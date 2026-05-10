@@ -4,7 +4,7 @@
   "description": "A Node JS project for running the Opening Range Breakout pattern against the 20 most active stock in the NYSE and NASDAQ exchanges on the current day",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "mocha"
   },
   "repository": {
     "type": "git",
@@ -20,6 +20,13 @@
   "dependencies": {
     "axios": "^1.16.0",
     "dotenv": "^17.4.2",
+    "winston": "^3.19.0",
     "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "axios-mock-adapter": "^2.1.0",
+    "chai": "^6.2.2",
+    "mocha": "^11.3.0",
+    "sinon": "^22.0.0"
   }
 }
