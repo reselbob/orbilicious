@@ -1,0 +1,25 @@
+{
+  "name": "orbilicious",
+  "version": "1.0.0",
+  "description": "A Node JS project for running the Opening Range Breakout pattern against the 20 most active stock in the NYSE and NASDAQ exchanges on the current day",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/reselbob/orbilicious.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/reselbob/orbilicious/issues"
+  },
+  "homepage": "https://github.com/reselbob/orbilicious#readme",
+  "dependencies": {
+    "axios": "^1.16.0",
+    "dotenv": "^17.4.2",
+    "ws": "^8.20.0"
+  }
+}
