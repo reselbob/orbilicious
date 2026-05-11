@@ -1,5 +1,5 @@
 import Alpaca from '@alpacahq/alpaca-trade-api';
-import logger from './logger'; // Adjust path as necessary
+import logger from './Logger'; // Adjust path as necessary
 
 type TradingState = 'MONITORING' | 'TESTING_HIGH' | 'TESTING_LOW' | 'WATCHING_BREAKOUT' | 'COMPLETED';
 type Direction = 'UP' | 'DOWN';

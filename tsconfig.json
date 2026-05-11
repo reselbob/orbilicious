@@ -15,7 +15,10 @@
       "node",
       "mocha",
       "chai"
-    ], // <--- Add mocha and chai here
+    ],
+    "typeRoots": [
+      "./node_modules/@types"
+    ],
     "noImplicitThis": false
   },
   "include": [

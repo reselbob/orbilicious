@@ -1,4 +1,5 @@
 import { expect } from 'chai';
+import { describe, it, before } from 'mocha';
 import { Orberator } from '../src/Orberator';
 import logger from '../src/Logger';
 import dotenv from 'dotenv';
@@ -9,12 +10,10 @@ import path from 'path';
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
 describe('Orberator Logger Integration', function () {
-    // Note: We use regular functions (not arrows) for describe/it 
-    // if we need to access 'this.timeout'
     const logFilePath = path.join(process.cwd(), 'Orberator.log');
 
-    before(function () {
-        // Increase timeout for the entire suite or specific hooks
+    // Use function(this: Mocha.Context) to fix 'this' errors and allow timeouts
+    before(function (this: Mocha.Context) {
         this.timeout(15000);
 
         if (fs.existsSync(logFilePath)) {
@@ -22,29 +21,26 @@ describe('Orberator Logger Integration', function () {
         }
     });
 
-    it('should log a successful connection message on create()', async function () {
-        this.timeout(15000); // Specific timeout for API handshake
+    it('should log a successful connection message on create()', async function (this: Mocha.Context) {
+        this.timeout(15000);
 
         logger.info('--- Starting Test: create() ---');
 
         const instance = await Orberator.create();
 
-        // Chai assertions
         expect(instance).to.not.be.undefined;
 
         const logContent = fs.readFileSync(logFilePath, 'utf8');
         expect(logContent).to.contain('Successfully authenticated');
     });
 
-    it('should log a warning when no active stocks are found', async function () {
+    it('should log a warning when no active stocks are found', async function (this: Mocha.Context) {
         this.timeout(15000);
 
         const instance = await Orberator.create();
         await instance.getActives();
 
         const logContent = fs.readFileSync(logFilePath, 'utf8');
-
-        // Chai regex testing
         const found = /Watchlist identified|Alpaca returned no active movers/.test(logContent);
         expect(found).to.be.true;
     });
