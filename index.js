@@ -1,159 +1,139 @@
 require('dotenv').config();
-const axios = require('axios');
-const WebSocket = require('ws');
-const logger = require('./logger'); // Import your Winston logger
+const Alpaca = require('@alpacahq/alpaca-trade-api');
+const logger = require('./logger'); // Import the new logger
 
-// Configuration
-const TOKEN = process.env.TRADIER_TOKEN;
-const ACCOUNT_ID = process.env.ACCOUNT_ID;
-const BASE_URL = 'https://sandbox.tradier.com/v1';
-const ORB_MINUTES = 30;
-
-// State management for stocks
-const watchlist = {};
-
-/**
- * FIXED: Fetches the top 20 most active stocks via Tradier API
- */
-async function getActiveTickers() {
-    logger.info("Fetching live market activity from Tradier...");
-
-    // Broad list of high-volume symbols to poll
-    const benchmarkSymbols = 'AAPL,NVDA,TSLA,AMD,MSFT,AMZN,META,GOOGL,NFLX,PLTR,INTC,PYPL,SQ,ROKU,BABA,NIO,COIN,MARA,HOOD,SHOP,F,BAC,PFE';
-
-    try {
-        const response = await axios.get(`${BASE_URL}/markets/quotes`, {
-            params: { symbols: benchmarkSymbols },
-            headers: {
-                'Authorization': `Bearer ${TOKEN}`,
-                'Accept': 'application/json'
-            }
+class AlpacaOrbBot {
+    constructor() {
+        this.alpaca = new Alpaca({
+            keyId: process.env.ALPACA_KEY,
+            secretKey: process.env.ALPACA_SECRET,
+            paper: true,
         });
 
-        let quotes = response.data.quotes.quote;
-        if (!Array.isArray(quotes)) quotes = [quotes];
-
-        const top20 = quotes
-            .sort((a, b) => b.volume - a.volume)
-            .slice(0, 20)
-            .map(q => q.symbol);
-
-        logger.info(`Top 20 Active Tickers identified: ${top20.join(', ')}`);
-        return top20;
-
-    } catch (error) {
-        logger.error(`Error fetching active tickers: ${error.message}`);
-        return ['AAPL', 'NVDA', 'TSLA', 'AMD', 'MSFT'];
-    };
-}
-
-/**
- * Places a Bracket Order (OTOCO)
- */
-async function placeBracketOrder(symbol, side, price, risk) {
-    const quantity = 10;
-    const stopPrice = side === 'buy' ? price - (risk * 2) : price + (risk * 2);
-    const profitPrice = side === 'buy' ? price + (risk * 4) : price - (risk * 4);
-
-    const data = new URLSearchParams({
-        class: 'oto',
-        symbol: symbol,
-        duration: 'day',
-        'side[0]': side,
-        'quantity[0]': quantity,
-        'type[0]': 'market',
-        'side[1]': side === 'buy' ? 'sell' : 'buy',
-        'quantity[1]': quantity,
-        'type[1]': 'stop',
-        'stop[1]': stopPrice.toFixed(2),
-        'side[2]': side === 'buy' ? 'sell' : 'buy',
-        'quantity[2]': quantity,
-        'type[2]': 'limit',
-        'price[2]': profitPrice.toFixed(2)
-    });
-
-    try {
-        const response = await axios.post(`${BASE_URL}/accounts/${ACCOUNT_ID}/orders`, data, {
-            headers: { Authorization: `Bearer ${TOKEN}`, Accept: 'application/json' }
-        });
-        logger.info(`✅ Order Placed for ${symbol}. Status: ${response.data.order.status}`);
-    } catch (err) {
-        const errorDetail = err.response?.data ? JSON.stringify(err.response.data) : err.message;
-        logger.error(`❌ Trade Failed for ${symbol}: ${errorDetail}`);
+        this.watchlist = {};
+        this.socket = this.alpaca.data_stream_v2;
     }
-}
 
-/**
- * Connects to Tradier WebSocket for real-time price monitoring
- */
-async function startStreaming(symbols) {
-    try {
-        const sessionResponse = await axios.post(`${BASE_URL}/markets/events/session`, {}, {
-            headers: { Authorization: `Bearer ${TOKEN}` }
-        });
-
-        const ws = new WebSocket('wss://ws.tradier.com/v1/markets/events');
-
-        ws.on('open', () => {
-            const payload = JSON.stringify({
-                symbols: symbols,
-                sessionid: sessionResponse.data.stream.sessionid,
-                filter: ['quote']
-            });
-            ws.send(payload);
-            logger.info(`🚀 WebSocket connected for ${symbols.length} tickers.`);
-        });
-
-        ws.on('message', (data) => {
-            const quote = JSON.parse(data);
-            if (quote.type !== 'quote') return;
-
-            const { symbol, last: price } = quote;
-
-            if (!watchlist[symbol]) watchlist[symbol] = { high: 0, low: Infinity, active: true };
-            const entry = watchlist[symbol];
-
-            const now = new Date();
-            const marketOpen = new Date();
-            marketOpen.setHours(9, 30, 0, 0);
-            const rangeEnd = new Date(marketOpen.getTime() + ORB_MINUTES * 60000);
-
-            if (now <= rangeEnd) {
-                if (price > entry.high) entry.high = price;
-                if (price < entry.low) entry.low = price;
+    async getActives() {
+        logger.info("Scanning for 40 most active stocks...");
+        try {
+            const actives = await this.alpaca.getMostActives();
+            if (!actives?.most_actives) {
+                logger.warn("Alpaca returned no active movers.");
+                return [];
             }
-            else if (entry.active && entry.high > 0) {
-                const risk = entry.high - entry.low;
-
-                if (price > entry.high) {
-                    logger.warn(`📈 LONG BREAKOUT DETECTED: ${symbol} at ${price} (Range: ${entry.low}-${entry.high})`);
-                    placeBracketOrder(symbol, 'buy', price, risk);
-                    entry.active = false;
-                } else if (price < entry.low) {
-                    logger.warn(`📉 SHORT BREAKOUT DETECTED: ${symbol} at ${price} (Range: ${entry.low}-${entry.high})`);
-                    placeBracketOrder(symbol, 'sell', price, risk);
-                    entry.active = false;
-                }
-            }
-        });
-
-        ws.on('error', (err) => logger.error(`WebSocket Error: ${err.message}`));
-        ws.on('close', () => logger.warn('WebSocket connection closed.'));
-
-    } catch (err) {
-        logger.error(`Failed to start stream: ${err.message}`);
-    }
-}
-
-// Start Program
-getActiveTickers()
-    .then(tickers => {
-        if (tickers && tickers.length > 0) {
-            startStreaming(tickers);
-        } else {
-            logger.error("No tickers available to stream.");
+            const symbols = actives.most_actives.slice(0, 40).map(item => item.symbol);
+            logger.info(`Watchlist set: ${symbols.join(', ')}`);
+            return symbols;
+        } catch (err) {
+            logger.error(`getActives failure: ${err.message}`);
+            return [];
         }
-    })
-    .catch(err => logger.error(`Initialization error: ${err.message}`));
+    }
 
-module.exports = { getActiveTickers };
+    async getOpeningRange(ticker) {
+        const today = new Date().toISOString().split('T')[0];
+        try {
+            const bars = await this.alpaca.getBarsV2(ticker, {
+                start: `${today}T13:30:00Z`, 
+                end: `${today}T13:46:00Z`,   
+                timeframe: this.alpaca.newTimeframe(1, this.alpaca.timeframeUnit.MIN),
+            });
+
+            let high = 0, low = Infinity;
+            for await (let bar of bars) {
+                if (bar.High > high) high = bar.High;
+                if (bar.Low < low) low = bar.Low;
+            }
+            logger.info(`Range for ${ticker}: High ${high}, Low ${low}`);
+            return { highValue: high, lowValue: low };
+        } catch (err) {
+            logger.error(`Range Error [${ticker}]: ${err.message}`);
+            return null;
+        }
+    }
+
+    async initMonitoring(tickers) {
+        for (const symbol of tickers) {
+            const range = await this.getOpeningRange(symbol);
+            if (range && range.highValue > 0) {
+                this.watchlist[symbol] = { ...range, state: 'MONITORING' };
+            }
+        }
+
+        this.socket.onConnect(() => {
+            logger.info("🚀 WebSocket Stream Connected via Alpaca");
+            this.socket.subscribeForTrades(Object.keys(this.watchlist));
+        });
+
+        this.socket.onStockTrade((trade) => {
+            this.processTrade(trade.Symbol, trade.Price);
+        });
+
+        this.socket.connect();
+    }
+
+    processTrade(ticker, price) {
+        const stock = this.watchlist[ticker];
+        if (!stock || stock.state === 'COMPLETED') return;
+
+        switch (stock.state) {
+            case 'MONITORING':
+                if (price >= stock.highValue) {
+                    stock.state = 'TESTING_HIGH';
+                    logger.info(`${ticker} crossed above High Level (${stock.highValue})`);
+                } else if (price <= stock.lowValue) {
+                    stock.state = 'TESTING_LOW';
+                    logger.info(`${ticker} crossed below Low Level (${stock.lowValue})`);
+                }
+                break;
+
+            case 'TESTING_HIGH':
+            case 'TESTING_LOW':
+                this.watchForTest(ticker, price);
+                break;
+
+            case 'WATCHING_BREAKOUT':
+                this.watchForBreakout(ticker, price);
+                break;
+        }
+    }
+
+    watchForTest(ticker, price) {
+        const stock = this.watchlist[ticker];
+        const isHighTest = stock.state === 'TESTING_HIGH' && price <= stock.highValue;
+        const isLowTest = stock.state === 'TESTING_LOW' && price >= stock.lowValue;
+
+        if (isHighTest || isLowTest) {
+            const result = { 
+                ticker, 
+                price: price, 
+                state: isHighTest ? "testedHigh" : "testedLow" 
+            };
+            
+            // Log the specific test result as requested
+            logger.warn(result);
+
+            stock.state = 'WATCHING_BREAKOUT';
+            stock.retestPrice = price;
+            stock.direction = isHighTest ? 'UP' : 'DOWN';
+        }
+    }
+
+    watchForBreakout(ticker, price) {
+        const stock = this.watchlist[ticker];
+        const buffer = 0.05;
+
+        const isBreakingUp = stock.direction === 'UP' && price > stock.retestPrice + buffer;
+        const isBreakingDown = stock.direction === 'DOWN' && price < stock.retestPrice - buffer;
+
+        if (isBreakingUp || isBreakingDown) {
+            logger.info(`📈 BREAKOUT: ${ticker} moving away from ${stock.retestPrice} (Current: ${price})`);
+            stock.state = 'COMPLETED';
+            // executeTrade(ticker, side);
+        }
+    }
+}
+
+const bot = new AlpacaOrbBot();
+bot.getActives().then(tickers => bot.initMonitoring(tickers));
