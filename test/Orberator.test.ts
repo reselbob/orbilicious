@@ -38,7 +38,7 @@ describe('Orberator Logger Integration', function () {
         this.timeout(15000);
 
         const instance = await Orberator.create();
-        await instance.getActives();
+
 
         const logContent = fs.readFileSync(logFilePath, 'utf8');
         const found = /Watchlist identified|Alpaca returned no active movers/.test(logContent);

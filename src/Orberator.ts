@@ -64,6 +64,8 @@ export class Orberator {
         }
     }
 
+
+
     /**
      * Scans for active stocks and logs the results to Orberator.log
      */
