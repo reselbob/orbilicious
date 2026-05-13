@@ -68,4 +68,6 @@ export class Candlestick {
     public isBearish(): boolean {
         return this.close < this.open;
     }
+
+
 }

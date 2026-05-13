@@ -1,5 +1,5 @@
 import { Orberator } from './Orberator';
-import logger from './Logger';
+import logger from './logger';
 
 export class OrbManager {
     private orberator: Orberator | null = null;
@@ -28,6 +28,9 @@ export class OrbManager {
             throw error;
         }
     }
+
+
+
 
     /**
      * Orchestrates the startup sequence
