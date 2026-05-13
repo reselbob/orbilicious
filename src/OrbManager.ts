@@ -40,6 +40,8 @@ export class OrbManager {
         if (this.isRunning) return;
 
         this.isRunning = true;
+
+        // Get all of today's active symbols as of 6:46 AM Pacific time
         const symbols = await this.orberator.getActives();
 
         if (symbols.length > 0) {

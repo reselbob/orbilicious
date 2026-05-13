@@ -14,13 +14,15 @@ export class Candlestick {
     public readonly high: number;
     public readonly low: number;
     public readonly close: number;
+    public readonly volume: number;
     public readonly timestamp?: string;
 
-    constructor(open: number, high: number, low: number, close: number, timestamp?: string) {
+    constructor(open: number, high: number, low: number, close: number, volume: number = 0, timestamp?: string) {
         this.open = open;
         this.high = high;
         this.low = low;
         this.close = close;
+        this.volume = volume; // Volume can be set later if needed
         this.timestamp = timestamp;
     }
 
