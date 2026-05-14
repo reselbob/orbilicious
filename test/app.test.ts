@@ -87,11 +87,14 @@ describe('app trade execution', () => {
         const candidateSymbols = candidates.map((candidate) => candidate.symbol);
         const dryRunTradeSymbols = trades.map((trade) => trade.symbol);
 
-        logger.info('Dry-run trade symbol coverage', {
-            dryRunTradeSymbols: dryRunTradeSymbols.length,
-            candidateSymbols: candidateSymbols.length,
-            allActiveSymbolsRetrieved: activeSymbols.length,
-        });
+        logger.info(
+            `submitted symbols ${dryRunTradeSymbols.length}, candidate symbols ${candidateSymbols.length}, all active symbols retrieved ${activeSymbols.length}`,
+            {
+                dryRunTradeSymbols: dryRunTradeSymbols.length,
+                candidateSymbols: candidateSymbols.length,
+                allActiveSymbolsRetrieved: activeSymbols.length,
+            }
+        );
 
         expect(client.requestedMostActiveLimit).to.equal(env.quantityToRetrieve);
         expect(candidateSymbols).to.deep.equal(activeSymbols);
