@@ -68,8 +68,8 @@ class CapturingAlpacaClient extends AlpacaClient {
 
 describe('app trade execution', () => {
     it('submits one bracket order for every symbol returned by findBreakoutCandidates', async () => {
-        const expectedSymbols = ['AAPL', 'TSLA', 'NVDA'];
-        const client = new CapturingAlpacaClient(expectedSymbols);
+        const activeSymbols = ['AAPL', 'TSLA', 'NVDA'];
+        const client = new CapturingAlpacaClient(activeSymbols);
 
         const candidates = await findBreakoutCandidates(client, '2026-05-13');
         const trades = normalizeTradesToConstraints(
@@ -80,8 +80,18 @@ describe('app trade execution', () => {
 
         await executeSizedTrades(client, '2026-05-13', trades);
 
-        expect(candidates.map((candidate) => candidate.symbol)).to.deep.equal(expectedSymbols);
-        expect(client.submittedBracketOrders.map((order) => order.symbol)).to.deep.equal(expectedSymbols);
+        const candidateSymbols = candidates.map((candidate) => candidate.symbol);
+        const submittedSymbols = client.submittedBracketOrders.map((order) => order.symbol);
+
+        console.log(
+            'submitted symbols %d, candidate symbols %d, all active symbols retrieved %d',
+            submittedSymbols.length,
+            candidateSymbols.length,
+            activeSymbols.length
+        );
+
+        expect(candidateSymbols).to.deep.equal(activeSymbols);
+        expect(submittedSymbols).to.deep.equal(activeSymbols);
         expect(client.submittedBracketOrders).to.have.length(candidates.length);
         expect(client.submittedBracketOrders.every((order) => order.takeProfitLimitPrice > 0)).to.equal(true);
         expect(client.submittedBracketOrders.every((order) => order.stopLossStopPrice > 0)).to.equal(true);
