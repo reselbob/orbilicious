@@ -109,8 +109,13 @@ export async function findBreakoutCandidates(
     client: AlpacaClient,
     sessionDate: string
 ): Promise<BreakoutCandidate[]> {
-    const symbols = await client.getMostActiveSymbols(40);
-    logger.info('Evaluating most active symbols', { sessionDate, symbols });
+    const symbols = await client.getMostActiveSymbols(env.quantityToRetrieve);
+    logger.info('Evaluating most active symbols', {
+        sessionDate,
+        quantityToRetrieve: env.quantityToRetrieve,
+        retrievedCount: symbols.length,
+        symbols,
+    });
 
     const results = await Promise.all(
         symbols.map((symbol) => evaluateSymbol(client, symbol, sessionDate))
@@ -130,7 +135,7 @@ export async function executeSizedTrades(
     const totalPlannedRisk = trades.reduce((sum, t) => sum + t.plannedRiskDollars, 0);
     const totalEstimatedNotional = trades.reduce((sum, t) => sum + t.estimatedNotional, 0);
 
-    logger.info('Submitting normalized trade basket', {
+    logger.info('Processing normalized trade basket in dry-run mode', {
         sessionDate,
         tradeCount: trades.length,
         totalPlannedRisk,
@@ -145,34 +150,18 @@ export async function executeSizedTrades(
             continue;
         }
 
-        try {
-            await client.submitBracketOrder({
-                symbol: trade.symbol,
-                side: trade.side,
-                qty: trade.qty,
-                takeProfitLimitPrice: trade.takeProfitPrice,
-                stopLossStopPrice: trade.stopPrice,
-            });
+        executedToday.add(key);
 
-            executedToday.add(key);
-
-            logger.info('Trade submitted successfully', {
-                symbol: trade.symbol,
-                side: trade.side,
-                qty: trade.qty,
-                entry: trade.price,
-                stop: trade.stopPrice,
-                target: trade.takeProfitPrice,
-                plannedRisk: trade.plannedRiskDollars,
-                estimatedNotional: trade.estimatedNotional,
-            });
-        } catch (error) {
-            logger.error('Trade submission failed', {
-                symbol: trade.symbol,
-                sessionDate,
-                error,
-            });
-        }
+        logger.info('Trade executed in dry-run mode; no Alpaca bracket order submitted', {
+            symbol: trade.symbol,
+            side: trade.side,
+            qty: trade.qty,
+            entry: trade.price,
+            stop: trade.stopPrice,
+            target: trade.takeProfitPrice,
+            plannedRisk: trade.plannedRiskDollars,
+            estimatedNotional: trade.estimatedNotional,
+        });
     }
 }
 
@@ -218,6 +207,7 @@ export async function startApp() {
         sessionDate,
         pollIntervalSeconds: env.pollIntervalSeconds,
         maxTotalRisk: env.maxTotalRisk,
+        quantityToRetrieve: env.quantityToRetrieve,
         selectionMode: 'top 10 longs and top 10 shorts',
         rewardMode: '4R target',
     });

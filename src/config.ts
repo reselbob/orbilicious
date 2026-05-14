@@ -38,6 +38,7 @@ export const env = {
     sessionDate: process.env.SESSION_DATE || '',
     pollIntervalSeconds: num('POLL_INTERVAL_SECONDS', 20),
     maxTotalRisk: num('MAX_TOTAL_RISK', 1000),
+    quantityToRetrieve: num('QUANTITY_TO_RETRIEVE', 40),
 };
 
 export const strategyConfig: StrategyConfig = {
@@ -61,6 +62,7 @@ logger.info('Configuration loaded', {
     dataFeed: env.dataFeed,
     pollIntervalSeconds: env.pollIntervalSeconds,
     maxTotalRisk: env.maxTotalRisk,
+    quantityToRetrieve: env.quantityToRetrieve,
     strategy: {
         symbol: strategyConfig.symbol,
         openingRangeMinutes: strategyConfig.openingRangeMinutes,

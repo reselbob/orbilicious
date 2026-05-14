@@ -2,11 +2,12 @@ import { expect } from 'chai';
 import { describe, it } from 'mocha';
 import { AlpacaClient } from '../src/alpaca';
 import { buildWeightedRiskTrades, normalizeTradesToConstraints } from '../src/basket';
+import { env } from '../src/config';
 import { executeSizedTrades, findBreakoutCandidates } from '../src/app';
 import { logger } from '../src/logger';
 import { Bar, Position } from '../src/types';
 
-type SubmittedBracketOrder = {
+type BracketOrderParams = {
     symbol: string;
     side: 'buy' | 'sell';
     qty: number;
@@ -43,13 +44,15 @@ function makeBreakoutBars(symbol: string): Bar[] {
 }
 
 class CapturingAlpacaClient extends AlpacaClient {
-    readonly submittedBracketOrders: SubmittedBracketOrder[] = [];
+    requestedMostActiveLimit: number | undefined;
+    submitBracketOrderCallCount = 0;
 
     constructor(private readonly symbols: string[]) {
         super();
     }
 
-    async getMostActiveSymbols(): Promise<string[]> {
+    async getMostActiveSymbols(limit = 40): Promise<string[]> {
+        this.requestedMostActiveLimit = limit;
         return this.symbols;
     }
 
@@ -61,14 +64,14 @@ class CapturingAlpacaClient extends AlpacaClient {
         return makeBreakoutBars(symbol);
     }
 
-    async submitBracketOrder(params: SubmittedBracketOrder): Promise<{ id: string; status: string }> {
-        this.submittedBracketOrders.push(params);
-        return { id: `order-${params.symbol}`, status: 'accepted' };
+    async submitBracketOrder(_params: BracketOrderParams): Promise<{ id: string; status: string }> {
+        this.submitBracketOrderCallCount += 1;
+        throw new Error('submitBracketOrder must not be called in dry-run mode');
     }
 }
 
 describe('app trade execution', () => {
-    it('submits one bracket order for every symbol returned by findBreakoutCandidates', async () => {
+    it('retrieves active symbols using configured quantity and logs dry-run executions for breakout candidates', async () => {
         const activeSymbols = ['AAPL', 'TSLA', 'NVDA'];
         const client = new CapturingAlpacaClient(activeSymbols);
 
@@ -82,18 +85,20 @@ describe('app trade execution', () => {
         await executeSizedTrades(client, '2026-05-13', trades);
 
         const candidateSymbols = candidates.map((candidate) => candidate.symbol);
-        const submittedSymbols = client.submittedBracketOrders.map((order) => order.symbol);
+        const dryRunTradeSymbols = trades.map((trade) => trade.symbol);
 
-        logger.info('Submitted symbol coverage', {
-            submittedSymbols: submittedSymbols.length,
+        logger.info('Dry-run trade symbol coverage', {
+            dryRunTradeSymbols: dryRunTradeSymbols.length,
             candidateSymbols: candidateSymbols.length,
             allActiveSymbolsRetrieved: activeSymbols.length,
         });
 
+        expect(client.requestedMostActiveLimit).to.equal(env.quantityToRetrieve);
         expect(candidateSymbols).to.deep.equal(activeSymbols);
-        expect(submittedSymbols).to.deep.equal(activeSymbols);
-        expect(client.submittedBracketOrders).to.have.length(candidates.length);
-        expect(client.submittedBracketOrders.every((order) => order.takeProfitLimitPrice > 0)).to.equal(true);
-        expect(client.submittedBracketOrders.every((order) => order.stopLossStopPrice > 0)).to.equal(true);
+        expect(dryRunTradeSymbols).to.deep.equal(activeSymbols);
+        expect(client.submitBracketOrderCallCount).to.equal(0);
+        expect(trades).to.have.length(candidates.length);
+        expect(trades.every((trade) => trade.takeProfitPrice > 0)).to.equal(true);
+        expect(trades.every((trade) => trade.stopPrice > 0)).to.equal(true);
     });
 });
