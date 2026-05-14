@@ -75,12 +75,12 @@ describe('basket integration', () => {
             openingRangeLow: 101,
         }));
 
-        //const { longs, shorts } = rankAndSelectCandidates(candidates);
+        const ranked = rankAndSelectCandidates([...longs, ...shorts]);
 
-        expect(longs).to.have.length(10);
-        expect(shorts).to.have.length(10);
-        expect(longs[0].score).to.equal(12);
-        expect(shorts[0].score).to.equal(12);
+        expect(ranked.longs).to.have.length(10);
+        expect(ranked.shorts).to.have.length(10);
+        expect(ranked.longs[0].score).to.equal(12);
+        expect(ranked.shorts[0].score).to.equal(12);
     });
 
     it('builds weighted-risk trades and sets 4R profit targets', () => {

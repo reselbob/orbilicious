@@ -8,6 +8,7 @@ import {
     SizedTrade,
     buildWeightedRiskTrades,
     computeCandidateScore,
+    normalizeTradesToConstraints,
     rankAndSelectCandidates,
 } from './basket';
 
