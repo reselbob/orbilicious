@@ -3,6 +3,7 @@ import { describe, it } from 'mocha';
 import { AlpacaClient } from '../src/alpaca';
 import { buildWeightedRiskTrades, normalizeTradesToConstraints } from '../src/basket';
 import { executeSizedTrades, findBreakoutCandidates } from '../src/app';
+import { logger } from '../src/logger';
 import { Bar, Position } from '../src/types';
 
 type SubmittedBracketOrder = {
@@ -83,12 +84,11 @@ describe('app trade execution', () => {
         const candidateSymbols = candidates.map((candidate) => candidate.symbol);
         const submittedSymbols = client.submittedBracketOrders.map((order) => order.symbol);
 
-        console.log(
-            'submitted symbols %d, candidate symbols %d, all active symbols retrieved %d',
-            submittedSymbols.length,
-            candidateSymbols.length,
-            activeSymbols.length
-        );
+        logger.info('Submitted symbol coverage', {
+            submittedSymbols: submittedSymbols.length,
+            candidateSymbols: candidateSymbols.length,
+            allActiveSymbolsRetrieved: activeSymbols.length,
+        });
 
         expect(candidateSymbols).to.deep.equal(activeSymbols);
         expect(submittedSymbols).to.deep.equal(activeSymbols);
