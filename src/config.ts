@@ -28,6 +28,20 @@ function num(name: string, fallback: number): number {
     return parsed;
 }
 
+function dateStr(name: string, fallback = ''): string {
+    const value = process.env[name];
+    if (value == null || value.trim() === '') return fallback;
+
+    const parts = value.trim().split('-').map((part) => Number(part));
+    if (parts.length !== 3 || parts.some((part) => Number.isNaN(part) || part <= 0)) {
+        logger.error('Invalid date environment variable', { name, value, expected: 'YYYY-M-D or YYYY-MM-DD' });
+        throw new Error(`Invalid date for ${name}: ${value}`);
+    }
+
+    const [year, month, day] = parts;
+    return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
 function ratio(name: string, fallback: string): { raw: string; risk: number; reward: number; rewardMultiple: number } {
     const value = process.env[name] || fallback;
     const parts = value.split(':').map((part) => Number(part.trim()));
@@ -55,7 +69,8 @@ export const env = {
     tradingBaseUrl: process.env.ALPACA_TRADING_BASE_URL || 'https://paper-api.alpaca.markets',
     dataBaseUrl: process.env.ALPACA_DATA_BASE_URL || 'https://data.alpaca.markets',
     dataFeed: process.env.ALPACA_DATA_FEED || 'iex',
-    sessionDate: process.env.SESSION_DATE || '',
+    sessionDate: dateStr('SESSION_DATE', ''),
+    runDate: dateStr('RUN_DATE', ''),
     pollIntervalSeconds: num('POLL_INTERVAL_SECONDS', 20),
     maxTotalRisk: num('MAX_TOTAL_RISK', 1000),
     quantityToRetrieve: num('QUANTITY_TO_RETRIEVE', 40),
@@ -85,6 +100,7 @@ logger.info('Configuration loaded', {
     tradingBaseUrl: env.tradingBaseUrl,
     dataBaseUrl: env.dataBaseUrl,
     dataFeed: env.dataFeed,
+    runDate: env.runDate,
     pollIntervalSeconds: env.pollIntervalSeconds,
     maxTotalRisk: env.maxTotalRisk,
     quantityToRetrieve: env.quantityToRetrieve,

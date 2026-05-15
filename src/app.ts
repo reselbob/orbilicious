@@ -2,7 +2,7 @@ import { env, strategyConfig } from './config';
 import { AlpacaClient } from './alpaca';
 import { logger } from './logger';
 import { computeOpeningRange, generateOrbSignal } from './strategy';
-import { sleep, todayNyDate } from './time';
+import { sleep, todayNyDate, toNyParts } from './time';
 import {
     BreakoutCandidate,
     SizedTrade,
@@ -13,9 +13,15 @@ import {
 } from './basket';
 
 const executedToday = new Set<string>();
+const reportedDates = new Set<string>();
 
 function executionKey(sessionDate: string, symbol: string) {
     return `${sessionDate}:${symbol}`;
+}
+
+function minutesFromHHMM(hhmm: string): number {
+    const [hour, minute] = hhmm.split(':').map(Number);
+    return hour * 60 + minute;
 }
 
 async function evaluateSymbol(
@@ -232,22 +238,89 @@ export async function runCycle(client: AlpacaClient, sessionDate: string) {
 }
 
 export async function startApp() {
-    const sessionDate = env.sessionDate || todayNyDate();
     const client = new AlpacaClient();
 
-    logger.info('Starting ORB normalized weighted-risk runner', {
-        sessionDate,
+    if (env.runDate) {
+        logger.info('Starting historical ORB report runner', {
+            runDate: env.runDate,
+            quantityToRetrieve: env.quantityToRetrieve,
+            maxTotalRisk: env.maxTotalRisk,
+        });
+
+        await client.generateOrbReport(env.runDate, { usesHistoricData: true });
+        logger.info('Completed historical ORB report run', { runDate: env.runDate });
+        return;
+    }
+
+    const marketOpenMinutes = strategyConfig.sessionOpenHour * 60 + strategyConfig.sessionOpenMinute;
+    const marketCloseMinutes = minutesFromHHMM(strategyConfig.forceExitTimeHHMM);
+    const isCurrentDayMode = !env.sessionDate;
+
+    logger.info('Starting ORB normalized weighted-risk runner (daily schedule)', {
+        sessionDateMode: isCurrentDayMode ? 'current-day' : 'fixed-session-date',
         pollIntervalSeconds: env.pollIntervalSeconds,
         maxTotalRisk: env.maxTotalRisk,
         quantityToRetrieve: env.quantityToRetrieve,
         selectionMode: 'top 10 longs and top 10 shorts',
         rewardMode: `${env.stopLossRiskPart}:${env.takeProfitPart}`,
         dryRun: env.dryRun,
+        marketOpenMinutes,
+        marketCloseMinutes,
     });
 
     for (; ;) {
+        const nyNow = toNyParts(new Date(), strategyConfig.sessionTimezone);
+        const sessionDate = env.sessionDate || nyNow.date;
+        const currentMinutes = nyNow.hour * 60 + nyNow.minute;
+        const dayOfWeek = new Date().toLocaleString('en-US', {
+            timeZone: strategyConfig.sessionTimezone,
+            weekday: 'short',
+        });
+        const isWeekday = !['Sat', 'Sun'].includes(dayOfWeek);
+
         try {
-            await runCycle(client, sessionDate);
+            if (!isWeekday) {
+                logger.info('Market closed (weekend); waiting for next session', {
+                    sessionDate,
+                    dayOfWeek,
+                    currentTime: nyNow.hhmm,
+                });
+            } else if (currentMinutes < marketOpenMinutes) {
+                logger.info('Waiting for market open', { sessionDate, currentTime: nyNow.hhmm });
+            } else if (currentMinutes < marketCloseMinutes) {
+                await runCycle(client, sessionDate);
+            } else if (!reportedDates.has(sessionDate)) {
+                logger.info('Market closed; generating end-of-day ORB report', {
+                    sessionDate,
+                    currentTime: nyNow.hhmm,
+                    forceExitTime: strategyConfig.forceExitTimeHHMM,
+                });
+
+                await client.generateOrbReport(sessionDate);
+                reportedDates.add(sessionDate);
+                logger.info('Completed live end-of-day ORB report', { sessionDate });
+
+                if (isCurrentDayMode) {
+                    logger.info('Current-day mode complete after market close; exiting app', {
+                        sessionDate,
+                        currentTime: nyNow.hhmm,
+                    });
+                    return;
+                }
+            } else {
+                logger.info('End-of-day ORB report already generated for session; waiting for next session', {
+                    sessionDate,
+                    currentTime: nyNow.hhmm,
+                });
+
+                if (isCurrentDayMode) {
+                    logger.info('Current-day mode already reported after market close; exiting app', {
+                        sessionDate,
+                        currentTime: nyNow.hhmm,
+                    });
+                    return;
+                }
+            }
         } catch (error) {
             logger.error('Unhandled cycle failure', { sessionDate, error });
         }

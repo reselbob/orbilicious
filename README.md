@@ -9,6 +9,7 @@ A complete Node + TypeScript starter project for a 15-minute Opening Range Break
 - Weighted total stop-risk sizing
 - Basket normalization to fit both total planned stop-loss risk and available buying power
 - Winston-based structured logging
+- Source-level ORB PDF report generation (end-of-day live or historical by date)
 
 ## Strategy rules
 
@@ -82,10 +83,26 @@ npm start
 - `ALLOW_LONG`
 - `ALLOW_SHORT`
 - `SESSION_DATE`
+- `RUN_DATE` (optional; if set, runs historical one-shot report for that date)
 - `POLL_INTERVAL_SECONDS`
 - `MAX_TOTAL_RISK`
 - `LOG_LEVEL`
 - `NODE_ENV`
+
+## Report modes and scheduling
+
+- **Live end-of-day mode (default):** If `RUN_DATE` is not set, app runs continuously, starts trading logic at market open, stops trading logic at market close, generates one end-of-day ORB PDF report per trading day, then waits for the next market day.
+- **Historical one-shot mode:** If `RUN_DATE=YYYY-MM-DD` is set, app runs a single historical ORB report for that session date and exits.
+
+Usage:
+
+```bash
+# Live daily loop with end-of-day reports:
+npm run dev
+
+# Historical report for a specific date:
+RUN_DATE=2026-05-14 npm run dev
+```
 
 ## Tests
 

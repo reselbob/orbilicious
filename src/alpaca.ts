@@ -1,6 +1,8 @@
-import { env } from './config';
+import { env, strategyConfig } from './config';
 import { logger } from './logger';
+import { toNyParts } from './time';
 import { Bar, Position } from './types';
+import type { OrbReportResult } from './orb-report';
 
 type AlpacaOrderResponse = {
     id: string;
@@ -16,7 +18,34 @@ function headers() {
     };
 }
 
+function normalizeSessionDate(sessionDate?: Date | string): string {
+    if (sessionDate instanceof Date) {
+        return toNyParts(sessionDate, strategyConfig.sessionTimezone).date;
+    }
+
+    if (typeof sessionDate === 'string' && sessionDate.trim() !== '') {
+        const parts = sessionDate.trim().split('-').map((part) => Number(part));
+        if (parts.length === 3 && parts.every((part) => Number.isFinite(part) && part > 0)) {
+            const [year, month, day] = parts;
+            return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        }
+
+        throw new Error(`Invalid sessionDate format: ${sessionDate}. Expected YYYY-MM-DD`);
+    }
+
+    return toNyParts(new Date(), strategyConfig.sessionTimezone).date;
+}
+
 export class AlpacaClient {
+    async generateOrbReport(
+        sessionDate?: Date | string,
+        options?: { usesHistoricData?: boolean }
+    ): Promise<OrbReportResult> {
+        const normalizedDate = normalizeSessionDate(sessionDate);
+        const { generateOrbReport } = await import('./orb-report');
+        return generateOrbReport(this, normalizedDate, options);
+    }
+
     async getAccount(): Promise<{ buyingPower: number; tradingBlocked: boolean }> {
         logger.debug('Fetching Alpaca account');
 
