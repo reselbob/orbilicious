@@ -28,6 +28,26 @@ function num(name: string, fallback: number): number {
     return parsed;
 }
 
+function ratio(name: string, fallback: string): { raw: string; risk: number; reward: number; rewardMultiple: number } {
+    const value = process.env[name] || fallback;
+    const parts = value.split(':').map((part) => Number(part.trim()));
+
+    if (parts.length !== 2 || parts.some((part) => Number.isNaN(part) || part <= 0)) {
+        logger.error('Invalid ratio environment variable', { name, value, expected: 'x:y' });
+        throw new Error(`Invalid ratio for ${name}: ${value}`);
+    }
+
+    const [risk, reward] = parts;
+    return {
+        raw: value,
+        risk,
+        reward,
+        rewardMultiple: reward / risk,
+    };
+}
+
+const stopLossProfitRatio = ratio('STOP_LOSS_PROFIT_RATIO', '1:4');
+
 export const env = {
     apiKey: required('APCA_API_KEY_ID'),
     apiSecret: required('APCA_API_SECRET_KEY'),
@@ -39,6 +59,11 @@ export const env = {
     pollIntervalSeconds: num('POLL_INTERVAL_SECONDS', 20),
     maxTotalRisk: num('MAX_TOTAL_RISK', 1000),
     quantityToRetrieve: num('QUANTITY_TO_RETRIEVE', 40),
+    stopLossProfitRatio: stopLossProfitRatio.raw,
+    stopLossRiskPart: stopLossProfitRatio.risk,
+    takeProfitPart: stopLossProfitRatio.reward,
+    takeProfitMultiple: stopLossProfitRatio.rewardMultiple,
+    dryRun: bool('DRY_RUN', true),
 };
 
 export const strategyConfig: StrategyConfig = {
@@ -63,6 +88,9 @@ logger.info('Configuration loaded', {
     pollIntervalSeconds: env.pollIntervalSeconds,
     maxTotalRisk: env.maxTotalRisk,
     quantityToRetrieve: env.quantityToRetrieve,
+    stopLossProfitRatio: env.stopLossProfitRatio,
+    takeProfitMultiple: env.takeProfitMultiple,
+    dryRun: env.dryRun,
     strategy: {
         symbol: strategyConfig.symbol,
         openingRangeMinutes: strategyConfig.openingRangeMinutes,

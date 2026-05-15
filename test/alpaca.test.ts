@@ -1,7 +1,11 @@
 import { expect } from 'chai';
 import { describe, it } from 'mocha';
 import { AlpacaClient } from '../src/alpaca';
+import { env } from '../src/config';
+import { buildWeightedRiskTrades, normalizeTradesToConstraints } from '../src/basket';
+import { executeSizedTrades, findBreakoutCandidates } from '../src/app';
 import { installMockFetch } from './helpers/mock-fetch';
+import { Bar, Position } from '../src/types';
 
 describe('alpaca client integration', () => {
     it('reads buying power from account response', async () => {
@@ -152,5 +156,135 @@ describe('alpaca client integration', () => {
         } finally {
             restore();
         }
+    });
+
+    it('gets actual most active stocks from Alpaca API using QUANTITY_TO_RETRIEVE', async () => {
+        const client = new AlpacaClient();
+        const symbols = await client.getMostActiveSymbols(env.quantityToRetrieve);
+
+        expect(symbols).to.be.an('array');
+        expect(symbols.length).to.equal(env.quantityToRetrieve);
+        expect(symbols.length).to.be.greaterThan(0);
+
+        // Verify all elements are strings (symbols)
+        symbols.forEach((symbol) => {
+            expect(symbol).to.be.a('string');
+            expect(symbol.length).to.be.greaterThan(0);
+        });
+    });
+
+    it('executes each sized breakout candidate trade in parallel promises using runtime pricing and risk rules', async () => {
+        function makeBreakoutBars(symbol: string): Bar[] {
+            const bars: Bar[] = [];
+
+            for (let minute = 30; minute <= 44; minute++) {
+                bars.push({
+                    symbol,
+                    timestamp: `2026-05-13T13:${String(minute).padStart(2, '0')}:00Z`,
+                    open: 100,
+                    high: 101,
+                    low: 99,
+                    close: 100,
+                    volume: 1000,
+                });
+            }
+
+            bars.push({
+                symbol,
+                timestamp: '2026-05-13T13:45:00Z',
+                open: 101,
+                high: 103,
+                low: 100.5,
+                close: 102,
+                volume: 5000,
+            });
+
+            return bars;
+        }
+
+        const activeSymbols = ['AAPL', 'TSLA', 'NVDA', 'MSFT'];
+        const submittedOrders: Array<{
+            symbol: string;
+            side: 'buy' | 'sell';
+            qty: number;
+            takeProfitLimitPrice: number;
+            stopLossStopPrice: number;
+            startedAt: number;
+        }> = [];
+
+        class RuntimeNoTradeClient extends AlpacaClient {
+            async getMostActiveSymbols(): Promise<string[]> {
+                return activeSymbols;
+            }
+
+            async getOpenPosition(): Promise<Position | null> {
+                return null;
+            }
+
+            async getIntradayBars(symbol: string): Promise<Bar[]> {
+                return makeBreakoutBars(symbol);
+            }
+
+            async submitBracketOrder(params: {
+                symbol: string;
+                side: 'buy' | 'sell';
+                qty: number;
+                takeProfitLimitPrice: number;
+                stopLossStopPrice: number;
+            }): Promise<{ id: string; status: string }> {
+                submittedOrders.push({
+                    symbol: params.symbol,
+                    side: params.side,
+                    qty: params.qty,
+                    takeProfitLimitPrice: params.takeProfitLimitPrice,
+                    stopLossStopPrice: params.stopLossStopPrice,
+                    startedAt: Date.now(),
+                });
+
+                await new Promise((resolve) => setTimeout(resolve, 50));
+
+                return {
+                    id: `sim-${params.symbol}`,
+                    status: 'accepted',
+                };
+            }
+        }
+
+        const client = new RuntimeNoTradeClient();
+        const sessionDate = '2026-05-13';
+
+        const candidates = await findBreakoutCandidates(client, sessionDate);
+        const weightedTrades = buildWeightedRiskTrades(
+            candidates,
+            env.maxTotalRisk,
+            env.takeProfitMultiple
+        );
+        const trades = normalizeTradesToConstraints(weightedTrades, env.maxTotalRisk, 1_000_000);
+
+        const totalRisk = trades.reduce((sum, trade) => sum + trade.plannedRiskDollars, 0);
+        expect(totalRisk).to.be.at.most(env.maxTotalRisk + 0.0001);
+
+        const previousDryRun = env.dryRun;
+        env.dryRun = false;
+
+        try {
+            await executeSizedTrades(client, sessionDate, trades);
+        } finally {
+            env.dryRun = previousDryRun;
+        }
+
+        expect(submittedOrders.length).to.equal(trades.length);
+
+        trades.forEach((trade) => {
+            const submitted = submittedOrders.find((order) => order.symbol === trade.symbol);
+            expect(submitted).to.not.equal(undefined);
+            expect(submitted!.qty).to.equal(trade.qty);
+            expect(submitted!.stopLossStopPrice).to.equal(trade.stopPrice);
+            expect(submitted!.takeProfitLimitPrice).to.equal(trade.takeProfitPrice);
+        });
+
+        const startTimes = submittedOrders.map((order) => order.startedAt);
+        const startRangeMs = Math.max(...startTimes) - Math.min(...startTimes);
+        expect(startRangeMs).to.be.lessThan(100);
     });
 });

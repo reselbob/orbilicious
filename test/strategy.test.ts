@@ -2,6 +2,11 @@ import { expect } from 'chai';
 import { describe, it } from 'mocha';
 import { computeOpeningRange, generateOrbSignal } from '../src/strategy';
 import { Bar, StrategyConfig } from '../src/types';
+import { AlpacaClient } from '../src/alpaca';
+import { findBreakoutCandidates } from '../src/app';
+import { env, strategyConfig } from '../src/config';
+import { logger } from '../src/logger';
+import { toNyParts } from '../src/time';
 
 function makeBar(minute: number, close: number, high = close + 0.2, low = close - 0.2): Bar {
     const hh = 13;
@@ -134,5 +139,50 @@ describe('strategy integration', () => {
         });
 
         expect(signal.type).to.equal('EXIT');
+    });
+
+    it('gets most active stocks and determines breakout candidates when market is open', async () => {
+        // Check if market is open: weekday between 9:30 AM and 4:00 PM ET
+        const now = new Date();
+        const nyTime = toNyParts(now, 'America/New_York');
+        const dayOfWeek = now.toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short' });
+        const [currentHour, currentMinute] = nyTime.hhmm.split(':').map(Number);
+        const currentTimeInMinutes = currentHour * 60 + currentMinute;
+        const marketOpenMinutes = 9 * 60 + 30; // 9:30 AM
+        const marketCloseMinutes = 16 * 60; // 4:00 PM
+
+        const isWeekday = !['Sat', 'Sun'].includes(dayOfWeek);
+        const isMarketOpen = isWeekday && currentTimeInMinutes >= marketOpenMinutes && currentTimeInMinutes < marketCloseMinutes;
+
+        if (!isMarketOpen) {
+            throw new Error('MARKET NOT OPEN');
+        }
+
+        // Get most active stocks
+        const client = new AlpacaClient();
+        const sessionDate = `${nyTime.year}-${nyTime.month}-${nyTime.day}`;
+
+        // Get the most active symbols using QUANTITY_TO_RETRIEVE
+        const mostActiveSymbols = await client.getMostActiveSymbols(env.quantityToRetrieve);
+
+        logger.info('Got most active stocks', {
+            quantityToRetrieve: env.quantityToRetrieve,
+            mostActiveCount: mostActiveSymbols.length,
+            mostActiveSymbols,
+        });
+
+        // Find breakout candidates
+        const candidates = await findBreakoutCandidates(client, sessionDate);
+
+        logger.info('Found breakout candidates', {
+            mostActiveCount: mostActiveSymbols.length,
+            breakoutCandidateCount: candidates.length,
+            breakoutCandidates: candidates.map((c) => ({ symbol: c.symbol, side: c.side, price: c.price })),
+        });
+
+        // Verify we got the data
+        expect(mostActiveSymbols).to.be.an('array');
+        expect(mostActiveSymbols.length).to.equal(env.quantityToRetrieve);
+        expect(candidates).to.be.an('array');
     });
 });

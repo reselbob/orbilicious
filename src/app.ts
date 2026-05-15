@@ -135,12 +135,15 @@ export async function executeSizedTrades(
     const totalPlannedRisk = trades.reduce((sum, t) => sum + t.plannedRiskDollars, 0);
     const totalEstimatedNotional = trades.reduce((sum, t) => sum + t.estimatedNotional, 0);
 
-    logger.info('Processing normalized trade basket in dry-run mode', {
+    logger.info('Processing normalized trade basket', {
         sessionDate,
         tradeCount: trades.length,
         totalPlannedRisk,
         totalEstimatedNotional,
+        dryRun: env.dryRun,
     });
+
+    const tradesToExecute: SizedTrade[] = [];
 
     for (const trade of trades) {
         const key = executionKey(sessionDate, trade.symbol);
@@ -151,18 +154,43 @@ export async function executeSizedTrades(
         }
 
         executedToday.add(key);
-
-        logger.info('Trade executed in dry-run mode; no Alpaca bracket order submitted', {
-            symbol: trade.symbol,
-            side: trade.side,
-            qty: trade.qty,
-            entry: trade.price,
-            stop: trade.stopPrice,
-            target: trade.takeProfitPrice,
-            plannedRisk: trade.plannedRiskDollars,
-            estimatedNotional: trade.estimatedNotional,
-        });
+        tradesToExecute.push(trade);
     }
+
+    if (env.dryRun) {
+        for (const trade of tradesToExecute) {
+            logger.info('Trade executed in dry-run mode; no Alpaca bracket order submitted', {
+                symbol: trade.symbol,
+                side: trade.side,
+                qty: trade.qty,
+                entry: trade.price,
+                stop: trade.stopPrice,
+                target: trade.takeProfitPrice,
+                plannedRisk: trade.plannedRiskDollars,
+                estimatedNotional: trade.estimatedNotional,
+            });
+        }
+
+        return;
+    }
+
+    await Promise.all(
+        tradesToExecute.map((trade) =>
+            client.submitBracketOrder({
+                symbol: trade.symbol,
+                side: trade.side,
+                qty: trade.qty,
+                takeProfitLimitPrice: trade.takeProfitPrice,
+                stopLossStopPrice: trade.stopPrice,
+            })
+        )
+    );
+
+    logger.info('Submitted bracket orders', {
+        sessionDate,
+        submittedCount: tradesToExecute.length,
+        symbols: tradesToExecute.map((trade) => trade.symbol),
+    });
 }
 
 export async function runCycle(client: AlpacaClient, sessionDate: string) {
@@ -179,7 +207,11 @@ export async function runCycle(client: AlpacaClient, sessionDate: string) {
     const { longs, shorts } = rankAndSelectCandidates(candidates);
     const selected = [...longs, ...shorts];
 
-    const weightedTrades = buildWeightedRiskTrades(selected, env.maxTotalRisk);
+    const weightedTrades = buildWeightedRiskTrades(
+        selected,
+        env.maxTotalRisk,
+        env.takeProfitMultiple
+    );
     const normalizedTrades = normalizeTradesToConstraints(
         weightedTrades,
         env.maxTotalRisk,
@@ -209,7 +241,8 @@ export async function startApp() {
         maxTotalRisk: env.maxTotalRisk,
         quantityToRetrieve: env.quantityToRetrieve,
         selectionMode: 'top 10 longs and top 10 shorts',
-        rewardMode: '4R target',
+        rewardMode: `${env.stopLossRiskPart}:${env.takeProfitPart}`,
+        dryRun: env.dryRun,
     });
 
     for (; ;) {

@@ -73,7 +73,8 @@ export function rankAndSelectCandidates(candidates: BreakoutCandidate[]) {
 
 export function buildWeightedRiskTrades(
     candidates: BreakoutCandidate[],
-    maxTotalRisk: number
+    maxTotalRisk: number,
+    takeProfitMultiple = 4
 ): SizedTrade[] {
     const positiveScoreCandidates = candidates.filter((c) => c.score > MIN_SCORE);
     if (!positiveScoreCandidates.length) return [];
@@ -98,8 +99,8 @@ export function buildWeightedRiskTrades(
 
             const takeProfitPrice =
                 candidate.side === 'buy'
-                    ? candidate.price + 4 * stopDistancePerShare
-                    : candidate.price - 4 * stopDistancePerShare;
+                    ? candidate.price + takeProfitMultiple * stopDistancePerShare
+                    : candidate.price - takeProfitMultiple * stopDistancePerShare;
 
             const plannedRiskDollars = qty * stopDistancePerShare;
             const estimatedNotional = qty * candidate.price;
