@@ -2,7 +2,7 @@ import { env, strategyConfig } from './config';
 import { logger } from './logger';
 import { toNyParts } from './time';
 import { Bar, Position } from './types';
-import type { OrbReportResult } from './orb-report';
+import type { OrbReportResult } from './reports';
 
 type AlpacaOrderResponse = {
     id: string;
@@ -42,8 +42,8 @@ export class AlpacaClient {
         options?: { usesHistoricData?: boolean }
     ): Promise<OrbReportResult> {
         const normalizedDate = normalizeSessionDate(sessionDate);
-        const { generateOrbReport } = await import('./orb-report');
-        return generateOrbReport(this, normalizedDate, options);
+        const { Reports } = await import('./reports');
+        return Reports.generateOrbReport(this, normalizedDate, options);
     }
 
     async getAccount(): Promise<{ buyingPower: number; tradingBlocked: boolean }> {

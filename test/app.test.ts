@@ -15,13 +15,14 @@ type BracketOrderParams = {
     stopLossStopPrice: number;
 };
 
-function makeBreakoutBars(symbol: string): Bar[] {
+function makeBreakoutBars(symbol: string, sessionDate: string): Bar[] {
     const bars: Bar[] = [];
+    const [year, month, day] = sessionDate.split('-');
 
     for (let minute = 30; minute <= 44; minute++) {
         bars.push({
             symbol,
-            timestamp: `2026-05-13T13:${String(minute).padStart(2, '0')}:00Z`,
+            timestamp: `${year}-${month}-${day}T13:${String(minute).padStart(2, '0')}:00Z`,
             open: 100,
             high: 101,
             low: 99,
@@ -32,7 +33,7 @@ function makeBreakoutBars(symbol: string): Bar[] {
 
     bars.push({
         symbol,
-        timestamp: '2026-05-13T13:45:00Z',
+        timestamp: `${year}-${month}-${day}T13:45:00Z`,
         open: 101,
         high: 103,
         low: 100.5,
@@ -47,7 +48,10 @@ class CapturingAlpacaClient extends AlpacaClient {
     requestedMostActiveLimit: number | undefined;
     submitBracketOrderCallCount = 0;
 
-    constructor(private readonly symbols: string[]) {
+    constructor(
+        private readonly symbols: string[],
+        private readonly sessionDate: string
+    ) {
         super();
     }
 
@@ -61,7 +65,7 @@ class CapturingAlpacaClient extends AlpacaClient {
     }
 
     async getIntradayBars(symbol: string): Promise<Bar[]> {
-        return makeBreakoutBars(symbol);
+        return makeBreakoutBars(symbol, this.sessionDate);
     }
 
     async submitBracketOrder(_params: BracketOrderParams): Promise<{ id: string; status: string }> {
@@ -72,17 +76,18 @@ class CapturingAlpacaClient extends AlpacaClient {
 
 describe('app trade execution', () => {
     it('retrieves active symbols using configured quantity and logs dry-run executions for breakout candidates', async () => {
+        const sessionDate = '2099-05-13';
         const activeSymbols = ['AAPL', 'TSLA', 'NVDA'];
-        const client = new CapturingAlpacaClient(activeSymbols);
+        const client = new CapturingAlpacaClient(activeSymbols, sessionDate);
 
-        const candidates = await findBreakoutCandidates(client, '2026-05-13');
+        const candidates = await findBreakoutCandidates(client, sessionDate);
         const trades = normalizeTradesToConstraints(
             buildWeightedRiskTrades(candidates, 1000),
             1000,
             1_000_000
         );
 
-        await executeSizedTrades(client, '2026-05-13', trades);
+        await executeSizedTrades(client, sessionDate, trades);
 
         const candidateSymbols = candidates.map((candidate) => candidate.symbol);
         const dryRunTradeSymbols = trades.map((trade) => trade.symbol);

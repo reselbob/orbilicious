@@ -1,12 +1,11 @@
 import { expect } from 'chai';
 import { describe, it } from 'mocha';
 import { computeOpeningRange, generateOrbSignal } from '../src/strategy';
-import { Bar, StrategyConfig } from '../src/types';
+import { Bar, Position, StrategyConfig } from '../src/types';
 import { AlpacaClient } from '../src/alpaca';
 import { findBreakoutCandidates } from '../src/app';
 import { env, strategyConfig } from '../src/config';
 import { logger } from '../src/logger';
-import { toNyParts } from '../src/time';
 
 function makeBar(minute: number, close: number, high = close + 0.2, low = close - 0.2): Bar {
     const hh = 13;
@@ -35,6 +34,59 @@ const cfg: StrategyConfig = {
     allowLong: true,
     allowShort: true,
 };
+
+function makeSymbolBreakoutBars(symbol: string, sessionDate: string): Bar[] {
+    const bars: Bar[] = [];
+    const [year, month, day] = sessionDate.split('-');
+
+    for (let minute = 30; minute <= 44; minute++) {
+        bars.push({
+            symbol,
+            timestamp: `${year}-${month}-${day}T13:${String(minute).padStart(2, '0')}:00Z`,
+            open: 100,
+            high: 101,
+            low: 99,
+            close: 100,
+            volume: 1000,
+        });
+    }
+
+    bars.push({
+        symbol,
+        timestamp: `${year}-${month}-${day}T13:45:00Z`,
+        open: 101,
+        high: 103,
+        low: 100.5,
+        close: 102,
+        volume: 5000,
+    });
+
+    return bars;
+}
+
+class DeterministicStrategyClient extends AlpacaClient {
+    requestedMostActiveLimit: number | undefined;
+
+    constructor(
+        private readonly symbols: string[],
+        private readonly sessionDate: string
+    ) {
+        super();
+    }
+
+    async getMostActiveSymbols(limit = 40): Promise<string[]> {
+        this.requestedMostActiveLimit = limit;
+        return this.symbols;
+    }
+
+    async getOpenPosition(_symbol: string): Promise<Position | null> {
+        return null;
+    }
+
+    async getIntradayBars(symbol: string, _sessionDate: string): Promise<Bar[]> {
+        return makeSymbolBreakoutBars(symbol, this.sessionDate);
+    }
+}
 
 describe('strategy integration', () => {
     it('computes the 15-minute opening range from 1-minute bars', () => {
@@ -141,48 +193,31 @@ describe('strategy integration', () => {
         expect(signal.type).to.equal('EXIT');
     });
 
-    it('gets most active stocks and determines breakout candidates when market is open', async () => {
-        // Check if market is open: weekday between 9:30 AM and 4:00 PM ET
-        const now = new Date();
-        const nyTime = toNyParts(now, 'America/New_York');
-        const dayOfWeek = now.toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short' });
-        const [currentHour, currentMinute] = nyTime.hhmm.split(':').map(Number);
-        const currentTimeInMinutes = currentHour * 60 + currentMinute;
-        const marketOpenMinutes = 9 * 60 + 30; // 9:30 AM
-        const marketCloseMinutes = 16 * 60; // 4:00 PM
+    it('gets most active stocks and determines breakout candidates deterministically', async () => {
+        const sessionDate = '2099-05-14';
+        const mostActiveSymbols = ['AAPL', 'TSLA', 'NVDA'];
+        const client = new DeterministicStrategyClient(mostActiveSymbols, sessionDate);
 
-        const isWeekday = !['Sat', 'Sun'].includes(dayOfWeek);
-        const isMarketOpen = isWeekday && currentTimeInMinutes >= marketOpenMinutes && currentTimeInMinutes < marketCloseMinutes;
-
-        if (!isMarketOpen) {
-            throw new Error('MARKET NOT OPEN');
-        }
-
-        // Get most active stocks
-        const client = new AlpacaClient();
-        const sessionDate = `${nyTime.year}-${nyTime.month}-${nyTime.day}`;
-
-        // Get the most active symbols using QUANTITY_TO_RETRIEVE
-        const mostActiveSymbols = await client.getMostActiveSymbols(env.quantityToRetrieve);
+        const retrievedSymbols = await client.getMostActiveSymbols(env.quantityToRetrieve);
 
         logger.info('Got most active stocks', {
             quantityToRetrieve: env.quantityToRetrieve,
-            mostActiveCount: mostActiveSymbols.length,
-            mostActiveSymbols,
+            mostActiveCount: retrievedSymbols.length,
+            mostActiveSymbols: retrievedSymbols,
         });
 
-        // Find breakout candidates
         const candidates = await findBreakoutCandidates(client, sessionDate);
 
         logger.info('Found breakout candidates', {
-            mostActiveCount: mostActiveSymbols.length,
+            mostActiveCount: retrievedSymbols.length,
             breakoutCandidateCount: candidates.length,
             breakoutCandidates: candidates.map((c) => ({ symbol: c.symbol, side: c.side, price: c.price })),
         });
 
-        // Verify we got the data
-        expect(mostActiveSymbols).to.be.an('array');
-        expect(mostActiveSymbols.length).to.equal(env.quantityToRetrieve);
+        expect(client.requestedMostActiveLimit).to.equal(env.quantityToRetrieve);
+        expect(retrievedSymbols).to.deep.equal(mostActiveSymbols);
         expect(candidates).to.be.an('array');
+        expect(candidates.map((candidate) => candidate.symbol)).to.deep.equal(mostActiveSymbols);
+        expect(candidates.every((candidate) => candidate.side === 'buy')).to.equal(true);
     });
 });
