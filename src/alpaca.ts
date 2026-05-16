@@ -2,7 +2,11 @@ import { env, strategyConfig } from './config';
 import { logger } from './logger';
 import { toNyParts } from './time';
 import { Bar, Position } from './types';
-import type { OrbReportResult } from './reports';
+import type {
+    OrbReportResult,
+    RunningSummaryOrbReportResult,
+    WeeklySummaryOrbReportResult,
+} from './reports';
 
 type AlpacaOrderResponse = {
     id: string;
@@ -37,6 +41,20 @@ function normalizeSessionDate(sessionDate?: Date | string): string {
 }
 
 export class AlpacaClient {
+    public readonly client = this;
+
+    async generateWeeklySummaryOrbReports(date: Date): Promise<WeeklySummaryOrbReportResult> {
+        const { Reports } = await import('./reports');
+        return Reports.generateWeeklySummaryOrbReports(this, date);
+    }
+
+    async generateRunningSummaryOrbReports(
+        anchorDate: Date,
+    ): Promise<RunningSummaryOrbReportResult> {
+        const { Reports } = await import('./reports');
+        return Reports.generateRunningSummaryOrbReports(this, anchorDate);
+    }
+
     async generateOrbReport(
         sessionDate?: Date | string,
         options?: { usesHistoricData?: boolean }

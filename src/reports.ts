@@ -25,6 +25,7 @@ export type TradeOutcome = {
     qty: number;
     status: ExitStatus;
     exitPrice: number | null;
+    exitTimestamp: string | null;
     pnl: number;
 };
 
@@ -51,6 +52,7 @@ export type OrbReportResult = {
     evaluationRows: OrbEvaluationRow[];
     breakoutCandidates: AtrBreakoutCandidate[];
     emulatedTrades: SizedTrade[];
+    finalOutcomes: TradeOutcome[];
     htmlReportPath: string;
     pdfReportPath: string;
     maxSessionBars: number;
@@ -63,210 +65,171 @@ export type OrbReportResult = {
     totalProfitLossToDate: number;
 };
 
+export type WeeklySummaryDay = {
+    sessionDate: string;
+    totalCandidatesBoughtAtStart: number;
+    numberOfCandidatesSoldLong: number;
+    numberOfCandidatesBoughtShort: number;
+    totalCostOfBreakoutCandidatePurchases: number;
+    totalAmountOfCashAtStopLossRisk: number;
+    totalProfitLossToDate: number;
+    htmlReportPath?: string;
+    pdfReportPath?: string;
+};
+
+export type WeeklySummaryOrbReportResult = {
+    weekStartDate: string;
+    weekEndDate: string;
+    dailySummaries: WeeklySummaryDay[];
+    htmlReportPath: string;
+    pdfReportPath: string;
+    totalCandidatesBoughtAtStart: number;
+    numberOfCandidatesSoldLong: number;
+    numberOfCandidatesBoughtShort: number;
+    totalCostOfBreakoutCandidatePurchases: number;
+    totalAmountOfCashAtStopLossRisk: number;
+    totalProfitLossToDate: number;
+};
+
+export type RunningSummaryOrbReportResult = {
+    startDate: string;
+    endDate: string;
+    dailySummaries: WeeklySummaryDay[];
+    skippedDates: string[];
+    htmlReportPath: string;
+    pdfReportPath: string;
+    totalCandidatesBoughtAtStart: number;
+    numberOfCandidatesSoldLong: number;
+    numberOfCandidatesBoughtShort: number;
+    totalCostOfBreakoutCandidatePurchases: number;
+    totalAmountOfCashAtStopLossRisk: number;
+    totalProfitLossToDate: number;
+};
+
+type OrbReportComputation = {
+    sessionDate: string;
+    symbols: string[];
+    evaluationRows: OrbEvaluationRow[];
+    breakoutCandidates: AtrBreakoutCandidate[];
+    emulatedTrades: SizedTrade[];
+    maxSessionBars: number;
+    insufficientSymbols: string[];
+    totalCandidatesBoughtAtStart: number;
+    numberOfCandidatesSoldLong: number;
+    numberOfCandidatesBoughtShort: number;
+    totalCostOfBreakoutCandidatePurchases: number;
+    totalAmountOfCashAtStopLossRisk: number;
+    totalProfitLossToDate: number;
+    closedOutcomeBySymbol: Map<string, TradeOutcome>;
+    finalOutcomeBySymbol: Map<string, TradeOutcome>;
+};
+
 export class Reports {
-    public static buildReportSubtitle(
-        sessionDate: string,
-        usesHistoricData = false,
-    ): string {
-        const dataSourcePhrase = usesHistoricData
-            ? "using historic data from"
-            : "using";
-        return `ORB activity for the New York session on ${Reports.escapeHtml(sessionDate)} ${dataSourcePhrase} the first 15 minutes for the opening range and the following 15 minutes for breakout detection, then managing positions until market close.`;
-    }
+    private static weekDatesMondayToFriday(anchorDate: Date): string[] {
+        const nyAnchor = toNyParts(anchorDate, strategyConfig.sessionTimezone);
+        const utcAnchor = new Date(
+            Date.UTC(nyAnchor.year, nyAnchor.month - 1, nyAnchor.day),
+        );
 
-    private static escapeHtml(text: string): string {
-        return text
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#39;");
-    }
+        const mondayOffset = (utcAnchor.getUTCDay() + 6) % 7;
+        const monday = new Date(utcAnchor);
+        monday.setUTCDate(utcAnchor.getUTCDate() - mondayOffset);
 
-    private static writeHtmlReport(filePath: string, html: string) {
-        fs.mkdirSync(path.dirname(filePath), { recursive: true });
-        fs.writeFileSync(filePath, html, "utf8");
-    }
-
-    private static async renderHtmlToPdf(htmlPath: string, pdfPath: string) {
-        const browser = await puppeteer.launch({
-            headless: true,
-            args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        return Array.from({ length: 5 }, (_, index) => {
+            const current = new Date(monday);
+            current.setUTCDate(monday.getUTCDate() + index);
+            const year = String(current.getUTCFullYear()).padStart(4, "0");
+            const month = String(current.getUTCMonth() + 1).padStart(2, "0");
+            const day = String(current.getUTCDate()).padStart(2, "0");
+            return `${year}-${month}-${day}`;
         });
-
-        try {
-            const page = await browser.newPage();
-            await page.goto(`file://${htmlPath}`, { waitUntil: "networkidle0" });
-            await page.pdf({
-                path: pdfPath,
-                format: "A4",
-                landscape: true,
-                printBackground: true,
-                margin: {
-                    top: "0.5in",
-                    right: "0.5in",
-                    bottom: "0.5in",
-                    left: "0.5in",
-                },
-            });
-        } finally {
-            await browser.close();
-        }
     }
 
-    private static dedupeAndSortBars(bars: Bar[]): Bar[] {
-        const byTimestamp = new Map<string, Bar>();
-        for (const bar of bars) {
-            byTimestamp.set(bar.timestamp, bar);
-        }
-
-        return [...byTimestamp.values()].sort(
-            (a, b) =>
-                new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
-        );
-    }
-
-    private static formatNyTime(timestamp: string | null): string {
-        if (!timestamp) {
-            return "";
-        }
-
-        return toNyParts(timestamp, strategyConfig.sessionTimezone).hhmm;
-    }
-
-    private static calculateAtr1m(bars: Bar[], period = 14): number | null {
-        if (bars.length < 2) {
-            return null;
-        }
-
-        const sortedBars = [...bars].sort(
-            (a, b) =>
-                new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
-        );
-
-        const trueRanges: number[] = [];
-        for (let index = 1; index < sortedBars.length; index++) {
-            const current = sortedBars[index];
-            const previous = sortedBars[index - 1];
-            const rangeHighLow = current.high - current.low;
-            const rangeHighPrevClose = Math.abs(current.high - previous.close);
-            const rangeLowPrevClose = Math.abs(current.low - previous.close);
-            trueRanges.push(
-                Math.max(rangeHighLow, rangeHighPrevClose, rangeLowPrevClose),
-            );
-        }
-
-        const atrWindow = trueRanges.slice(-period);
-        if (atrWindow.length === 0) {
-            return null;
-        }
-
-        const atr =
-            atrWindow.reduce((sum, value) => sum + value, 0) / atrWindow.length;
-        return atr > 0 ? atr : null;
-    }
-
-    private static emulateExit(
-        trade: SizedTrade,
-        barsAfterEntry: Bar[],
-    ): TradeOutcome {
-        for (const bar of barsAfterEntry) {
-            if (trade.side === "buy") {
-                const stopHit = bar.low <= trade.stopPrice;
-                const tpHit = bar.high >= trade.takeProfitPrice;
-
-                if (stopHit) {
-                    return {
-                        symbol: trade.symbol,
-                        side: trade.side,
-                        entryPrice: trade.price,
-                        stopPrice: trade.stopPrice,
-                        takeProfitPrice: trade.takeProfitPrice,
-                        qty: trade.qty,
-                        status: "loss",
-                        exitPrice: trade.stopPrice,
-                        pnl: (trade.stopPrice - trade.price) * trade.qty,
-                    };
-                }
-
-                if (tpHit) {
-                    return {
-                        symbol: trade.symbol,
-                        side: trade.side,
-                        entryPrice: trade.price,
-                        stopPrice: trade.stopPrice,
-                        takeProfitPrice: trade.takeProfitPrice,
-                        qty: trade.qty,
-                        status: "profit",
-                        exitPrice: trade.takeProfitPrice,
-                        pnl: (trade.takeProfitPrice - trade.price) * trade.qty,
-                    };
-                }
-            } else {
-                const stopHit = bar.high >= trade.stopPrice;
-                const tpHit = bar.low <= trade.takeProfitPrice;
-
-                if (stopHit) {
-                    return {
-                        symbol: trade.symbol,
-                        side: trade.side,
-                        entryPrice: trade.price,
-                        stopPrice: trade.stopPrice,
-                        takeProfitPrice: trade.takeProfitPrice,
-                        qty: trade.qty,
-                        status: "loss",
-                        exitPrice: trade.stopPrice,
-                        pnl: (trade.price - trade.stopPrice) * trade.qty,
-                    };
-                }
-
-                if (tpHit) {
-                    return {
-                        symbol: trade.symbol,
-                        side: trade.side,
-                        entryPrice: trade.price,
-                        stopPrice: trade.stopPrice,
-                        takeProfitPrice: trade.takeProfitPrice,
-                        qty: trade.qty,
-                        status: "profit",
-                        exitPrice: trade.takeProfitPrice,
-                        pnl: (trade.price - trade.takeProfitPrice) * trade.qty,
-                    };
-                }
-            }
-        }
-
+    private static summarizeOrbReport(
+        report: Pick<
+            OrbReportComputation,
+            | "sessionDate"
+            | "totalCandidatesBoughtAtStart"
+            | "numberOfCandidatesSoldLong"
+            | "numberOfCandidatesBoughtShort"
+            | "totalCostOfBreakoutCandidatePurchases"
+            | "totalAmountOfCashAtStopLossRisk"
+            | "totalProfitLossToDate"
+        >,
+    ): WeeklySummaryDay {
         return {
-            symbol: trade.symbol,
-            side: trade.side,
-            entryPrice: trade.price,
-            stopPrice: trade.stopPrice,
-            takeProfitPrice: trade.takeProfitPrice,
-            qty: trade.qty,
-            status: "pending",
-            exitPrice: null,
-            pnl: 0,
+            sessionDate: report.sessionDate,
+            totalCandidatesBoughtAtStart: report.totalCandidatesBoughtAtStart,
+            numberOfCandidatesSoldLong: report.numberOfCandidatesSoldLong,
+            numberOfCandidatesBoughtShort: report.numberOfCandidatesBoughtShort,
+            totalCostOfBreakoutCandidatePurchases:
+                report.totalCostOfBreakoutCandidatePurchases,
+            totalAmountOfCashAtStopLossRisk:
+                report.totalAmountOfCashAtStopLossRisk,
+            totalProfitLossToDate: report.totalProfitLossToDate,
         };
     }
 
-    public static async generateOrbReport(
+    private static accumulateDailySummaries(dailySummaries: WeeklySummaryDay[]) {
+        return dailySummaries.reduce(
+            (acc, day) => {
+                acc.totalCandidatesBoughtAtStart += day.totalCandidatesBoughtAtStart;
+                acc.numberOfCandidatesSoldLong += day.numberOfCandidatesSoldLong;
+                acc.numberOfCandidatesBoughtShort += day.numberOfCandidatesBoughtShort;
+                acc.totalCostOfBreakoutCandidatePurchases +=
+                    day.totalCostOfBreakoutCandidatePurchases;
+                acc.totalAmountOfCashAtStopLossRisk +=
+                    day.totalAmountOfCashAtStopLossRisk;
+                acc.totalProfitLossToDate += day.totalProfitLossToDate;
+                return acc;
+            },
+            {
+                totalCandidatesBoughtAtStart: 0,
+                numberOfCandidatesSoldLong: 0,
+                numberOfCandidatesBoughtShort: 0,
+                totalCostOfBreakoutCandidatePurchases: 0,
+                totalAmountOfCashAtStopLossRisk: 0,
+                totalProfitLossToDate: 0,
+            },
+        );
+    }
+
+    private static isWeekdaySessionDate(sessionDate: string): boolean {
+        const [year, month, day] = sessionDate.split("-").map(Number);
+        const utcDate = new Date(Date.UTC(year, month - 1, day));
+        const dayOfWeek = utcDate.getUTCDay();
+        return dayOfWeek !== 0 && dayOfWeek !== 6;
+    }
+
+    private static nyDateRangeInclusive(anchorDate: Date, currentDate: Date): string[] {
+        const startNy = toNyParts(anchorDate, strategyConfig.sessionTimezone);
+        const endNy = toNyParts(currentDate, strategyConfig.sessionTimezone);
+        const start = new Date(Date.UTC(startNy.year, startNy.month - 1, startNy.day));
+        const end = new Date(Date.UTC(endNy.year, endNy.month - 1, endNy.day));
+
+        if (start.getTime() > end.getTime()) {
+            throw new Error(
+                `Running summary anchor date ${startNy.date} cannot be after current NY date ${endNy.date}`,
+            );
+        }
+
+        const dates: string[] = [];
+        for (const current = new Date(start); current.getTime() <= end.getTime();) {
+            const year = String(current.getUTCFullYear()).padStart(4, "0");
+            const month = String(current.getUTCMonth() + 1).padStart(2, "0");
+            const day = String(current.getUTCDate()).padStart(2, "0");
+            dates.push(`${year}-${month}-${day}`);
+            current.setUTCDate(current.getUTCDate() + 1);
+        }
+
+        return dates;
+    }
+
+    private static async computeOrbReportData(
         client: AlpacaClient,
         sessionDate: string,
-        options?: { usesHistoricData?: boolean },
-    ): Promise<OrbReportResult> {
+    ): Promise<OrbReportComputation> {
         const symbols = await client.getMostActiveSymbols(env.quantityToRetrieve);
-        const reportDir = path.resolve(process.cwd(), "reports");
-        const htmlReportDir = path.resolve(reportDir, "html", sessionDate);
-        fs.mkdirSync(reportDir, { recursive: true });
-        const htmlReportPath = path.join(htmlReportDir, `orb-report-${sessionDate}.html`);
-        const pdfSourceHtmlPath = path.join(reportDir, `orb-report-${sessionDate}.html`);
-        const pdfReportPath = path.join(reportDir, `orb-report-${sessionDate}.pdf`);
-
-        logger.info("Generating ORB report", {
-            sessionDate,
-            symbolCount: symbols.length,
-        });
-
         const openingRangeBars = 15;
         const evaluationWindowBars = 15;
         const evaluationRows: OrbEvaluationRow[] = [];
@@ -512,6 +475,7 @@ export class Reports {
                 qty: trade.qty,
                 status: "pending",
                 exitPrice: finalBar.close,
+                exitTimestamp: finalBar.timestamp,
                 pnl: pnlAtClose,
             });
         });
@@ -520,6 +484,616 @@ export class Reports {
             (sum, outcome) => sum + outcome.pnl,
             0,
         );
+
+        return {
+            sessionDate,
+            symbols,
+            evaluationRows,
+            breakoutCandidates,
+            emulatedTrades,
+            maxSessionBars,
+            insufficientSymbols,
+            totalCandidatesBoughtAtStart,
+            numberOfCandidatesSoldLong,
+            numberOfCandidatesBoughtShort,
+            totalCostOfBreakoutCandidatePurchases,
+            totalAmountOfCashAtStopLossRisk,
+            totalProfitLossToDate,
+            closedOutcomeBySymbol,
+            finalOutcomeBySymbol,
+        };
+    }
+
+    public static async generateRunningSummaryOrbReports(
+        client: AlpacaClient,
+        anchorDate: Date,
+    ): Promise<RunningSummaryOrbReportResult> {
+        const currentDate = new Date();
+        const startDate = toNyParts(anchorDate, strategyConfig.sessionTimezone).date;
+        const endDate = toNyParts(currentDate, strategyConfig.sessionTimezone).date;
+        const sessionDates = Reports.nyDateRangeInclusive(anchorDate, currentDate);
+        const dailySummaries: WeeklySummaryDay[] = [];
+        const skippedDates: string[] = [];
+
+        logger.info("Generating running ORB summary reports", {
+            startDate,
+            endDate,
+            totalDatesInRange: sessionDates.length,
+        });
+
+        for (const sessionDate of sessionDates) {
+            if (!Reports.isWeekdaySessionDate(sessionDate)) {
+                skippedDates.push(sessionDate);
+                continue;
+            }
+
+            try {
+                const report = await Reports.computeOrbReportData(client, sessionDate);
+                dailySummaries.push(Reports.summarizeOrbReport(report));
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                if (message.includes("fewer than 30 session bars")) {
+                    skippedDates.push(sessionDate);
+                    logger.info("Skipping running summary date because NY market was closed", {
+                        sessionDate,
+                        message,
+                    });
+                    continue;
+                }
+
+                throw error;
+            }
+        }
+
+        if (dailySummaries.length === 0) {
+            throw new Error(
+                `No NY market-open sessions found between ${startDate} and ${endDate}`,
+            );
+        }
+
+        const totals = Reports.accumulateDailySummaries(dailySummaries);
+        const reportDir = path.resolve(process.cwd(), "reports");
+        const htmlReportPath = path.join(
+            reportDir,
+            `running-summary-start-date-${startDate}.html`,
+        );
+        const pdfSourceHtmlPath = path.join(
+            reportDir,
+            `running-summary-start-date-${startDate}-pdf-source.html`,
+        );
+        const pdfReportPath = path.join(
+            reportDir,
+            `running-summary-start-date-${startDate}.pdf`,
+        );
+
+        const dailyRowsHtml = dailySummaries
+            .map(
+                (day) => `<tr>
+                    <td>${Reports.escapeHtml(day.sessionDate)}</td>
+                    <td>${day.totalCandidatesBoughtAtStart}</td>
+                    <td>${day.numberOfCandidatesSoldLong}</td>
+                    <td>${day.numberOfCandidatesBoughtShort}</td>
+                    <td>${day.totalCostOfBreakoutCandidatePurchases.toFixed(2)}</td>
+                    <td>${day.totalAmountOfCashAtStopLossRisk.toFixed(2)}</td>
+                    <td>${day.totalProfitLossToDate.toFixed(2)}</td>
+                </tr>`,
+            )
+            .join("\n");
+
+        const tableSummaryRowHtml = `<tr class="summary-row">
+            <th>Totals</th>
+            <th>${totals.totalCandidatesBoughtAtStart}</th>
+            <th>${totals.numberOfCandidatesSoldLong}</th>
+            <th>${totals.numberOfCandidatesBoughtShort}</th>
+            <th>${totals.totalCostOfBreakoutCandidatePurchases.toFixed(2)}</th>
+            <th>${totals.totalAmountOfCashAtStopLossRisk.toFixed(2)}</th>
+            <th>${totals.totalProfitLossToDate.toFixed(2)}</th>
+        </tr>`;
+
+        const html = `<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ORB Running Summary</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: #f7f9fc;
+            color: #102a43;
+            padding: 24px;
+        }
+        .panel {
+            background: white;
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+            margin-bottom: 18px;
+        }
+        h1, h2 {
+            margin: 0 0 10px;
+            color: #0b1f3a;
+        }
+        p {
+            margin: 0;
+            color: #334e68;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 14px;
+            font-size: 13px;
+        }
+        th, td {
+            border-bottom: 1px solid #d9e2ec;
+            padding: 8px;
+            text-align: left;
+        }
+        thead th {
+            background: #f0f4f8;
+        }
+        tfoot th {
+            background: #d9e2ec;
+        }
+        .note {
+            margin-top: 12px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <section class="panel">
+        <h1>Running ORB Summary</h1>
+        <p>Date range: ${Reports.escapeHtml(startDate)} through ${Reports.escapeHtml(endDate)}</p>
+    </section>
+    <section class="panel">
+        <h2>Daily Summary Metrics</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Session Date</th>
+                    <th>Total Number of Candidates Bought at Start</th>
+                    <th>Number of Candidates Sold Long</th>
+                    <th>Number of Candidates Bought Short</th>
+                    <th>Total cost of Breakout Candidate purchases</th>
+                    <th>Total amount of cash at stop loss risk</th>
+                    <th>Total Profit (Loss) to Date</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${dailyRowsHtml}
+            </tbody>
+            <tfoot>
+                ${tableSummaryRowHtml}
+            </tfoot>
+        </table>
+        <p class="note">Included ${dailySummaries.length} NY market-open sessions. Skipped ${skippedDates.length} dates with closed markets or no session bars.</p>
+    </section>
+</body>
+</html>`;
+
+        Reports.writeHtmlReport(htmlReportPath, html);
+        Reports.writeHtmlReport(pdfSourceHtmlPath, html);
+        await Reports.renderHtmlToPdf(pdfSourceHtmlPath, pdfReportPath);
+        fs.unlinkSync(pdfSourceHtmlPath);
+
+        logger.info("Generated running ORB summary reports", {
+            startDate,
+            endDate,
+            htmlReportPath,
+            pdfReportPath,
+            includedSessions: dailySummaries.length,
+            skippedSessions: skippedDates.length,
+        });
+
+        return {
+            startDate,
+            endDate,
+            dailySummaries,
+            skippedDates,
+            htmlReportPath,
+            pdfReportPath,
+            totalCandidatesBoughtAtStart: totals.totalCandidatesBoughtAtStart,
+            numberOfCandidatesSoldLong: totals.numberOfCandidatesSoldLong,
+            numberOfCandidatesBoughtShort: totals.numberOfCandidatesBoughtShort,
+            totalCostOfBreakoutCandidatePurchases:
+                totals.totalCostOfBreakoutCandidatePurchases,
+            totalAmountOfCashAtStopLossRisk: totals.totalAmountOfCashAtStopLossRisk,
+            totalProfitLossToDate: totals.totalProfitLossToDate,
+        };
+    }
+
+    public static async generateWeeklySummaryOrbReports(
+        client: AlpacaClient,
+        date: Date,
+    ): Promise<WeeklySummaryOrbReportResult> {
+        const sessionDates = Reports.weekDatesMondayToFriday(date);
+        const weekStartDate = sessionDates[0];
+        const weekEndDate = sessionDates[sessionDates.length - 1];
+
+        logger.info("Generating weekly ORB summary reports", {
+            weekStartDate,
+            weekEndDate,
+            sessionDates,
+        });
+
+        const dailySummaries: WeeklySummaryDay[] = [];
+        for (const sessionDate of sessionDates) {
+            const report = await Reports.generateOrbReport(client, sessionDate, {
+                usesHistoricData: true,
+            });
+            dailySummaries.push(Reports.summarizeOrbReport(report));
+        }
+
+        const totals = Reports.accumulateDailySummaries(dailySummaries);
+
+        const reportDir = path.resolve(process.cwd(), "reports");
+        const htmlReportPath = path.join(
+            reportDir,
+            `summary-for-week-ending-${weekEndDate}.html`,
+        );
+        const pdfSourceHtmlPath = path.join(
+            reportDir,
+            `summary-for-week-ending-${weekEndDate}-pdf-source.html`,
+        );
+        const pdfReportPath = path.join(
+            reportDir,
+            `summary-for-week-ending-${weekEndDate}.pdf`,
+        );
+
+        const dailyRowsHtml = dailySummaries
+            .map(
+                (day) => `<tr>
+                    <td>${Reports.escapeHtml(day.sessionDate)}</td>
+                    <td>${day.totalCandidatesBoughtAtStart}</td>
+                    <td>${day.numberOfCandidatesSoldLong}</td>
+                    <td>${day.numberOfCandidatesBoughtShort}</td>
+                    <td>${day.totalCostOfBreakoutCandidatePurchases.toFixed(2)}</td>
+                    <td>${day.totalAmountOfCashAtStopLossRisk.toFixed(2)}</td>
+                    <td>${day.totalProfitLossToDate.toFixed(2)}</td>
+                </tr>`,
+            )
+            .join("\n");
+
+        const totalsRowsHtml = `<tr><th>Total Number of Candidates Bought at Start</th><td>${totals.totalCandidatesBoughtAtStart}</td></tr>
+            <tr><th>Number of Candidates Sold Long</th><td>${totals.numberOfCandidatesSoldLong}</td></tr>
+            <tr><th>Number of Candidates Bought Short</th><td>${totals.numberOfCandidatesBoughtShort}</td></tr>
+            <tr><th>Total cost of Breakout Candidate purchases</th><td>${totals.totalCostOfBreakoutCandidatePurchases.toFixed(2)}</td></tr>
+            <tr><th>Total amount of cash at stop loss risk</th><td>${totals.totalAmountOfCashAtStopLossRisk.toFixed(2)}</td></tr>
+            <tr><th>Total Profit (Loss) to Date</th><td>${totals.totalProfitLossToDate.toFixed(2)}</td></tr>`;
+
+        const html = `<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ORB Weekly Summary</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: #f7f9fc;
+            color: #102a43;
+            padding: 24px;
+        }
+        .panel {
+            background: white;
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+            margin-bottom: 18px;
+        }
+        h1, h2 {
+            margin: 0 0 10px;
+            color: #0b1f3a;
+        }
+        p {
+            margin: 0;
+            color: #334e68;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 14px;
+            font-size: 13px;
+        }
+        th, td {
+            border-bottom: 1px solid #d9e2ec;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background: #f0f4f8;
+        }
+    </style>
+</head>
+<body>
+    <section class="panel">
+        <h1>Weekly ORB Summary</h1>
+        <p>Week range: ${Reports.escapeHtml(weekStartDate)} to ${Reports.escapeHtml(weekEndDate)}</p>
+    </section>
+    <section class="panel">
+        <h2>Daily Summary Metrics</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Session Date</th>
+                    <th>Total Number of Candidates Bought at Start</th>
+                    <th>Number of Candidates Sold Long</th>
+                    <th>Number of Candidates Bought Short</th>
+                    <th>Total cost of Breakout Candidate purchases</th>
+                    <th>Total amount of cash at stop loss risk</th>
+                    <th>Total Profit (Loss) to Date</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${dailyRowsHtml}
+            </tbody>
+        </table>
+    </section>
+    <section class="panel">
+        <h2>Week Totals</h2>
+        <table>
+            <tbody>
+                ${totalsRowsHtml}
+            </tbody>
+        </table>
+    </section>
+</body>
+</html>`;
+
+        Reports.writeHtmlReport(htmlReportPath, html);
+        Reports.writeHtmlReport(pdfSourceHtmlPath, html);
+        await Reports.renderHtmlToPdf(pdfSourceHtmlPath, pdfReportPath);
+        fs.unlinkSync(pdfSourceHtmlPath);
+
+        logger.info("Generated weekly ORB summary reports", {
+            weekStartDate,
+            weekEndDate,
+            htmlReportPath,
+            pdfReportPath,
+        });
+
+        return {
+            weekStartDate,
+            weekEndDate,
+            dailySummaries,
+            htmlReportPath,
+            pdfReportPath,
+            totalCandidatesBoughtAtStart: totals.totalCandidatesBoughtAtStart,
+            numberOfCandidatesSoldLong: totals.numberOfCandidatesSoldLong,
+            numberOfCandidatesBoughtShort: totals.numberOfCandidatesBoughtShort,
+            totalCostOfBreakoutCandidatePurchases:
+                totals.totalCostOfBreakoutCandidatePurchases,
+            totalAmountOfCashAtStopLossRisk: totals.totalAmountOfCashAtStopLossRisk,
+            totalProfitLossToDate: totals.totalProfitLossToDate,
+        };
+    }
+
+    public static buildReportSubtitle(
+        sessionDate: string,
+        usesHistoricData = false,
+    ): string {
+        const dataSourcePhrase = usesHistoricData
+            ? "using historic data from"
+            : "using";
+        return `ORB activity for the New York session on ${Reports.escapeHtml(sessionDate)} ${dataSourcePhrase} the first 15 minutes for the opening range and the following 15 minutes for breakout detection, then managing positions until market close.`;
+    }
+
+    private static escapeHtml(text: string): string {
+        return text
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+    }
+
+    private static writeHtmlReport(filePath: string, html: string) {
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
+        fs.writeFileSync(filePath, html, "utf8");
+    }
+
+    private static async renderHtmlToPdf(htmlPath: string, pdfPath: string) {
+        const browser = await puppeteer.launch({
+            headless: true,
+            args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        });
+
+        try {
+            const page = await browser.newPage();
+            await page.goto(`file://${htmlPath}`, { waitUntil: "networkidle0" });
+            await page.pdf({
+                path: pdfPath,
+                format: "A4",
+                landscape: true,
+                printBackground: true,
+                margin: {
+                    top: "0.5in",
+                    right: "0.5in",
+                    bottom: "0.5in",
+                    left: "0.5in",
+                },
+            });
+        } finally {
+            await browser.close();
+        }
+    }
+
+    private static dedupeAndSortBars(bars: Bar[]): Bar[] {
+        const byTimestamp = new Map<string, Bar>();
+        for (const bar of bars) {
+            byTimestamp.set(bar.timestamp, bar);
+        }
+
+        return [...byTimestamp.values()].sort(
+            (a, b) =>
+                new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+        );
+    }
+
+    private static formatNyTime(timestamp: string | null): string {
+        if (!timestamp) {
+            return "";
+        }
+
+        return toNyParts(timestamp, strategyConfig.sessionTimezone).hhmm;
+    }
+
+    private static calculateAtr1m(bars: Bar[], period = 14): number | null {
+        if (bars.length < 2) {
+            return null;
+        }
+
+        const sortedBars = [...bars].sort(
+            (a, b) =>
+                new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+        );
+
+        const trueRanges: number[] = [];
+        for (let index = 1; index < sortedBars.length; index++) {
+            const current = sortedBars[index];
+            const previous = sortedBars[index - 1];
+            const rangeHighLow = current.high - current.low;
+            const rangeHighPrevClose = Math.abs(current.high - previous.close);
+            const rangeLowPrevClose = Math.abs(current.low - previous.close);
+            trueRanges.push(
+                Math.max(rangeHighLow, rangeHighPrevClose, rangeLowPrevClose),
+            );
+        }
+
+        const atrWindow = trueRanges.slice(-period);
+        if (atrWindow.length === 0) {
+            return null;
+        }
+
+        const atr =
+            atrWindow.reduce((sum, value) => sum + value, 0) / atrWindow.length;
+        return atr > 0 ? atr : null;
+    }
+
+    private static emulateExit(
+        trade: SizedTrade,
+        barsAfterEntry: Bar[],
+    ): TradeOutcome {
+        for (const bar of barsAfterEntry) {
+            if (trade.side === "buy") {
+                const stopHit = bar.low <= trade.stopPrice;
+                const tpHit = bar.high >= trade.takeProfitPrice;
+
+                if (stopHit) {
+                    return {
+                        symbol: trade.symbol,
+                        side: trade.side,
+                        entryPrice: trade.price,
+                        stopPrice: trade.stopPrice,
+                        takeProfitPrice: trade.takeProfitPrice,
+                        qty: trade.qty,
+                        status: "loss",
+                        exitPrice: trade.stopPrice,
+                        exitTimestamp: bar.timestamp,
+                        pnl: (trade.stopPrice - trade.price) * trade.qty,
+                    };
+                }
+
+                if (tpHit) {
+                    return {
+                        symbol: trade.symbol,
+                        side: trade.side,
+                        entryPrice: trade.price,
+                        stopPrice: trade.stopPrice,
+                        takeProfitPrice: trade.takeProfitPrice,
+                        qty: trade.qty,
+                        status: "profit",
+                        exitPrice: trade.takeProfitPrice,
+                        exitTimestamp: bar.timestamp,
+                        pnl: (trade.takeProfitPrice - trade.price) * trade.qty,
+                    };
+                }
+            } else {
+                const stopHit = bar.high >= trade.stopPrice;
+                const tpHit = bar.low <= trade.takeProfitPrice;
+
+                if (stopHit) {
+                    return {
+                        symbol: trade.symbol,
+                        side: trade.side,
+                        entryPrice: trade.price,
+                        stopPrice: trade.stopPrice,
+                        takeProfitPrice: trade.takeProfitPrice,
+                        qty: trade.qty,
+                        status: "loss",
+                        exitPrice: trade.stopPrice,
+                        exitTimestamp: bar.timestamp,
+                        pnl: (trade.price - trade.stopPrice) * trade.qty,
+                    };
+                }
+
+                if (tpHit) {
+                    return {
+                        symbol: trade.symbol,
+                        side: trade.side,
+                        entryPrice: trade.price,
+                        stopPrice: trade.stopPrice,
+                        takeProfitPrice: trade.takeProfitPrice,
+                        qty: trade.qty,
+                        status: "profit",
+                        exitPrice: trade.takeProfitPrice,
+                        exitTimestamp: bar.timestamp,
+                        pnl: (trade.price - trade.takeProfitPrice) * trade.qty,
+                    };
+                }
+            }
+        }
+
+        return {
+            symbol: trade.symbol,
+            side: trade.side,
+            entryPrice: trade.price,
+            stopPrice: trade.stopPrice,
+            takeProfitPrice: trade.takeProfitPrice,
+            qty: trade.qty,
+            status: "pending",
+            exitPrice: null,
+            exitTimestamp: null,
+            pnl: 0,
+        };
+    }
+
+    public static async generateOrbReport(
+        client: AlpacaClient,
+        sessionDate: string,
+        options?: { usesHistoricData?: boolean },
+    ): Promise<OrbReportResult> {
+        const reportData = await Reports.computeOrbReportData(client, sessionDate);
+        const {
+            symbols,
+            evaluationRows,
+            breakoutCandidates,
+            emulatedTrades,
+            maxSessionBars,
+            insufficientSymbols,
+            totalCandidatesBoughtAtStart,
+            numberOfCandidatesSoldLong,
+            numberOfCandidatesBoughtShort,
+            totalCostOfBreakoutCandidatePurchases,
+            totalAmountOfCashAtStopLossRisk,
+            totalProfitLossToDate,
+            closedOutcomeBySymbol,
+            finalOutcomeBySymbol,
+        } = reportData;
+        const reportDir = path.resolve(process.cwd(), "reports");
+        const htmlReportDir = path.resolve(reportDir, "html", sessionDate);
+        fs.mkdirSync(reportDir, { recursive: true });
+        const htmlReportPath = path.join(htmlReportDir, `orb-report-${sessionDate}.html`);
+        const pdfSourceHtmlPath = path.join(reportDir, `orb-report-${sessionDate}.html`);
+        const pdfReportPath = path.join(reportDir, `orb-report-${sessionDate}.pdf`);
+
+        logger.info("Generating ORB report", {
+            sessionDate,
+            symbolCount: symbols.length,
+        });
 
         const openingPriceRowsHtml = evaluationRows
             .map(
@@ -997,7 +1571,7 @@ export class Reports {
         fs.unlinkSync(pdfSourceHtmlPath);
         logger.info("PDF report written", { sessionDate, pdfReportPath });
 
-        if (maxSessionBars < openingRangeBars + evaluationWindowBars) {
+        if (maxSessionBars < 30) {
             throw new Error(
                 `Session ${sessionDate} has fewer than 30 session bars. Highest session bar count found: ${maxSessionBars}`,
             );
@@ -1009,6 +1583,7 @@ export class Reports {
             evaluationRows,
             breakoutCandidates,
             emulatedTrades,
+            finalOutcomes: [...finalOutcomeBySymbol.values()],
             htmlReportPath,
             pdfReportPath,
             maxSessionBars,

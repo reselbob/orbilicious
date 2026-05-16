@@ -107,14 +107,18 @@ Notes:
 
 ## Report modes and scheduling
 
-- **Live end-of-day mode (default):** If `SESSION_DATE` is not set, app runs current-day scheduling, starts trading logic at market open, and generates one end-of-day ORB PDF report after market close.
+- **Live end-of-day mode (default):** If `SESSION_DATE` is not set, app runs current-day scheduling, starts trading logic at market open, generates one end-of-day ORB report after market close, then exits.
+- **Live continuous mode:** Start with `--continuous` (or `-c`) to keep the process running across sessions. In this mode, data gathering/trade cycles run while NY markets are open, end-of-day report generation runs once per session, and the app waits for the next session instead of exiting.
 - **Historical one-shot mode:** If `SESSION_DATE=YYYY-MM-DD` is set, app runs a single historical ORB report for that session date and exits.
 
 Usage:
 
 ```bash
-# Live daily loop with end-of-day reports:
+# Live daily loop with end-of-day report then exit:
 npm run dev
+
+# Live continuous mode across sessions:
+npm run dev -- --continuous
 
 # Historical report for a specific date:
 SESSION_DATE=2026-05-14 npm run dev

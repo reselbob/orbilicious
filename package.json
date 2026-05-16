@@ -8,7 +8,9 @@
     "test:coverage": "nyc mocha -r ts-node/register \"test/**/*.test.ts\"",
     "coverage:report": "nyc report --reporter=text --reporter=html",
     "dev": "tsx src/main.ts",
+    "dev:web": "tsx src/web/server.ts",
     "start": "node dist/main.js",
+    "start:web": "node dist/web/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "repository": {

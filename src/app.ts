@@ -12,9 +12,96 @@ import {
     rankAndSelectCandidates,
 } from './basket';
 import { Bar } from './types';
+import type { OrbReportResult } from './reports';
 
 const executedToday = new Set<string>();
 const reportedDates = new Set<string>();
+
+type TradeMonitorEvent = {
+    eventType: 'open' | 'close';
+    sessionDate: string;
+    timestamp: string;
+    symbol: string;
+    side: 'buy' | 'sell';
+    position: 'long' | 'short';
+    qty: number;
+    entryPrice?: number;
+    stopPrice?: number;
+    targetPrice?: number;
+    closePrice?: number;
+    reason?: string;
+};
+
+type BacktestProgressEvent = {
+    startSessionDate: string;
+    endSessionDate: string;
+    totalWeekdaySessions: number;
+    processedDates: number;
+    skippedDates: number;
+    currentSessionDate: string | null;
+    completed: boolean;
+};
+
+function emitTradeMonitorEvent(event: TradeMonitorEvent) {
+    try {
+        const payload = JSON.stringify(event);
+        process.stdout.write(`__TRADE_MONITOR__${payload}\n`);
+    } catch {
+        // Keep failures silent so monitoring output never blocks strategy execution.
+    }
+}
+
+function emitBacktestProgressEvent(event: BacktestProgressEvent) {
+    try {
+        const payload = JSON.stringify(event);
+        process.stdout.write(`__BACKTEST_PROGRESS__${payload}\n`);
+    } catch {
+        // Keep failures silent so monitoring output never blocks strategy execution.
+    }
+}
+
+function emitHistoricalTradeMonitorEvents(report: OrbReportResult) {
+    const rowBySymbol = new Map(report.evaluationRows.map((row) => [row.symbol, row]));
+    const outcomeBySymbol = new Map(report.finalOutcomes.map((outcome) => [outcome.symbol, outcome]));
+
+    for (const trade of report.emulatedTrades) {
+        const row = rowBySymbol.get(trade.symbol);
+        const entryTimestamp = row?.confirmationRetestTimestamp ?? row?.breakoutTimestamp ?? new Date().toISOString();
+        const position = trade.side === 'buy' ? 'long' : 'short';
+
+        emitTradeMonitorEvent({
+            eventType: 'open',
+            sessionDate: report.sessionDate,
+            timestamp: entryTimestamp,
+            symbol: trade.symbol,
+            side: trade.side,
+            position,
+            qty: trade.qty,
+            entryPrice: trade.price,
+            stopPrice: trade.stopPrice,
+            targetPrice: trade.takeProfitPrice,
+            reason: 'historical emulation entry',
+        });
+
+        const outcome = outcomeBySymbol.get(trade.symbol);
+        if (!outcome || outcome.exitPrice == null) {
+            continue;
+        }
+
+        emitTradeMonitorEvent({
+            eventType: 'close',
+            sessionDate: report.sessionDate,
+            timestamp: outcome.exitTimestamp ?? entryTimestamp,
+            symbol: trade.symbol,
+            side: trade.side === 'buy' ? 'sell' : 'buy',
+            position,
+            qty: trade.qty,
+            entryPrice: trade.price,
+            closePrice: outcome.exitPrice,
+            reason: `historical emulation ${outcome.status} close`,
+        });
+    }
+}
 
 function executionKey(sessionDate: string, symbol: string) {
     return `${sessionDate}:${symbol}`;
@@ -23,6 +110,37 @@ function executionKey(sessionDate: string, symbol: string) {
 function minutesFromHHMM(hhmm: string): number {
     const [hour, minute] = hhmm.split(':').map(Number);
     return hour * 60 + minute;
+}
+
+function isWeekdaySessionDate(sessionDate: string): boolean {
+    const [year, month, day] = sessionDate.split('-').map(Number);
+    const utcDate = new Date(Date.UTC(year, month - 1, day));
+    const dayOfWeek = utcDate.getUTCDay();
+    return dayOfWeek !== 0 && dayOfWeek !== 6;
+}
+
+function sessionDatesFromAnchorToToday(anchorDate: string): string[] {
+    const [startYear, startMonth, startDay] = anchorDate.split('-').map(Number);
+    const start = new Date(Date.UTC(startYear, startMonth - 1, startDay));
+
+    const todayNy = toNyParts(new Date(), strategyConfig.sessionTimezone).date;
+    const [endYear, endMonth, endDay] = todayNy.split('-').map(Number);
+    const end = new Date(Date.UTC(endYear, endMonth - 1, endDay));
+
+    if (start.getTime() > end.getTime()) {
+        return [];
+    }
+
+    const dates: string[] = [];
+    for (const current = new Date(start); current.getTime() <= end.getTime();) {
+        const year = String(current.getUTCFullYear()).padStart(4, '0');
+        const month = String(current.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(current.getUTCDate()).padStart(2, '0');
+        dates.push(`${year}-${month}-${day}`);
+        current.setUTCDate(current.getUTCDate() + 1);
+    }
+
+    return dates;
 }
 
 function dedupeAndSortBars(bars: Bar[]): Bar[] {
@@ -247,6 +365,19 @@ async function evaluateSymbol(
                         latestClose: latestBar.close,
                     });
                 }
+
+                emitTradeMonitorEvent({
+                    eventType: 'close',
+                    sessionDate,
+                    timestamp: latestBar.timestamp,
+                    symbol,
+                    side: position.side === 'long' ? 'sell' : 'buy',
+                    position: position.side,
+                    qty: position.qty,
+                    entryPrice: position.entryPrice,
+                    closePrice: latestBar.close,
+                    reason: 'profit-capture close',
+                });
             } else {
                 logger.debug('Keeping open position; close is not yet favorable for profit capture', {
                     symbol,
@@ -341,6 +472,20 @@ export async function executeSizedTrades(
                 plannedRisk: trade.plannedRiskDollars,
                 estimatedNotional: trade.estimatedNotional,
             });
+
+            emitTradeMonitorEvent({
+                eventType: 'open',
+                sessionDate,
+                timestamp: new Date().toISOString(),
+                symbol: trade.symbol,
+                side: trade.side,
+                position: trade.side === 'buy' ? 'long' : 'short',
+                qty: trade.qty,
+                entryPrice: trade.price,
+                stopPrice: trade.stopPrice,
+                targetPrice: trade.takeProfitPrice,
+                reason: 'dry-run simulated entry',
+            });
         }
 
         return;
@@ -357,6 +502,22 @@ export async function executeSizedTrades(
             })
         )
     );
+
+    for (const trade of tradesToExecute) {
+        emitTradeMonitorEvent({
+            eventType: 'open',
+            sessionDate,
+            timestamp: new Date().toISOString(),
+            symbol: trade.symbol,
+            side: trade.side,
+            position: trade.side === 'buy' ? 'long' : 'short',
+            qty: trade.qty,
+            entryPrice: trade.price,
+            stopPrice: trade.stopPrice,
+            targetPrice: trade.takeProfitPrice,
+            reason: 'bracket order submitted',
+        });
+    }
 
     logger.info('Submitted bracket orders', {
         sessionDate,
@@ -407,27 +568,116 @@ export async function runCycle(client: AlpacaClient, sessionDate: string) {
     logger.info('Completed run cycle', { sessionDate });
 }
 
-export async function startApp() {
+export type StartAppOptions = {
+    continuous?: boolean;
+};
+
+export async function startApp(options?: StartAppOptions) {
     const client = new AlpacaClient();
+    const continuousMode = options?.continuous === true;
+
+    if (continuousMode) {
+        logger.info('Program is running in Continuous mode', {
+            pollIntervalSeconds: env.pollIntervalSeconds,
+        });
+    }
 
     if (env.sessionDate) {
         logger.info('Starting historical ORB report runner', {
             sessionDate: env.sessionDate,
             quantityToRetrieve: env.quantityToRetrieve,
             maxTotalRisk: env.maxTotalRisk,
+            continuousMode,
         });
 
-        await client.generateOrbReport(env.sessionDate, { usesHistoricData: true });
-        logger.info('Completed historical ORB report run', { sessionDate: env.sessionDate });
+        const allDates = sessionDatesFromAnchorToToday(env.sessionDate);
+        const weekdayDates = allDates.filter(isWeekdaySessionDate);
+        const endSessionDate = toNyParts(new Date(), strategyConfig.sessionTimezone).date;
+
+        emitBacktestProgressEvent({
+            startSessionDate: env.sessionDate,
+            endSessionDate,
+            totalWeekdaySessions: weekdayDates.length,
+            processedDates: 0,
+            skippedDates: 0,
+            currentSessionDate: null,
+            completed: false,
+        });
+
+        if (!weekdayDates.length) {
+            logger.warn('No weekday sessions found in selected historical window', {
+                sessionDate: env.sessionDate,
+                nyToday: endSessionDate,
+            });
+
+            emitBacktestProgressEvent({
+                startSessionDate: env.sessionDate,
+                endSessionDate,
+                totalWeekdaySessions: 0,
+                processedDates: 0,
+                skippedDates: 0,
+                currentSessionDate: null,
+                completed: true,
+            });
+
+            return;
+        }
+
+        let processedDates = 0;
+        let skippedDates = 0;
+
+        for (const sessionDate of weekdayDates) {
+            try {
+                const report = await client.generateOrbReport(sessionDate, { usesHistoricData: true });
+                emitHistoricalTradeMonitorEvents(report);
+                processedDates += 1;
+            } catch (error) {
+                skippedDates += 1;
+                logger.warn('Skipping historical session due to unavailable data or generation error', {
+                    sessionDate,
+                    error,
+                });
+            }
+
+            emitBacktestProgressEvent({
+                startSessionDate: env.sessionDate,
+                endSessionDate,
+                totalWeekdaySessions: weekdayDates.length,
+                processedDates,
+                skippedDates,
+                currentSessionDate: sessionDate,
+                completed: false,
+            });
+        }
+
+        logger.info('Completed historical ORB emulation window', {
+            startSessionDate: env.sessionDate,
+            endSessionDate,
+            totalWeekdaySessions: weekdayDates.length,
+            processedDates,
+            skippedDates,
+        });
+
+        emitBacktestProgressEvent({
+            startSessionDate: env.sessionDate,
+            endSessionDate,
+            totalWeekdaySessions: weekdayDates.length,
+            processedDates,
+            skippedDates,
+            currentSessionDate: null,
+            completed: true,
+        });
+
         return;
     }
 
     const marketOpenMinutes = strategyConfig.sessionOpenHour * 60 + strategyConfig.sessionOpenMinute;
     const marketCloseMinutes = minutesFromHHMM(strategyConfig.forceExitTimeHHMM);
-    const isCurrentDayMode = true;
+    const isCurrentDayMode = !continuousMode;
 
     logger.info('Starting ORB normalized weighted-risk runner (daily schedule)', {
         sessionDateMode: 'current-day',
+        continuousMode,
         pollIntervalSeconds: env.pollIntervalSeconds,
         maxTotalRisk: env.maxTotalRisk,
         quantityToRetrieve: env.quantityToRetrieve,
