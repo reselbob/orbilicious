@@ -187,9 +187,16 @@ describe('reporting tests', () => {
 
             // Verify report path includes the target date.
             expect(result.pdfReportPath).to.include(sessionDate!);
+            expect(result.htmlReportPath).to.include(sessionDate!);
 
             // Verify the PDF file was created.
             expect(fs.existsSync(result.pdfReportPath)).to.be.true;
+            expect(fs.existsSync(result.htmlReportPath)).to.be.true;
+
+            const htmlReport = fs.readFileSync(result.htmlReportPath, 'utf8');
+            expect(htmlReport).to.include('<details class="candidate-card"');
+            expect(htmlReport).to.include('Num of Shares Bought');
+            expect(htmlReport).to.include('Previous Candle Hi/Lo');
 
             logger.info('SESSION_DATE env test passed', { sessionDate, pdfReportPath: result.pdfReportPath });
         } finally {

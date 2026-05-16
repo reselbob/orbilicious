@@ -51,6 +51,7 @@ export type OrbReportResult = {
     evaluationRows: OrbEvaluationRow[];
     breakoutCandidates: AtrBreakoutCandidate[];
     emulatedTrades: SizedTrade[];
+    htmlReportPath: string;
     pdfReportPath: string;
     maxSessionBars: number;
     insufficientSymbols: string[];
@@ -83,6 +84,7 @@ export class Reports {
     }
 
     private static writeHtmlReport(filePath: string, html: string) {
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
         fs.writeFileSync(filePath, html, "utf8");
     }
 
@@ -254,11 +256,10 @@ export class Reports {
     ): Promise<OrbReportResult> {
         const symbols = await client.getMostActiveSymbols(env.quantityToRetrieve);
         const reportDir = path.resolve(process.cwd(), "reports");
+        const htmlReportDir = path.resolve(reportDir, "html", sessionDate);
         fs.mkdirSync(reportDir, { recursive: true });
-        const htmlReportPath = path.join(
-            reportDir,
-            `orb-report-${sessionDate}.html`,
-        );
+        const htmlReportPath = path.join(htmlReportDir, `orb-report-${sessionDate}.html`);
+        const pdfSourceHtmlPath = path.join(reportDir, `orb-report-${sessionDate}.html`);
         const pdfReportPath = path.join(reportDir, `orb-report-${sessionDate}.pdf`);
 
         logger.info("Generating ORB report", {
@@ -584,6 +585,194 @@ export class Reports {
             })
             .join("");
 
+        const interactiveCandidateCardsHtml = emulatedTrades
+            .map((trade) => {
+                const row = evaluationRows.find(
+                    (evaluationRow) => evaluationRow.symbol === trade.symbol,
+                );
+                const closedOutcome = closedOutcomeBySymbol.get(trade.symbol);
+                const finalOutcome = finalOutcomeBySymbol.get(trade.symbol);
+                const exitPrice =
+                    finalOutcome?.exitPrice != null
+                        ? finalOutcome.exitPrice.toFixed(2)
+                        : "n/a";
+                const exitType = closedOutcome
+                    ? "Stop/Target"
+                    : finalOutcome
+                        ? "Market Close"
+                        : "Open";
+
+                return `
+                <details class="candidate-card" id="candidate-${Reports.escapeHtml(trade.symbol)}">
+                    <summary class="candidate-summary">
+                        <span class="candidate-symbol">${Reports.escapeHtml(trade.symbol)}</span>
+                        <span>${Reports.escapeHtml(trade.side)}</span>
+                        <span>${trade.qty.toFixed(4)}</span>
+                        <span>${trade.price.toFixed(2)}</span>
+                        <span>${exitPrice}</span>
+                        <span>${finalOutcome ? finalOutcome.pnl.toFixed(2) : "Open"}</span>
+                    </summary>
+                    <div class="candidate-drilldown">
+                        <table class="candidate-drilldown-table">
+                            <tbody>
+                                <tr><th>Breakout Price</th><td>${row?.breakoutPrice != null ? row.breakoutPrice.toFixed(2) : "n/a"}</td></tr>
+                                <tr><th>Breakout Time</th><td>${Reports.escapeHtml(Reports.formatNyTime(row?.breakoutTimestamp ?? null) || "n/a")}</td></tr>
+                                <tr><th>Retest Time</th><td>${Reports.escapeHtml(Reports.formatNyTime(row?.confirmationRetestTimestamp ?? null) || "n/a")}</td></tr>
+                                <tr><th>Previous Candle Hi/Lo</th><td>${trade.preBreakoutWickPrice != null ? trade.preBreakoutWickPrice.toFixed(2) : "n/a"}</td></tr>
+                                <tr><th>Stop</th><td>${trade.stopPrice.toFixed(2)}</td></tr>
+                                <tr><th>Target</th><td>${trade.takeProfitPrice.toFixed(2)}</td></tr>
+                                <tr><th>Exit Price</th><td>${exitPrice}</td></tr>
+                                <tr><th>Exit Type</th><td>${Reports.escapeHtml(exitType)}</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </details>`;
+            })
+            .join("");
+
+        const htmlDrilldownReport = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ORB Drilldown Report ${Reports.escapeHtml(sessionDate)}</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --bg: #111827;
+            --ink: #f9fafb;
+            --muted: #cbd5e1;
+            --accent: #34d399;
+            --border: rgba(255,255,255,0.12);
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: radial-gradient(circle at top, #1f2937, var(--bg) 60%);
+            color: var(--ink);
+        }
+        .page { max-width: 1280px; margin: 0 auto; padding: 32px 20px 72px; }
+        .hero {
+            background: linear-gradient(135deg, rgba(52,211,153,0.15), rgba(96,165,250,0.12));
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            padding: 28px;
+            box-shadow: 0 24px 60px rgba(0,0,0,0.28);
+        }
+        h1 { margin: 0; font-size: 42px; letter-spacing: -0.03em; }
+        .subtitle { margin: 10px 0 0; color: var(--muted); font-size: 16px; }
+        .section {
+            margin-top: 24px;
+            background: rgba(31,41,55,0.92);
+            border: 1px solid var(--border);
+            border-radius: 22px;
+            padding: 20px;
+        }
+        h2 { margin: 0 0 10px; font-size: 22px; }
+        .summary-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .summary-table th,
+        .summary-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border);
+            text-align: left;
+            vertical-align: top;
+            font-size: 13px;
+        }
+        .summary-table th {
+            color: var(--muted);
+            font-weight: 600;
+            width: 55%;
+        }
+        .summary-table tr:last-child th,
+        .summary-table tr:last-child td { border-bottom: none; }
+        .candidate-table-head {
+            display: grid;
+            grid-template-columns: 1.6fr 0.9fr 1fr 1fr 1fr 1fr;
+            gap: 10px;
+            padding: 0 12px 12px;
+            color: var(--muted);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+        .candidate-card {
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            background: linear-gradient(180deg, rgba(36,50,68,0.98), rgba(31,41,55,0.98));
+            margin-bottom: 12px;
+            overflow: hidden;
+        }
+        .candidate-summary {
+            list-style: none;
+            display: grid;
+            grid-template-columns: 1.6fr 0.9fr 1fr 1fr 1fr 1fr;
+            gap: 10px;
+            align-items: center;
+            padding: 16px 12px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .candidate-summary::-webkit-details-marker { display: none; }
+        .candidate-symbol { color: var(--accent); font-weight: 700; letter-spacing: 0.02em; }
+        .candidate-drilldown { border-top: 1px solid var(--border); padding: 12px; background: rgba(15,23,42,0.35); }
+        .candidate-drilldown-table { width: 100%; border-collapse: collapse; }
+        .candidate-drilldown-table th,
+        .candidate-drilldown-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border);
+            text-align: left;
+            vertical-align: top;
+            font-size: 13px;
+        }
+        .candidate-drilldown-table th { width: 240px; color: var(--muted); font-weight: 600; }
+        .candidate-drilldown-table tr:last-child th,
+        .candidate-drilldown-table tr:last-child td { border-bottom: none; }
+        .note { margin-top: 14px; color: var(--muted); font-size: 13px; }
+    </style>
+</head>
+<body>
+    <main class="page">
+        <section class="hero">
+            <h1>ORB Drilldown Report</h1>
+            <p class="subtitle">${Reports.buildReportSubtitle(sessionDate, options?.usesHistoricData === true)}</p>
+        </section>
+
+        <section class="section">
+            <h2>Summary</h2>
+            <table class="summary-table">
+                <tbody>
+                    <tr><th>Total Number of Candidates Bought at Start</th><td>${totalCandidatesBoughtAtStart}</td></tr>
+                    <tr><th>Number of Candidates Sold Long</th><td>${numberOfCandidatesSoldLong}</td></tr>
+                    <tr><th>Number of Candidates Bought Short</th><td>${numberOfCandidatesBoughtShort}</td></tr>
+                    <tr><th>Total cost of Breakout Candidate purchases</th><td>${totalCostOfBreakoutCandidatePurchases.toFixed(2)}</td></tr>
+                    <tr><th>Total amount of cash at stop loss risk</th><td>${totalAmountOfCashAtStopLossRisk.toFixed(2)}</td></tr>
+                    <tr><th>Stop Loss Profit Ratio</th><td>${Reports.escapeHtml(env.stopLossProfitRatio)}</td></tr>
+                    <tr><th>Total Profit (Loss) to Date</th><td>${totalProfitLossToDate.toFixed(2)}</td></tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section class="section">
+            <h2>Breakout Candidates</h2>
+            <div class="candidate-table-head">
+                <div>Symbol</div>
+                <div>Side</div>
+                <div>Num of Shares Bought</div>
+                <div>Entry Price</div>
+                <div>Exit Price</div>
+                <div>Profit (Loss)</div>
+            </div>
+            ${interactiveCandidateCardsHtml}
+            <div class="note">Click a symbol row to drill into the breakout, retest, stop, target, and exit data for that symbol.</div>
+        </section>
+    </main>
+</body>
+</html>`;
+
         const htmlReport = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -802,9 +991,10 @@ export class Reports {
 </body>
 </html>`;
 
-        Reports.writeHtmlReport(htmlReportPath, htmlReport);
-        await Reports.renderHtmlToPdf(htmlReportPath, pdfReportPath);
-        fs.unlinkSync(htmlReportPath);
+        Reports.writeHtmlReport(htmlReportPath, htmlDrilldownReport);
+        Reports.writeHtmlReport(pdfSourceHtmlPath, htmlReport);
+        await Reports.renderHtmlToPdf(pdfSourceHtmlPath, pdfReportPath);
+        fs.unlinkSync(pdfSourceHtmlPath);
         logger.info("PDF report written", { sessionDate, pdfReportPath });
 
         if (maxSessionBars < openingRangeBars + evaluationWindowBars) {
@@ -819,6 +1009,7 @@ export class Reports {
             evaluationRows,
             breakoutCandidates,
             emulatedTrades,
+            htmlReportPath,
             pdfReportPath,
             maxSessionBars,
             insufficientSymbols,
