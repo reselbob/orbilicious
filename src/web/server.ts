@@ -52,6 +52,7 @@ type TradeEvent = {
     stopPrice?: number;
     targetPrice?: number;
     closePrice?: number;
+    pnl?: number;
     reason?: string;
 };
 

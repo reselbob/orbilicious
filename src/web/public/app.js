@@ -11,8 +11,10 @@ const refreshReportsBtn = document.getElementById('refreshReportsBtn');
 const openReportBtn = document.getElementById('openReportBtn');
 const reportFrame = document.getElementById('reportFrame');
 const tradeMonitorBody = document.getElementById('tradeMonitorBody');
+const dailySummaryBody = document.getElementById('dailySummaryBody');
 const clearActivityBtn = document.getElementById('clearActivityBtn');
 const backtestProgressSummary = document.getElementById('backtestProgressSummary');
+const paneExpandButtons = document.querySelectorAll('.pane-expand-btn');
 
 let tradeCursor = 0;
 let tradeEvents = [];
@@ -54,18 +56,82 @@ function formatQty(value) {
     return value.toFixed(4);
 }
 
-function formatTradeTime(iso) {
+function formatTradeDateTime(iso) {
     const value = typeof iso === 'string' ? new Date(iso) : null;
     if (!value || Number.isNaN(value.getTime())) {
         return '-';
     }
 
-    return value.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const datePart = value.toLocaleDateString([], { year: 'numeric', month: '2-digit', day: '2-digit' });
+    const timePart = value.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    return `${datePart} ${timePart}`;
+}
+
+function formatPnl(value) {
+    if (typeof value !== 'number' || Number.isNaN(value)) {
+        return '-';
+    }
+
+    return `${value > 0 ? '+' : ''}${value.toFixed(2)}`;
+}
+
+function eventSessionDate(event) {
+    if (typeof event.sessionDate === 'string' && event.sessionDate) {
+        return event.sessionDate;
+    }
+
+    if (typeof event.timestamp === 'string' && event.timestamp.length >= 10) {
+        return event.timestamp.slice(0, 10);
+    }
+
+    return null;
+}
+
+function renderDailySummary() {
+    const dailyTotals = new Map();
+
+    for (const event of tradeEvents) {
+        if (event.eventType !== 'close') {
+            continue;
+        }
+
+        if (typeof event.pnl !== 'number' || Number.isNaN(event.pnl)) {
+            continue;
+        }
+
+        const sessionDate = eventSessionDate(event);
+        if (!sessionDate) {
+            continue;
+        }
+
+        const previous = dailyTotals.get(sessionDate) || 0;
+        dailyTotals.set(sessionDate, previous + event.pnl);
+    }
+
+    if (!dailyTotals.size) {
+        dailySummaryBody.innerHTML = '<tr><td colspan="2" class="text-muted">No closed trades yet.</td></tr>';
+        return;
+    }
+
+    const rows = Array.from(dailyTotals.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([date, pnl]) => {
+            const pnlClass = pnl > 0 ? 'result-profit' : pnl < 0 ? 'result-loss' : 'result-open';
+            return `
+                <tr>
+                    <td>${date}</td>
+                    <td class="text-end trade-price ${pnlClass}">${formatPnl(pnl)}</td>
+                </tr>`;
+        })
+        .join('');
+
+    dailySummaryBody.innerHTML = rows;
 }
 
 function renderTrades() {
     if (!tradeEvents.length) {
         tradeMonitorBody.innerHTML = '<tr><td colspan="10" class="text-muted">No entries or closes have been recorded yet.</td></tr>';
+        renderDailySummary();
         return;
     }
 
@@ -86,31 +152,35 @@ function renderTrades() {
 
             let resultState = 'open';
             if (event.eventType === 'close') {
-                const hasPrices = typeof event.entryPrice === 'number' && typeof event.closePrice === 'number';
-                if (hasPrices) {
-                    if (event.position === 'long') {
-                        resultState = event.closePrice > event.entryPrice ? 'profit' : event.closePrice < event.entryPrice ? 'loss' : 'open';
-                    } else {
-                        resultState = event.closePrice < event.entryPrice ? 'profit' : event.closePrice > event.entryPrice ? 'loss' : 'open';
-                    }
+                if (typeof event.pnl === 'number' && !Number.isNaN(event.pnl)) {
+                    resultState = event.pnl > 0 ? 'profit' : event.pnl < 0 ? 'loss' : 'open';
                 } else {
-                    const reason = typeof event.reason === 'string' ? event.reason.toLowerCase() : '';
-                    if (reason.includes('profit')) resultState = 'profit';
-                    else if (reason.includes('loss')) resultState = 'loss';
-                    else resultState = 'open';
+                    const hasPrices = typeof event.entryPrice === 'number' && typeof event.closePrice === 'number';
+                    if (hasPrices) {
+                        if (event.position === 'long') {
+                            resultState = event.closePrice > event.entryPrice ? 'profit' : event.closePrice < event.entryPrice ? 'loss' : 'open';
+                        } else {
+                            resultState = event.closePrice < event.entryPrice ? 'profit' : event.closePrice > event.entryPrice ? 'loss' : 'open';
+                        }
+                    } else {
+                        const reason = typeof event.reason === 'string' ? event.reason.toLowerCase() : '';
+                        if (reason.includes('profit')) resultState = 'profit';
+                        else if (reason.includes('loss')) resultState = 'loss';
+                        else resultState = 'open';
+                    }
                 }
             }
 
             const resultClass = resultState === 'profit'
-                ? 'result-dot result-dot-profit'
+                ? 'result-profit'
                 : resultState === 'loss'
-                    ? 'result-dot result-dot-loss'
-                    : 'result-dot result-dot-open';
-            const resultLabel = resultState === 'profit' ? 'Profit' : resultState === 'loss' ? 'Loss' : 'Open';
+                    ? 'result-loss'
+                    : 'result-open';
+            const pnl = event.eventType === 'close' ? formatPnl(event.pnl) : 'Open';
 
             return `
                 <tr>
-                    <td>${formatTradeTime(event.timestamp)}</td>
+                    <td>${formatTradeDateTime(event.timestamp)}</td>
                     <td>${statusBadge}</td>
                     <td><span class="trade-symbol">${event.symbol || '-'}</span></td>
                     <td>${sideBadge}</td>
@@ -119,12 +189,13 @@ function renderTrades() {
                     <td class="trade-price">${stop}</td>
                     <td class="trade-price">${target}</td>
                     <td class="trade-price">${close}</td>
-                    <td><span class="${resultClass}" title="${resultLabel}" aria-label="${resultLabel}"></span></td>
+                    <td class="trade-price ${resultClass}">${pnl}</td>
                 </tr>`;
         })
         .join('');
 
     tradeMonitorBody.innerHTML = rows;
+    renderDailySummary();
 }
 
 function clearActivity() {
@@ -307,6 +378,22 @@ function openSelectedReport() {
     reportFrame.src = `/reports/${encodeURI(selected)}`;
 }
 
+function togglePaneExpansion(button) {
+    const targetId = button.getAttribute('data-target');
+    if (!targetId) {
+        return;
+    }
+
+    const pane = document.getElementById(targetId);
+    if (!pane) {
+        return;
+    }
+
+    const expanded = pane.classList.toggle('expanded');
+    button.textContent = expanded ? 'Collapse' : 'Expand';
+    button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+}
+
 startBtn.addEventListener('click', startOrbilicious);
 stopBtn.addEventListener('click', stopOrbilicious);
 refreshStatusBtn.addEventListener('click', refreshStatus);
@@ -314,6 +401,10 @@ refreshReportsBtn.addEventListener('click', refreshReports);
 openReportBtn.addEventListener('click', openSelectedReport);
 clearActivityBtn.addEventListener('click', clearActivity);
 sessionMode.addEventListener('change', syncEmulationControls);
+
+for (const button of paneExpandButtons) {
+    button.addEventListener('click', () => togglePaneExpansion(button));
+}
 
 const today = todayIsoDate();
 emulationDateInput.value = today;

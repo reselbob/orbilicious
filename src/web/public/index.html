@@ -30,6 +30,31 @@
             background: #ffffff;
         }
 
+        .trade-monitor-wrap tbody {
+            font-size: 0.8rem;
+        }
+
+        .expandable-pane {
+            max-height: 340px;
+            overflow: auto;
+            transition: max-height 0.2s ease;
+        }
+
+        .expandable-pane.summary-pane {
+            max-height: 220px;
+        }
+
+        .expandable-pane.expanded {
+            max-height: 70vh;
+        }
+
+        .card-header-actions {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+        }
+
         .trade-monitor-head {
             position: sticky;
             top: 0;
@@ -46,24 +71,22 @@
             font-variant-numeric: tabular-nums;
         }
 
-        .result-dot {
-            display: inline-block;
-            width: 0.7rem;
-            height: 0.7rem;
-            border-radius: 50%;
-            vertical-align: middle;
+        .trade-monitor-wrap td.result-profit,
+        #dailySummaryPane td.result-profit {
+            color: #198754 !important;
+            font-weight: 600;
         }
 
-        .result-dot-profit {
-            background: #198754;
+        .trade-monitor-wrap td.result-loss,
+        #dailySummaryPane td.result-loss {
+            color: #dc3545 !important;
+            font-weight: 600;
         }
 
-        .result-dot-loss {
-            background: #dc3545;
-        }
-
-        .result-dot-open {
-            background: #ffc107;
+        .trade-monitor-wrap td.result-open,
+        #dailySummaryPane td.result-open {
+            color: #b58100 !important;
+            font-weight: 600;
         }
     </style>
 </head>
@@ -71,12 +94,12 @@
 <body>
     <main class="container py-4">
         <div class="row g-4">
-            <div class="col-12 col-lg-5">
+            <div class="col-12">
                 <h1 class="h3 mb-1">Orbilicious Web Client</h1>
                 <p class="text-muted mb-0">Start the app and view generated reports directly in the browser.</p>
             </div>
 
-            <div class="col-12 col-lg-7">
+            <div class="col-12">
                 <div class="bg-white border rounded p-3 h-100">
                     <h2 class="h6 mb-2">What Is the Opening Range Breakout (ORB)?</h2>
                     <p class="text-muted mb-2">
@@ -139,19 +162,21 @@
 
             <div class="col-12 col-lg-7">
                 <div class="card shadow-sm">
-                    <div class="card-header">Trade Monitor</div>
+                    <div class="card-header card-header-actions">
+                        <span>Trade Monitor</span>
+                        <button class="btn btn-sm btn-outline-secondary pane-expand-btn" type="button"
+                            data-target="tradeMonitorPane" aria-expanded="false">Expand</button>
+                    </div>
                     <div class="card-body">
-                        <p class="small text-muted mb-2">Displays executed ORB entries and closes only (no system/stdout
-                            lines).</p>
                         <div class="d-flex justify-content-end mb-2">
                             <button id="clearActivityBtn" class="btn btn-sm btn-outline-secondary">Clear Trades</button>
                         </div>
 
-                        <div class="trade-monitor-wrap table-responsive" style="max-height: 340px; overflow: auto;">
+                        <div id="tradeMonitorPane" class="trade-monitor-wrap table-responsive expandable-pane">
                             <table class="table table-sm table-striped align-middle mb-0">
                                 <thead class="trade-monitor-head">
                                     <tr>
-                                        <th scope="col">Time</th>
+                                        <th scope="col">Date/Time</th>
                                         <th scope="col">Status</th>
                                         <th scope="col">Symbol</th>
                                         <th scope="col">Side</th>
@@ -160,12 +185,37 @@
                                         <th scope="col">Stop</th>
                                         <th scope="col">Target</th>
                                         <th scope="col">Close</th>
-                                        <th scope="col">Result</th>
+                                        <th scope="col">P/L</th>
                                     </tr>
                                 </thead>
                                 <tbody id="tradeMonitorBody">
                                     <tr>
                                         <td colspan="10" class="text-muted">No trade events yet.</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card shadow-sm mt-3">
+                    <div class="card-header card-header-actions">
+                        <span>Daily Summary</span>
+                        <button class="btn btn-sm btn-outline-secondary pane-expand-btn" type="button"
+                            data-target="dailySummaryPane" aria-expanded="false">Expand</button>
+                    </div>
+                    <div class="card-body">
+                        <div id="dailySummaryPane" class="table-responsive expandable-pane summary-pane">
+                            <table class="table table-sm table-striped align-middle mb-0">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Date</th>
+                                        <th scope="col" class="text-end">Total P/L</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="dailySummaryBody">
+                                    <tr>
+                                        <td colspan="2" class="text-muted">No closed trades yet.</td>
                                     </tr>
                                 </tbody>
                             </table>

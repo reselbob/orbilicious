@@ -29,6 +29,7 @@ type TradeMonitorEvent = {
     stopPrice?: number;
     targetPrice?: number;
     closePrice?: number;
+    pnl?: number;
     reason?: string;
 };
 
@@ -98,6 +99,7 @@ function emitHistoricalTradeMonitorEvents(report: OrbReportResult) {
             qty: trade.qty,
             entryPrice: trade.price,
             closePrice: outcome.exitPrice,
+            pnl: outcome.pnl,
             reason: `historical emulation ${outcome.status} close`,
         });
     }
@@ -376,6 +378,9 @@ async function evaluateSymbol(
                     qty: position.qty,
                     entryPrice: position.entryPrice,
                     closePrice: latestBar.close,
+                    pnl: position.side === 'long'
+                        ? (latestBar.close - position.entryPrice) * position.qty
+                        : (position.entryPrice - latestBar.close) * position.qty,
                     reason: 'profit-capture close',
                 });
             } else {
