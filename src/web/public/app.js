@@ -15,6 +15,10 @@ const dailySummaryBody = document.getElementById('dailySummaryBody');
 const clearActivityBtn = document.getElementById('clearActivityBtn');
 const backtestProgressSummary = document.getElementById('backtestProgressSummary');
 const paneExpandButtons = document.querySelectorAll('.pane-expand-btn');
+const moneyInAccountSelect = document.getElementById('moneyInAccount');
+const moneyInAccountCustom = document.getElementById('moneyInAccountCustom');
+const maxRiskPerSessionSelect = document.getElementById('maxRiskPerSession');
+const maxRiskPerSessionCustom = document.getElementById('maxRiskPerSessionCustom');
 
 let tradeCursor = 0;
 let tradeEvents = [];
@@ -297,6 +301,8 @@ async function startOrbilicious() {
                 continuous: continuousMode.checked,
                 sessionMode: sessionMode.value,
                 emulationSessionDate: isEmulationMode() ? emulationDateInput.value : undefined,
+                moneyInAccount: getMoneyInAccount(),
+                maxRiskPerSession: getMaxRiskPerSession(),
             }),
         });
 
@@ -394,6 +400,38 @@ function togglePaneExpansion(button) {
     button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
 }
 
+function populateDropdownRange(selectElement, start, end, increment, formatter) {
+    selectElement.innerHTML = '<option value="">Select or enter custom amount...</option>';
+    for (let value = start; value <= end; value += increment) {
+        const option = document.createElement('option');
+        option.value = value.toString();
+        option.textContent = formatter(value);
+        selectElement.appendChild(option);
+    }
+}
+
+function initializeAccountAndRiskDropdowns() {
+    populateDropdownRange(moneyInAccountSelect, 500, 100000, 500, (v) => `$${v.toLocaleString()}`);
+    populateDropdownRange(maxRiskPerSessionSelect, 250, 5000, 250, (v) => `$${v.toLocaleString()}`);
+
+    moneyInAccountSelect.value = '25000';
+    maxRiskPerSessionSelect.value = '1000';
+}
+
+function getMoneyInAccount() {
+    if (moneyInAccountCustom.value) {
+        return parseFloat(moneyInAccountCustom.value) || undefined;
+    }
+    return moneyInAccountSelect.value ? parseFloat(moneyInAccountSelect.value) : undefined;
+}
+
+function getMaxRiskPerSession() {
+    if (maxRiskPerSessionCustom.value) {
+        return parseFloat(maxRiskPerSessionCustom.value) || undefined;
+    }
+    return maxRiskPerSessionSelect.value ? parseFloat(maxRiskPerSessionSelect.value) : undefined;
+}
+
 startBtn.addEventListener('click', startOrbilicious);
 stopBtn.addEventListener('click', stopOrbilicious);
 refreshStatusBtn.addEventListener('click', refreshStatus);
@@ -410,6 +448,7 @@ const today = todayIsoDate();
 emulationDateInput.value = today;
 emulationDateInput.max = today;
 syncEmulationControls();
+initializeAccountAndRiskDropdowns();
 
 refreshStatus();
 refreshReports();

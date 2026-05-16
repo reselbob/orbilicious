@@ -66,6 +66,53 @@ npm run build
 npm start
 ```
 
+## Web UI Usage
+
+The web client provides a complete control panel to run and monitor the ORB strategy. Start it using:
+
+```bash
+./start.sh
+```
+
+This launches both the trading app and web server on port 8787 (or use `WEB_PORT=XXXX ./start.sh` to override), and opens the browser automatically.
+
+### Runtime Controls
+
+- **Session mode**: Choose `EMULATION` (Alpaca data, no orders), `PAPER` (paper trading), or `LIVE` (live trading).
+- **Emulation session date**: For `EMULATION` mode, select a past trading day to run a historical backtest from that date forward.
+- **Continuous mode**: Run the strategy continuously (only available in `PAPER` and `LIVE` modes).
+- **Money in Account**: Total account capital available (default $25,000). Overrides `HARD_BASKET_CAP` env var.
+- **Max Amount to Risk Per Trading Day**: Maximum total stop-loss risk per day (default $1,000). Overrides `MAX_TOTAL_RISK` env var.
+- **Current status**: Real-time execution state (running, stopped, error details).
+- **Backtest progress**: For historical runs, shows current date, total dates, and completion.
+
+### Trade Monitor
+
+Live view of all executed entries and closes with:
+
+- **Date/Time**: When the trade entry or close occurred.
+- **Status**: `OPEN` for entries, `CLOSED` for exits.
+- **Symbol, Side, Qty**: Trade details.
+- **Entry, Stop, Target, Close**: Price levels.
+- **P/L**: Profit/loss for closed trades, or "Open" for active positions. Green text for profits, red for losses.
+
+Expand the pane to see more rows at once.
+
+### Daily Summary
+
+Aggregated profit/loss by trading day. Shows:
+
+- **Date**: Calendar day.
+- **Total P/L**: Sum of all closed-trade P/L for that day. Green for net profit, red for net loss.
+
+Expand the pane to scroll through historical days.
+
+### Reports
+
+- **Select a report**: Choose from generated HTML or PDF reports.
+- **Refresh List**: Fetch latest reports from the `reports/` directory.
+- **Open Report**: Display the selected report in an embedded viewer.
+
 ## Environment variables
 
 The app reads configuration from `.env` (via `dotenv`) and supports the following variables.

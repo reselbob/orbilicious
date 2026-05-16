@@ -12,6 +12,8 @@ type AppState = {
     continuous: boolean;
     sessionMode: SessionMode;
     emulationSessionDate: string | null;
+    moneyInAccount: number | null;
+    maxRiskPerSession: number | null;
     backtestProgress: {
         startSessionDate: string;
         endSessionDate: string;
@@ -30,6 +32,8 @@ type StartRequest = {
     continuous?: boolean;
     sessionMode?: SessionMode;
     emulationSessionDate?: string;
+    moneyInAccount?: number;
+    maxRiskPerSession?: number;
 };
 
 type ActivityLine = {
@@ -73,6 +77,8 @@ const appState: AppState = {
     continuous: false,
     sessionMode: 'EMULATION',
     emulationSessionDate: null,
+    moneyInAccount: null,
+    maxRiskPerSession: null,
     backtestProgress: null,
     pid: null,
     lastOutcome: 'never-started',
@@ -257,8 +263,10 @@ function startOrbiliciousProcess(params: {
     continuous: boolean;
     sessionMode: SessionMode;
     emulationSessionDate: string | null;
+    hardBasketCap?: number;
+    maxTotalRisk?: number;
 }) {
-    const { continuous, sessionMode, emulationSessionDate } = params;
+    const { continuous, sessionMode, emulationSessionDate, hardBasketCap, maxTotalRisk } = params;
     const entry = resolveAppEntryPoint();
     const args = [...entry.args];
     if (continuous) {
@@ -274,6 +282,8 @@ function startOrbiliciousProcess(params: {
     appState.continuous = continuous;
     appState.sessionMode = sessionMode;
     appState.emulationSessionDate = emulationSessionDate;
+    appState.moneyInAccount = hardBasketCap ?? null;
+    appState.maxRiskPerSession = maxTotalRisk ?? null;
     appState.lastOutcome = 'running';
     appState.lastError = null;
 
@@ -283,6 +293,8 @@ function startOrbiliciousProcess(params: {
             ...process.env,
             SESSION_MODE: sessionMode,
             SESSION_DATE: emulationSessionDate ?? '',
+            HARD_BASKET_CAP: hardBasketCap ? hardBasketCap.toString() : '',
+            MAX_TOTAL_RISK: maxTotalRisk ? maxTotalRisk.toString() : '',
         },
         stdio: 'pipe',
     });
@@ -292,7 +304,7 @@ function startOrbiliciousProcess(params: {
 
     addActivityLine(
         'system',
-        `Starting Orbilicious in ${sessionMode} mode${continuous ? ' (continuous)' : ''}${emulationSessionDate ? ` for ${emulationSessionDate}` : ''}`
+        `Starting Orbilicious in ${sessionMode} mode${continuous ? ' (continuous)' : ''}${emulationSessionDate ? ` for ${emulationSessionDate}` : ''}${hardBasketCap ? ` | Basket Cap: $${hardBasketCap.toLocaleString()}` : ''}${maxTotalRisk ? ` | Max Risk: $${maxTotalRisk.toLocaleString()}` : ''}`
     );
 
     wireProcessOutput('stdout', child.stdout);
@@ -483,6 +495,12 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
                 ? payload.emulationSessionDate.trim()
                 : null)
             : null;
+        const hardBasketCap = typeof payload.moneyInAccount === 'number' && payload.moneyInAccount > 0
+            ? payload.moneyInAccount
+            : undefined;
+        const maxTotalRisk = typeof payload.maxRiskPerSession === 'number' && payload.maxRiskPerSession > 0
+            ? payload.maxRiskPerSession
+            : undefined;
 
         if (sessionMode === 'EMULATION' && emulationSessionDate && !isValidSessionDate(emulationSessionDate)) {
             sendJson(res, 400, {
@@ -492,7 +510,7 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
             return;
         }
 
-        startOrbiliciousProcess({ continuous, sessionMode, emulationSessionDate });
+        startOrbiliciousProcess({ continuous, sessionMode, emulationSessionDate, hardBasketCap, maxTotalRisk });
 
         sendJson(res, 202, {
             ok: true,
