@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { StrategyConfig } from './types';
 import { logger } from './logger';
 
-type RunMode = 'EMULATION' | 'PAPER' | 'LIVE';
+type SessionMode = 'EMULATION' | 'PAPER' | 'LIVE';
 
 function required(name: string): string {
     const value = process.env[name];
@@ -62,7 +62,7 @@ function ratio(name: string, fallback: string): { raw: string; risk: number; rew
     };
 }
 
-function runMode(name: string, fallback: RunMode): RunMode {
+function sessionMode(name: string, fallback: SessionMode): SessionMode {
     const value = process.env[name];
     if (value == null || value.trim() === '') return fallback;
 
@@ -73,30 +73,29 @@ function runMode(name: string, fallback: RunMode): RunMode {
         return normalized;
     }
 
-    logger.error('Invalid run mode environment variable', {
+    logger.error('Invalid session mode environment variable', {
         name,
         value,
         expected: 'EMULATION|PAPER|LIVE',
     });
-    throw new Error(`Invalid run mode for ${name}: ${value}`);
+    throw new Error(`Invalid session mode for ${name}: ${value}`);
 }
 
 const stopLossProfitRatio = ratio('STOP_LOSS_PROFIT_RATIO', '1:4');
-const configuredRunMode = runMode('RUN_MODE', 'EMULATION');
-const defaultTradingBaseUrlByMode = configuredRunMode === 'LIVE'
+const configuredSessionMode = sessionMode('SESSION_MODE', 'EMULATION');
+const defaultTradingBaseUrlByMode = configuredSessionMode === 'LIVE'
     ? 'https://api.alpaca.markets'
     : 'https://paper-api.alpaca.markets';
 
 export const env = {
     apiKey: required('APCA_API_KEY_ID'),
     apiSecret: required('APCA_API_SECRET_KEY'),
-    runMode: configuredRunMode,
-    paper: configuredRunMode !== 'LIVE',
+    sessionMode: configuredSessionMode,
+    paper: configuredSessionMode !== 'LIVE',
     tradingBaseUrl: process.env.ALPACA_TRADING_BASE_URL || defaultTradingBaseUrlByMode,
     dataBaseUrl: process.env.ALPACA_DATA_BASE_URL || 'https://data.alpaca.markets',
     dataFeed: process.env.ALPACA_DATA_FEED || 'iex',
     sessionDate: dateStr('SESSION_DATE', ''),
-    runDate: dateStr('RUN_DATE', ''),
     pollIntervalSeconds: num('POLL_INTERVAL_SECONDS', 20),
     maxTotalRisk: num('MAX_TOTAL_RISK', 1000),
     hardBasketCap: num('HARD_BASKET_CAP', 25000),
@@ -109,7 +108,7 @@ export const env = {
     stopLossRiskPart: stopLossProfitRatio.risk,
     takeProfitPart: stopLossProfitRatio.reward,
     takeProfitMultiple: stopLossProfitRatio.rewardMultiple,
-    dryRun: configuredRunMode === 'EMULATION',
+    dryRun: configuredSessionMode === 'EMULATION',
 };
 
 export const strategyConfig: StrategyConfig = {
@@ -127,12 +126,12 @@ export const strategyConfig: StrategyConfig = {
 };
 
 logger.info('Configuration loaded', {
-    runMode: env.runMode,
+    sessionMode: env.sessionMode,
     paper: env.paper,
     tradingBaseUrl: env.tradingBaseUrl,
     dataBaseUrl: env.dataBaseUrl,
     dataFeed: env.dataFeed,
-    runDate: env.runDate,
+    sessionDate: env.sessionDate,
     pollIntervalSeconds: env.pollIntervalSeconds,
     maxTotalRisk: env.maxTotalRisk,
     hardBasketCap: env.hardBasketCap,

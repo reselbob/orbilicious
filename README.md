@@ -46,7 +46,7 @@ LOG_LEVEL=debug
 ## Setup
 
 1. Copy `.env.example` to `.env`
-2. Fill in your Alpaca paper credentials
+2. Fill in your Alpaca API credentials
 3. Install dependencies:
 
 ```bash
@@ -79,7 +79,6 @@ The app reads configuration from `.env` (via `dotenv`) and supports the followin
 | `ALPACA_TRADING_BASE_URL` | No | Mode-dependent (`https://paper-api.alpaca.markets` for `EMULATION`/`PAPER`, `https://api.alpaca.markets` for `LIVE`) | Optional override for trading/account endpoint base URL. |
 | `APCA_API_KEY_ID` | Yes | None | Alpaca API key ID. Required for all Alpaca data/account/order API calls. |
 | `APCA_API_SECRET_KEY` | Yes | None | Alpaca API secret key paired with `APCA_API_KEY_ID`. |
-| `APCA_PAPER` | No | `true` | Legacy setting kept in `.env`; execution mode is controlled by `RUN_MODE`. |
 | `ATR_STOP_MULTIPLE` | No | `1` | ATR multiplier used as one candidate stop-distance component in sizing fallback. |
 | `CANDLE_MINUTES` | No | `1` | Bar interval used by strategy logic. |
 | `FORCE_EXIT_TIME` | No | `15:55` | NY cutoff used for end-of-day position management and cycle close/report timing. |
@@ -95,9 +94,8 @@ The app reads configuration from `.env` (via `dotenv`) and supports the followin
 | `POLL_INTERVAL_SECONDS` | No | `20` | Wait interval between live loop cycles. |
 | `QTY` | No | `1` | Baseline strategy quantity field in config. Not used by weighted basket sizing path. |
 | `QUANTITY_TO_RETRIEVE` | No | `40` | Number of most-active symbols to request from Alpaca for candidate generation. |
-| `RUN_DATE` | No | Empty | Historical one-shot report mode date (`YYYY-MM-DD`). If set, app generates report for that date and exits. |
-| `RUN_MODE` | No | `EMULATION` | Execution mode: `EMULATION` (Alpaca data, no order submission), `PAPER` (Alpaca paper trading), `LIVE` (Alpaca live trading). |
-| `SESSION_DATE` | No | Empty | Optional fixed trading session date (`YYYY-MM-DD`) for cycle logic instead of current NY date. |
+| `SESSION_DATE` | No | Empty | Session date (`YYYY-MM-DD`). If set, app runs a one-shot historical report for that date and exits; if empty, app runs current-day live scheduling and generates end-of-day report(s). |
+| `SESSION_MODE` | No | `EMULATION` | Execution mode: `EMULATION` (Alpaca data, no order submission), `PAPER` (Alpaca paper trading), `LIVE` (Alpaca live trading). |
 | `STOP_LOSS_PROFIT_RATIO` | No | `1:4` | Risk/reward ratio in `risk:reward` format. Example `1:2` gives a 2R target. |
 | `SYMBOL` | No | `SPY` | Strategy config symbol baseline (kept for config completeness; main scanner still uses most-active universe). |
 
@@ -109,8 +107,8 @@ Notes:
 
 ## Report modes and scheduling
 
-- **Live end-of-day mode (default):** If `RUN_DATE` is not set, app runs continuously, starts trading logic at market open, stops trading logic at market close, generates one end-of-day ORB PDF report per trading day, then waits for the next market day.
-- **Historical one-shot mode:** If `RUN_DATE=YYYY-MM-DD` is set, app runs a single historical ORB report for that session date and exits.
+- **Live end-of-day mode (default):** If `SESSION_DATE` is not set, app runs current-day scheduling, starts trading logic at market open, and generates one end-of-day ORB PDF report after market close.
+- **Historical one-shot mode:** If `SESSION_DATE=YYYY-MM-DD` is set, app runs a single historical ORB report for that session date and exits.
 
 Usage:
 
@@ -119,7 +117,7 @@ Usage:
 npm run dev
 
 # Historical report for a specific date:
-RUN_DATE=2026-05-14 npm run dev
+SESSION_DATE=2026-05-14 npm run dev
 ```
 
 ## Tests
@@ -149,7 +147,7 @@ npm test
 - Bracket orders are submitted using Alpaca's `/v2/orders` endpoint.
 - Buying power is read from Alpaca's `/v2/account` endpoint before basket normalization.
 - Realized losses can still exceed planned stop-loss exposure because of slippage, fast markets, gaps, and execution behavior.
-- This should be tested in Alpaca paper trading before any live use.
+- This should be tested in Alpaca PAPER mode before any live use.
 
 ## Recommended next upgrades
 

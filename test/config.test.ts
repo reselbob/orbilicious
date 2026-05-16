@@ -29,41 +29,41 @@ describe('config integration', () => {
         expect(mod.strategyConfig.allowShort).to.equal(false);
     });
 
-    it('defaults RUN_MODE to EMULATION when not set', () => {
+    it('defaults SESSION_MODE to EMULATION when not set', () => {
         withBaseConfigEnv();
-        delete process.env.RUN_MODE;
+        delete process.env.SESSION_MODE;
         delete process.env.ALPACA_TRADING_BASE_URL;
 
         clearConfigModuleCache();
         const mod = require('../src/config');
 
-        expect(mod.env.runMode).to.equal('EMULATION');
+        expect(mod.env.sessionMode).to.equal('EMULATION');
         expect(mod.env.dryRun).to.equal(true);
         expect(mod.env.tradingBaseUrl).to.equal('https://paper-api.alpaca.markets');
     });
 
     it('uses PAPER mode to execute against Alpaca paper endpoint', () => {
         withBaseConfigEnv();
-        process.env.RUN_MODE = 'PAPER';
+        process.env.SESSION_MODE = 'PAPER';
         delete process.env.ALPACA_TRADING_BASE_URL;
 
         clearConfigModuleCache();
         const mod = require('../src/config');
 
-        expect(mod.env.runMode).to.equal('PAPER');
+        expect(mod.env.sessionMode).to.equal('PAPER');
         expect(mod.env.dryRun).to.equal(false);
         expect(mod.env.tradingBaseUrl).to.equal('https://paper-api.alpaca.markets');
     });
 
     it('uses LIVE mode to execute against Alpaca live endpoint', () => {
         withBaseConfigEnv();
-        process.env.RUN_MODE = 'LIVE';
+        process.env.SESSION_MODE = 'LIVE';
         delete process.env.ALPACA_TRADING_BASE_URL;
 
         clearConfigModuleCache();
         const mod = require('../src/config');
 
-        expect(mod.env.runMode).to.equal('LIVE');
+        expect(mod.env.sessionMode).to.equal('LIVE');
         expect(mod.env.dryRun).to.equal(false);
         expect(mod.env.tradingBaseUrl).to.equal('https://api.alpaca.markets');
     });

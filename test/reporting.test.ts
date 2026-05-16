@@ -100,12 +100,12 @@ describe('reporting tests', () => {
     it('runs for current day', async function () {
         this.timeout(170_000);
 
-        const previousRunDate = process.env.RUN_DATE;
-        delete process.env.RUN_DATE;
+        const previousSessionDate = process.env.SESSION_DATE;
+        delete process.env.SESSION_DATE;
 
         const sessionDate = toNyParts(new Date(), strategyConfig.sessionTimezone).date;
         const client = new AlpacaClient();
-        logger.info('Testing current-day ORB run with RUN_DATE unset', { sessionDate });
+        logger.info('Testing current-day ORB run with SESSION_DATE unset', { sessionDate });
 
         try {
             let result;
@@ -135,38 +135,38 @@ describe('reporting tests', () => {
                 pdfReportPath: result.pdfReportPath,
             });
         } finally {
-            if (previousRunDate != null) {
-                process.env.RUN_DATE = previousRunDate;
+            if (previousSessionDate != null) {
+                process.env.SESSION_DATE = previousSessionDate;
             }
         }
     });
 
-    it('respects RUN_DATE set in environment variable', async function () {
+    it('respects SESSION_DATE set in environment variable', async function () {
         this.timeout(150_000);
 
-        const existingRunDate = process.env.RUN_DATE;
-        let injectedRunDate: string | null = null;
+        const existingSessionDate = process.env.SESSION_DATE;
+        let injectedSessionDate: string | null = null;
 
-        if (!existingRunDate || existingRunDate.trim() === '') {
-            // Inject a known-good reporting date only when RUN_DATE is not already set.
-            injectedRunDate = '2026-05-14';
-            process.env.RUN_DATE = injectedRunDate;
+        if (!existingSessionDate || existingSessionDate.trim() === '') {
+            // Inject a known-good reporting date only when SESSION_DATE is not already set.
+            injectedSessionDate = '2026-05-14';
+            process.env.SESSION_DATE = injectedSessionDate;
         }
 
-        const runDate = process.env.RUN_DATE;
-        expect(runDate).to.be.a('string').and.not.equal('');
+        const sessionDate = process.env.SESSION_DATE;
+        expect(sessionDate).to.be.a('string').and.not.equal('');
 
-        logger.info('Testing RUN_DATE from process env', {
-            runDate,
-            wasInjected: injectedRunDate != null,
+        logger.info('Testing SESSION_DATE from process env', {
+            sessionDate,
+            wasInjected: injectedSessionDate != null,
         });
 
         try {
-            const result = await new AlpacaClient().generateOrbReport(runDate!, {
+            const result = await new AlpacaClient().generateOrbReport(sessionDate!, {
                 usesHistoricData: true,
             });
 
-            expect(result.sessionDate).to.equal(runDate!);
+            expect(result.sessionDate).to.equal(sessionDate!);
 
             result.emulatedTrades.forEach((trade) => {
                 if (trade.preBreakoutWickPrice != null) {
@@ -186,15 +186,15 @@ describe('reporting tests', () => {
             });
 
             // Verify report path includes the target date.
-            expect(result.pdfReportPath).to.include(runDate!);
+            expect(result.pdfReportPath).to.include(sessionDate!);
 
             // Verify the PDF file was created.
             expect(fs.existsSync(result.pdfReportPath)).to.be.true;
 
-            logger.info('RUN_DATE env test passed', { runDate, pdfReportPath: result.pdfReportPath });
+            logger.info('SESSION_DATE env test passed', { sessionDate, pdfReportPath: result.pdfReportPath });
         } finally {
-            if (injectedRunDate != null) {
-                delete process.env.RUN_DATE;
+            if (injectedSessionDate != null) {
+                delete process.env.SESSION_DATE;
             }
         }
     });

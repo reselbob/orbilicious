@@ -410,24 +410,24 @@ export async function runCycle(client: AlpacaClient, sessionDate: string) {
 export async function startApp() {
     const client = new AlpacaClient();
 
-    if (env.runDate) {
+    if (env.sessionDate) {
         logger.info('Starting historical ORB report runner', {
-            runDate: env.runDate,
+            sessionDate: env.sessionDate,
             quantityToRetrieve: env.quantityToRetrieve,
             maxTotalRisk: env.maxTotalRisk,
         });
 
-        await client.generateOrbReport(env.runDate, { usesHistoricData: true });
-        logger.info('Completed historical ORB report run', { runDate: env.runDate });
+        await client.generateOrbReport(env.sessionDate, { usesHistoricData: true });
+        logger.info('Completed historical ORB report run', { sessionDate: env.sessionDate });
         return;
     }
 
     const marketOpenMinutes = strategyConfig.sessionOpenHour * 60 + strategyConfig.sessionOpenMinute;
     const marketCloseMinutes = minutesFromHHMM(strategyConfig.forceExitTimeHHMM);
-    const isCurrentDayMode = !env.sessionDate;
+    const isCurrentDayMode = true;
 
     logger.info('Starting ORB normalized weighted-risk runner (daily schedule)', {
-        sessionDateMode: isCurrentDayMode ? 'current-day' : 'fixed-session-date',
+        sessionDateMode: 'current-day',
         pollIntervalSeconds: env.pollIntervalSeconds,
         maxTotalRisk: env.maxTotalRisk,
         quantityToRetrieve: env.quantityToRetrieve,
@@ -440,7 +440,7 @@ export async function startApp() {
 
     for (; ;) {
         const nyNow = toNyParts(new Date(), strategyConfig.sessionTimezone);
-        const sessionDate = env.sessionDate || nyNow.date;
+        const sessionDate = nyNow.date;
         const currentMinutes = nyNow.hour * 60 + nyNow.minute;
         const dayOfWeek = new Date().toLocaleString('en-US', {
             timeZone: strategyConfig.sessionTimezone,
