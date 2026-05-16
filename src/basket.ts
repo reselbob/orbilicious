@@ -1,3 +1,4 @@
+import { env } from './config';
 import { Bar } from './types';
 
 export type BreakoutCandidate = {
@@ -10,6 +11,7 @@ export type BreakoutCandidate = {
     totalVolume: number;
     openingRangeHigh: number;
     openingRangeLow: number;
+    atr1m?: number;
 };
 
 export type SizedTrade = BreakoutCandidate & {
@@ -57,18 +59,40 @@ export function computeCandidateScore(params: {
     };
 }
 
-export function rankAndSelectCandidates(candidates: BreakoutCandidate[]) {
+export function rankAndSelectCandidates(
+    candidates: BreakoutCandidate[],
+    maxPositionsPerSide = 10
+) {
     const longs = candidates
         .filter((c) => c.side === 'buy')
         .sort((a, b) => b.score - a.score)
-        .slice(0, 10);
+        .slice(0, maxPositionsPerSide);
 
     const shorts = candidates
         .filter((c) => c.side === 'sell')
         .sort((a, b) => b.score - a.score)
-        .slice(0, 10);
+        .slice(0, maxPositionsPerSide);
 
     return { longs, shorts };
+}
+
+function applyScale(trade: SizedTrade, scale: number): SizedTrade | null {
+    const scaledQty = trade.qty * scale;
+    if (scaledQty < MIN_QTY) return null;
+
+    const roundedQty = Math.floor(scaledQty * 10_000) / 10_000;
+    if (roundedQty < MIN_QTY) return null;
+
+    const plannedRiskDollars = roundedQty * trade.stopDistancePerShare;
+    const estimatedNotional = roundedQty * trade.price;
+
+    return {
+        ...trade,
+        qty: roundedQty,
+        assignedRiskDollars: plannedRiskDollars,
+        plannedRiskDollars,
+        estimatedNotional,
+    };
 }
 
 export function buildWeightedRiskTrades(
@@ -86,13 +110,23 @@ export function buildWeightedRiskTrades(
         .map((candidate) => {
             const assignedRiskDollars = maxTotalRisk * (candidate.score / totalScore);
 
+            const openingRangeStopDistance =
+                candidate.side === 'buy'
+                    ? candidate.price - candidate.openingRangeLow
+                    : candidate.openingRangeHigh - candidate.price;
+            const atrStopDistance = (candidate.atr1m ?? 0) * env.atrStopMultiple;
+            const minimumStopDistance = candidate.price * env.minStopPct;
+            const stopDistancePerShare = Math.max(
+                openingRangeStopDistance,
+                atrStopDistance,
+                minimumStopDistance
+            );
+            if (stopDistancePerShare <= 0) return null;
+
             const stopPrice =
                 candidate.side === 'buy'
-                    ? candidate.openingRangeLow
-                    : candidate.openingRangeHigh;
-
-            const stopDistancePerShare = Math.abs(candidate.price - stopPrice);
-            if (stopDistancePerShare <= 0) return null;
+                    ? candidate.price - stopDistancePerShare
+                    : candidate.price + stopDistancePerShare;
 
             const qty = assignedRiskDollars / stopDistancePerShare;
             if (qty < MIN_QTY) return null;
@@ -122,12 +156,26 @@ export function buildWeightedRiskTrades(
 export function normalizeTradesToConstraints(
     trades: SizedTrade[],
     maxTotalRisk: number,
-    availableBuyingPower: number
+    availableBuyingPower: number,
+    maxPositionNotional = Number.POSITIVE_INFINITY
 ): SizedTrade[] {
     if (!trades.length) return [];
 
-    const totalPlannedRisk = trades.reduce((sum, t) => sum + t.plannedRiskDollars, 0);
-    const totalEstimatedNotional = trades.reduce((sum, t) => sum + t.estimatedNotional, 0);
+    const individuallyCappedTrades = trades
+        .map((trade) => {
+            if (!Number.isFinite(maxPositionNotional) || maxPositionNotional <= 0) {
+                return trade;
+            }
+
+            const perTradeScale = Math.min(1, maxPositionNotional / trade.estimatedNotional);
+            return applyScale(trade, perTradeScale);
+        })
+        .filter((x): x is SizedTrade => x !== null);
+
+    if (!individuallyCappedTrades.length) return [];
+
+    const totalPlannedRisk = individuallyCappedTrades.reduce((sum, t) => sum + t.plannedRiskDollars, 0);
+    const totalEstimatedNotional = individuallyCappedTrades.reduce((sum, t) => sum + t.estimatedNotional, 0);
 
     if (totalPlannedRisk <= 0 || totalEstimatedNotional <= 0) return [];
 
@@ -135,22 +183,7 @@ export function normalizeTradesToConstraints(
     const buyingPowerScale = availableBuyingPower / totalEstimatedNotional;
     const finalScale = Math.min(1, riskScale, buyingPowerScale);
 
-    return trades
-        .map((trade) => {
-            const scaledQty = trade.qty * finalScale;
-            if (scaledQty < MIN_QTY) return null;
-
-            const roundedQty = Number(scaledQty.toFixed(4));
-            const plannedRiskDollars = roundedQty * trade.stopDistancePerShare;
-            const estimatedNotional = roundedQty * trade.price;
-
-            return {
-                ...trade,
-                qty: roundedQty,
-                assignedRiskDollars: plannedRiskDollars,
-                plannedRiskDollars,
-                estimatedNotional,
-            };
-        })
+    return individuallyCappedTrades
+        .map((trade) => applyScale(trade, finalScale))
         .filter((x): x is SizedTrade => x !== null);
 }

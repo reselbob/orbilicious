@@ -1,8 +1,8 @@
 import { env, strategyConfig } from './config';
 import { AlpacaClient } from './alpaca';
 import { logger } from './logger';
-import { computeOpeningRange, generateOrbSignal } from './strategy';
-import { sleep, todayNyDate, toNyParts } from './time';
+import { computeOpeningRange } from './strategy';
+import { sleep, toNyParts } from './time';
 import {
     BreakoutCandidate,
     SizedTrade,
@@ -11,6 +11,7 @@ import {
     normalizeTradesToConstraints,
     rankAndSelectCandidates,
 } from './basket';
+import { Bar } from './types';
 
 const executedToday = new Set<string>();
 const reportedDates = new Set<string>();
@@ -22,6 +23,135 @@ function executionKey(sessionDate: string, symbol: string) {
 function minutesFromHHMM(hhmm: string): number {
     const [hour, minute] = hhmm.split(':').map(Number);
     return hour * 60 + minute;
+}
+
+function dedupeAndSortBars(bars: Bar[]): Bar[] {
+    const byTimestamp = new Map<string, Bar>();
+    for (const bar of bars) {
+        byTimestamp.set(bar.timestamp, bar);
+    }
+
+    return [...byTimestamp.values()].sort(
+        (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+}
+
+function calculateAtr1m(bars: Bar[], period = 14): number | null {
+    if (bars.length < 2) {
+        return null;
+    }
+
+    const sortedBars = [...bars].sort(
+        (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+
+    const trueRanges: number[] = [];
+    for (let index = 1; index < sortedBars.length; index++) {
+        const current = sortedBars[index];
+        const previous = sortedBars[index - 1];
+        const rangeHighLow = current.high - current.low;
+        const rangeHighPrevClose = Math.abs(current.high - previous.close);
+        const rangeLowPrevClose = Math.abs(current.low - previous.close);
+        trueRanges.push(Math.max(rangeHighLow, rangeHighPrevClose, rangeLowPrevClose));
+    }
+
+    const atrWindow = trueRanges.slice(-period);
+    if (!atrWindow.length) {
+        return null;
+    }
+
+    const atr = atrWindow.reduce((sum, value) => sum + value, 0) / atrWindow.length;
+    return atr > 0 ? atr : null;
+}
+
+function buildConfirmedBreakoutCandidate(
+    symbol: string,
+    sessionDate: string,
+    bars: Bar[]
+): BreakoutCandidate | null {
+    const sessionBars = dedupeAndSortBars(bars).filter(
+        (bar) => toNyParts(bar.timestamp, strategyConfig.sessionTimezone).date === sessionDate
+    );
+    if (!sessionBars.length) {
+        return null;
+    }
+
+    const cfg = { ...strategyConfig, symbol };
+    const openingRange = computeOpeningRange(sessionBars, sessionDate, cfg);
+    const openingRangeBars = strategyConfig.openingRangeMinutes / strategyConfig.candleMinutes;
+    const evaluationWindowBars = openingRangeBars;
+    const evaluationBars = sessionBars.slice(openingRangeBars, openingRangeBars + evaluationWindowBars);
+
+    let breakoutBar: Bar | null = null;
+    let confirmationRetestBar: Bar | null = null;
+    let side: 'buy' | 'sell' | 'none' = 'none';
+
+    for (const evaluationBar of evaluationBars) {
+        if (evaluationBar.close > openingRange.high) {
+            breakoutBar = evaluationBar;
+            side = 'buy';
+            break;
+        }
+
+        if (evaluationBar.close < openingRange.low) {
+            breakoutBar = evaluationBar;
+            side = 'sell';
+            break;
+        }
+    }
+
+    if (!breakoutBar || side === 'none') {
+        return null;
+    }
+
+    const postBreakoutBars = sessionBars.filter(
+        (bar) => new Date(bar.timestamp).getTime() > new Date(breakoutBar.timestamp).getTime()
+    );
+
+    for (const retestBar of postBreakoutBars) {
+        if (side === 'buy' && retestBar.low <= openingRange.high && retestBar.close > openingRange.high) {
+            confirmationRetestBar = retestBar;
+            break;
+        }
+
+        if (side === 'sell' && retestBar.high >= openingRange.low && retestBar.close < openingRange.low) {
+            confirmationRetestBar = retestBar;
+            break;
+        }
+    }
+
+    if (!confirmationRetestBar) {
+        return null;
+    }
+
+    const atrSourceBars = sessionBars.filter(
+        (bar) => new Date(bar.timestamp).getTime() <= new Date(confirmationRetestBar.timestamp).getTime()
+    );
+    const atr1m = calculateAtr1m(atrSourceBars, 14);
+    if (!atr1m) {
+        return null;
+    }
+
+    const metrics = computeCandidateScore({
+        bars: sessionBars,
+        breakoutSide: side,
+        latestClose: confirmationRetestBar.close,
+        openingRangeHigh: openingRange.high,
+        openingRangeLow: openingRange.low,
+    });
+
+    return {
+        symbol,
+        side,
+        price: confirmationRetestBar.close,
+        reason: `confirmed post-opening-range ${side === 'buy' ? 'upside' : 'downside'} breakout retest`,
+        score: metrics.score,
+        relativeBreakPct: metrics.relativeBreakPct,
+        totalVolume: metrics.totalVolume,
+        openingRangeHigh: openingRange.high,
+        openingRangeLow: openingRange.low,
+        atr1m,
+    };
 }
 
 async function evaluateSymbol(
@@ -47,64 +177,7 @@ async function evaluateSymbol(
             return null;
         }
 
-        const cfg = { ...strategyConfig, symbol };
-        const openingRange = computeOpeningRange(bars, sessionDate, cfg);
-
-        const signal = generateOrbSignal({
-            bars,
-            openingRange,
-            existingPosition: null,
-            cfg,
-        });
-
-        const latestBar = bars[bars.length - 1];
-        if (!latestBar) return null;
-
-        if (signal.type === 'BUY') {
-            const metrics = computeCandidateScore({
-                bars,
-                breakoutSide: 'buy',
-                latestClose: latestBar.close,
-                openingRangeHigh: openingRange.high,
-                openingRangeLow: openingRange.low,
-            });
-
-            return {
-                symbol,
-                side: 'buy',
-                price: signal.price,
-                reason: signal.reason,
-                score: metrics.score,
-                relativeBreakPct: metrics.relativeBreakPct,
-                totalVolume: metrics.totalVolume,
-                openingRangeHigh: openingRange.high,
-                openingRangeLow: openingRange.low,
-            };
-        }
-
-        if (signal.type === 'SELL') {
-            const metrics = computeCandidateScore({
-                bars,
-                breakoutSide: 'sell',
-                latestClose: latestBar.close,
-                openingRangeHigh: openingRange.high,
-                openingRangeLow: openingRange.low,
-            });
-
-            return {
-                symbol,
-                side: 'sell',
-                price: signal.price,
-                reason: signal.reason,
-                score: metrics.score,
-                relativeBreakPct: metrics.relativeBreakPct,
-                totalVolume: metrics.totalVolume,
-                openingRangeHigh: openingRange.high,
-                openingRangeLow: openingRange.low,
-            };
-        }
-
-        return null;
+        return buildConfirmedBreakoutCandidate(symbol, sessionDate, bars);
     } catch (error) {
         logger.error('Failed evaluating symbol', { symbol, sessionDate, error });
         return null;
@@ -210,8 +283,9 @@ export async function runCycle(client: AlpacaClient, sessionDate: string) {
     }
 
     const candidates = await findBreakoutCandidates(client, sessionDate);
-    const { longs, shorts } = rankAndSelectCandidates(candidates);
+    const { longs, shorts } = rankAndSelectCandidates(candidates, env.maxPositionsPerSide);
     const selected = [...longs, ...shorts];
+    const effectiveBuyingPower = Math.min(account.buyingPower, env.hardBasketCap);
 
     const weightedTrades = buildWeightedRiskTrades(
         selected,
@@ -221,12 +295,15 @@ export async function runCycle(client: AlpacaClient, sessionDate: string) {
     const normalizedTrades = normalizeTradesToConstraints(
         weightedTrades,
         env.maxTotalRisk,
-        account.buyingPower
+        effectiveBuyingPower,
+        env.maxPositionNotional
     );
 
     logger.info('Cycle summary', {
         sessionDate,
         accountBuyingPower: account.buyingPower,
+        effectiveBuyingPower,
+        hardBasketCap: env.hardBasketCap,
         candidateCount: candidates.length,
         selectedCount: selected.length,
         weightedTradeCount: weightedTrades.length,
@@ -261,7 +338,7 @@ export async function startApp() {
         pollIntervalSeconds: env.pollIntervalSeconds,
         maxTotalRisk: env.maxTotalRisk,
         quantityToRetrieve: env.quantityToRetrieve,
-        selectionMode: 'top 10 longs and top 10 shorts',
+        selectionMode: `top ${env.maxPositionsPerSide} longs and top ${env.maxPositionsPerSide} shorts`,
         rewardMode: `${env.stopLossRiskPart}:${env.takeProfitPart}`,
         dryRun: env.dryRun,
         marketOpenMinutes,

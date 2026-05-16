@@ -2,7 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import puppeteer from "puppeteer";
 import { AlpacaClient } from "./alpaca";
-import { BreakoutCandidate, SizedTrade, computeCandidateScore } from "./basket";
+import {
+    BreakoutCandidate,
+    SizedTrade,
+    computeCandidateScore,
+    normalizeTradesToConstraints,
+} from "./basket";
 import { env, strategyConfig } from "./config";
 import { logger } from "./logger";
 import { Bar } from "./types";
@@ -462,9 +467,15 @@ export class Reports {
             });
         }
 
-        const emulatedTrades = Reports.buildAtrBasedTrades(
+        const atrSizedTrades = Reports.buildAtrBasedTrades(
             breakoutCandidates,
             env.maxTotalRisk,
+        );
+        const emulatedTrades = normalizeTradesToConstraints(
+            atrSizedTrades,
+            env.maxTotalRisk,
+            env.hardBasketCap,
+            env.maxPositionNotional,
         );
         const tradeBySymbol = new Map(
             emulatedTrades.map((trade) => [trade.symbol, trade]),

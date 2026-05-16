@@ -41,6 +41,16 @@ function makeBreakoutBars(symbol: string, sessionDate: string): Bar[] {
         volume: 5000,
     });
 
+    bars.push({
+        symbol,
+        timestamp: `${year}-${month}-${day}T13:46:00Z`,
+        open: 101.2,
+        high: 102.2,
+        low: 100.9,
+        close: 101.5,
+        volume: 4500,
+    });
+
     return bars;
 }
 

@@ -325,13 +325,91 @@ describe('basket integration', () => {
             1000
         );
 
-        const normalized = normalizeTradesToConstraints(trades, 1000, 10000);
+        const normalized = normalizeTradesToConstraints(trades, 1000, 10000, 4000);
 
         const totalRisk = normalized.reduce((sum, t) => sum + t.plannedRiskDollars, 0);
         const totalNotional = normalized.reduce((sum, t) => sum + t.estimatedNotional, 0);
 
         expect(totalRisk).to.be.at.most(1000.0001);
         expect(totalNotional).to.be.at.most(10000.0001);
+        normalized.forEach((trade) => {
+            expect(trade.estimatedNotional).to.be.at.most(4000.0001);
+        });
+    });
+
+    it('never rounds scaled qty up past the basket cap', () => {
+        const trades = buildWeightedRiskTrades(
+            [
+                {
+                    symbol: 'ROUNDING_CAP',
+                    side: 'buy' as const,
+                    price: 25000.02,
+                    reason: 'rounding-regression',
+                    score: 1,
+                    relativeBreakPct: 1,
+                    totalVolume: 100000,
+                    openingRangeHigh: 25100,
+                    openingRangeLow: 24000.02,
+                },
+            ],
+            1000
+        );
+
+        const normalized = normalizeTradesToConstraints(trades, 1000, 25000, Number.POSITIVE_INFINITY);
+        const totalNotional = normalized.reduce((sum, trade) => sum + trade.estimatedNotional, 0);
+
+        expect(totalNotional).to.be.at.most(25000);
+    });
+
+    it('uses the widest of opening-range, ATR, and minimum-stop distances when sizing', () => {
+        const trades = buildWeightedRiskTrades(
+            [
+                {
+                    symbol: 'OR_WIDE',
+                    side: 'buy' as const,
+                    price: 100,
+                    reason: 'breakout',
+                    score: 1,
+                    relativeBreakPct: 2,
+                    totalVolume: 100000,
+                    openingRangeHigh: 101,
+                    openingRangeLow: 95,
+                },
+                {
+                    symbol: 'ATR_WIDE',
+                    side: 'buy' as const,
+                    price: 100,
+                    reason: 'breakout',
+                    score: 1,
+                    relativeBreakPct: 2,
+                    totalVolume: 100000,
+                    openingRangeHigh: 101,
+                    openingRangeLow: 99.8,
+                    atr1m: 2,
+                },
+                {
+                    symbol: 'MIN_WIDE',
+                    side: 'buy' as const,
+                    price: 100,
+                    reason: 'breakout',
+                    score: 1,
+                    relativeBreakPct: 2,
+                    totalVolume: 100000,
+                    openingRangeHigh: 101,
+                    openingRangeLow: 99.9,
+                },
+            ],
+            900,
+            2
+        );
+
+        const orWide = trades.find((trade) => trade.symbol === 'OR_WIDE')!;
+        const atrWide = trades.find((trade) => trade.symbol === 'ATR_WIDE')!;
+        const minWide = trades.find((trade) => trade.symbol === 'MIN_WIDE')!;
+
+        expect(orWide.stopDistancePerShare).to.equal(5);
+        expect(atrWide.stopDistancePerShare).to.equal(2);
+        expect(minWide.stopDistancePerShare).to.equal(0.75);
     });
 
     it('applies configured STOP_LOSS_PROFIT_RATIO (1:2) so take-profit distance equals 2x stop distance', () => {
