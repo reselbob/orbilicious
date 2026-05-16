@@ -14,6 +14,7 @@ type AppState = {
     emulationSessionDate: string | null;
     moneyInAccount: number | null;
     maxRiskPerSession: number | null;
+    stopProfitRewardPart: number | null;
     backtestProgress: {
         startSessionDate: string;
         endSessionDate: string;
@@ -34,6 +35,7 @@ type StartRequest = {
     emulationSessionDate?: string;
     moneyInAccount?: number;
     maxRiskPerSession?: number;
+    stopProfitRewardPart?: number;
 };
 
 type ActivityLine = {
@@ -79,6 +81,7 @@ const appState: AppState = {
     emulationSessionDate: null,
     moneyInAccount: null,
     maxRiskPerSession: null,
+    stopProfitRewardPart: null,
     backtestProgress: null,
     pid: null,
     lastOutcome: 'never-started',
@@ -265,8 +268,9 @@ function startOrbiliciousProcess(params: {
     emulationSessionDate: string | null;
     hardBasketCap?: number;
     maxTotalRisk?: number;
+    stopProfitRewardPart?: number;
 }) {
-    const { continuous, sessionMode, emulationSessionDate, hardBasketCap, maxTotalRisk } = params;
+    const { continuous, sessionMode, emulationSessionDate, hardBasketCap, maxTotalRisk, stopProfitRewardPart } = params;
     const entry = resolveAppEntryPoint();
     const args = [...entry.args];
     if (continuous) {
@@ -284,6 +288,7 @@ function startOrbiliciousProcess(params: {
     appState.emulationSessionDate = emulationSessionDate;
     appState.moneyInAccount = hardBasketCap ?? null;
     appState.maxRiskPerSession = maxTotalRisk ?? null;
+    appState.stopProfitRewardPart = stopProfitRewardPart ?? null;
     appState.lastOutcome = 'running';
     appState.lastError = null;
 
@@ -295,6 +300,7 @@ function startOrbiliciousProcess(params: {
             SESSION_DATE: emulationSessionDate ?? '',
             HARD_BASKET_CAP: hardBasketCap ? hardBasketCap.toString() : '',
             MAX_TOTAL_RISK: maxTotalRisk ? maxTotalRisk.toString() : '',
+            STOP_LOSS_PROFIT_RATIO: stopProfitRewardPart ? `1:${stopProfitRewardPart}` : '',
         },
         stdio: 'pipe',
     });
@@ -304,7 +310,7 @@ function startOrbiliciousProcess(params: {
 
     addActivityLine(
         'system',
-        `Starting Orbilicious in ${sessionMode} mode${continuous ? ' (continuous)' : ''}${emulationSessionDate ? ` for ${emulationSessionDate}` : ''}${hardBasketCap ? ` | Basket Cap: $${hardBasketCap.toLocaleString()}` : ''}${maxTotalRisk ? ` | Max Risk: $${maxTotalRisk.toLocaleString()}` : ''}`
+        `Starting Orbilicious in ${sessionMode} mode${continuous ? ' (continuous)' : ''}${emulationSessionDate ? ` for ${emulationSessionDate}` : ''}${hardBasketCap ? ` | Basket Cap: $${hardBasketCap.toLocaleString()}` : ''}${maxTotalRisk ? ` | Max Risk: $${maxTotalRisk.toLocaleString()}` : ''}${stopProfitRewardPart ? ` | Stop/Profit: 1/${stopProfitRewardPart}` : ''}`
     );
 
     wireProcessOutput('stdout', child.stdout);
@@ -501,6 +507,9 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
         const maxTotalRisk = typeof payload.maxRiskPerSession === 'number' && payload.maxRiskPerSession > 0
             ? payload.maxRiskPerSession
             : undefined;
+        const stopProfitRewardPart = typeof payload.stopProfitRewardPart === 'number' && payload.stopProfitRewardPart >= 1 && payload.stopProfitRewardPart <= 20
+            ? payload.stopProfitRewardPart
+            : undefined;
 
         if (sessionMode === 'EMULATION' && emulationSessionDate && !isValidSessionDate(emulationSessionDate)) {
             sendJson(res, 400, {
@@ -510,7 +519,7 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
             return;
         }
 
-        startOrbiliciousProcess({ continuous, sessionMode, emulationSessionDate, hardBasketCap, maxTotalRisk });
+        startOrbiliciousProcess({ continuous, sessionMode, emulationSessionDate, hardBasketCap, maxTotalRisk, stopProfitRewardPart });
 
         sendJson(res, 202, {
             ok: true,

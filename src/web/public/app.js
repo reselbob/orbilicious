@@ -16,9 +16,8 @@ const clearActivityBtn = document.getElementById('clearActivityBtn');
 const backtestProgressSummary = document.getElementById('backtestProgressSummary');
 const paneExpandButtons = document.querySelectorAll('.pane-expand-btn');
 const moneyInAccountSelect = document.getElementById('moneyInAccount');
-const moneyInAccountCustom = document.getElementById('moneyInAccountCustom');
 const maxRiskPerSessionSelect = document.getElementById('maxRiskPerSession');
-const maxRiskPerSessionCustom = document.getElementById('maxRiskPerSessionCustom');
+const stopProfitRatioSpinner = document.getElementById('stopProfitRatio');
 
 let tradeCursor = 0;
 let tradeEvents = [];
@@ -245,23 +244,30 @@ async function refreshStatus() {
 
         if (!response.ok) {
             setStatusText(`Failed to load status: ${payload.message || response.status}`);
-            return;
+            return payload;
         }
 
         setStatusText(formatState(payload));
         startBtn.disabled = payload.isRunning === true;
         stopBtn.disabled = payload.isRunning !== true;
-        if (typeof payload.sessionMode === 'string') {
-            sessionMode.value = payload.sessionMode;
-        }
-        if (typeof payload.emulationSessionDate === 'string' && payload.emulationSessionDate) {
-            emulationDateInput.value = payload.emulationSessionDate;
-        }
         renderBacktestProgress(payload.backtestProgress || null);
         syncEmulationControls();
+        return payload;
     } catch (error) {
         setStatusText(`Status request failed: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
     }
+}
+
+function syncDropdownsFromServer(payload) {
+    if (!payload) return;
+    if (typeof payload.sessionMode === 'string') {
+        sessionMode.value = payload.sessionMode;
+    }
+    if (typeof payload.emulationSessionDate === 'string' && payload.emulationSessionDate) {
+        emulationDateInput.value = payload.emulationSessionDate;
+    }
+    syncEmulationControls();
 }
 
 async function refreshTrades() {
@@ -303,6 +309,7 @@ async function startOrbilicious() {
                 emulationSessionDate: isEmulationMode() ? emulationDateInput.value : undefined,
                 moneyInAccount: getMoneyInAccount(),
                 maxRiskPerSession: getMaxRiskPerSession(),
+                stopProfitRewardPart: getStopProfitRatio(),
             }),
         });
 
@@ -401,7 +408,7 @@ function togglePaneExpansion(button) {
 }
 
 function populateDropdownRange(selectElement, start, end, increment, formatter) {
-    selectElement.innerHTML = '<option value="">Select or enter custom amount...</option>';
+    selectElement.innerHTML = '';
     for (let value = start; value <= end; value += increment) {
         const option = document.createElement('option');
         option.value = value.toString();
@@ -410,26 +417,24 @@ function populateDropdownRange(selectElement, start, end, increment, formatter) 
     }
 }
 
-function initializeAccountAndRiskDropdowns() {
+function initializeAccountAndRiskSpinners() {
     populateDropdownRange(moneyInAccountSelect, 500, 100000, 500, (v) => `$${v.toLocaleString()}`);
-    populateDropdownRange(maxRiskPerSessionSelect, 250, 5000, 250, (v) => `$${v.toLocaleString()}`);
-
+    populateDropdownRange(maxRiskPerSessionSelect, 500, 20000, 500, (v) => `$${v.toLocaleString()}`);
     moneyInAccountSelect.value = '25000';
     maxRiskPerSessionSelect.value = '1000';
 }
 
 function getMoneyInAccount() {
-    if (moneyInAccountCustom.value) {
-        return parseFloat(moneyInAccountCustom.value) || undefined;
-    }
-    return moneyInAccountSelect.value ? parseFloat(moneyInAccountSelect.value) : undefined;
+    return moneyInAccountSelect.value ? parseFloat(moneyInAccountSelect.value) || undefined : undefined;
 }
 
 function getMaxRiskPerSession() {
-    if (maxRiskPerSessionCustom.value) {
-        return parseFloat(maxRiskPerSessionCustom.value) || undefined;
-    }
-    return maxRiskPerSessionSelect.value ? parseFloat(maxRiskPerSessionSelect.value) : undefined;
+    return maxRiskPerSessionSelect.value ? parseFloat(maxRiskPerSessionSelect.value) || undefined : undefined;
+}
+
+function getStopProfitRatio() {
+    const value = stopProfitRatioSpinner.value ? parseFloat(stopProfitRatioSpinner.value) : 4;
+    return Math.max(1, Math.min(20, value));
 }
 
 startBtn.addEventListener('click', startOrbilicious);
@@ -448,9 +453,11 @@ const today = todayIsoDate();
 emulationDateInput.value = today;
 emulationDateInput.max = today;
 syncEmulationControls();
-initializeAccountAndRiskDropdowns();
+initializeAccountAndRiskSpinners();
 
-refreshStatus();
+refreshStatus().then((payload) => {
+    syncDropdownsFromServer(payload);
+});
 refreshReports();
 refreshTrades();
 window.setInterval(refreshStatus, 3000);

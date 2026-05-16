@@ -143,26 +143,20 @@
                             </label>
                         </div>
 
-                        <div class="mb-3">
-                            <label class="form-label" for="moneyInAccount">Money in Account</label>
-                            <div class="d-flex gap-2">
-                                <select id="moneyInAccount" class="form-select">
-                                    <option value="">Select or enter custom amount...</option>
-                                </select>
-                                <input type="number" id="moneyInAccountCustom" class="form-control" placeholder="Custom"
-                                    min="0" step="100" />
-                            </div>
+                        <div class="mb-3 d-flex gap-2 align-items-center">
+                            <label class="form-label mb-0" for="moneyInAccount">Money in Account</label>
+                            <select id="moneyInAccount" class="form-select" style="width: auto;"></select>
                         </div>
 
-                        <div class="mb-3">
-                            <label class="form-label" for="maxRiskPerSession">Max Amount to Risk Per Trading Day</label>
-                            <div class="d-flex gap-2">
-                                <select id="maxRiskPerSession" class="form-select">
-                                    <option value="">Select or enter custom amount...</option>
-                                </select>
-                                <input type="number" id="maxRiskPerSessionCustom" class="form-control"
-                                    placeholder="Custom" min="0" step="50" />
-                            </div>
+                        <div class="mb-3 d-flex gap-2 align-items-center">
+                            <label class="form-label mb-0" for="maxRiskPerSession">Max Amount to Risk Per Trading Day</label>
+                            <select id="maxRiskPerSession" class="form-select" style="width: auto;"></select>
+                        </div>
+
+                        <div class="mb-3 d-flex gap-2 align-items-center">
+                            <label class="form-label mb-0" for="stopProfitRatio">Stop/Profit Limit Ratio 1:</label>
+                            <input type="number" id="stopProfitRatio" class="form-control" min="1" max="20"
+                                value="4" style="width: 70px;" />
                         </div>
 
                         <div class="d-flex gap-2 mb-3">
