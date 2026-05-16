@@ -72,34 +72,34 @@ The app reads configuration from `.env` (via `dotenv`) and supports the followin
 
 | Variable | Required | Default | Purpose and use |
 | --- | --- | --- | --- |
-| `APCA_API_KEY_ID` | Yes | None | Alpaca API key ID. Required for all Alpaca data/account/order API calls. |
-| `APCA_API_SECRET_KEY` | Yes | None | Alpaca API secret key paired with `APCA_API_KEY_ID`. |
-| `APCA_PAPER` | No | `true` | Set `true` to use paper account behavior; set `false` for live account credentials/environment. |
-| `ALPACA_TRADING_BASE_URL` | No | `https://paper-api.alpaca.markets` | Base URL for trading/account endpoints. Change only if targeting a different Alpaca environment. |
-| `ALPACA_DATA_BASE_URL` | No | `https://data.alpaca.markets` | Base URL for market data endpoints. |
-| `ALPACA_DATA_FEED` | No | `iex` | Data feed selector used when requesting Alpaca market data. |
-| `SYMBOL` | No | `SPY` | Strategy config symbol baseline (kept for config completeness; main scanner still uses most-active universe). |
-| `QTY` | No | `1` | Baseline strategy quantity field in config. Not used by weighted basket sizing path. |
-| `OPENING_RANGE_MINUTES` | No | `15` | Number of minutes used to build the opening range window. |
-| `CANDLE_MINUTES` | No | `1` | Bar interval used by strategy logic. |
-| `LAST_ENTRY_TIME` | No | `15:30` | Last allowed NY time for new entries in live loop mode. |
-| `FORCE_EXIT_TIME` | No | `15:55` | NY cutoff used to stop intraday cycle and transition to report timing. |
 | `ALLOW_LONG` | No | `true` | Enables long-side trade eligibility. |
 | `ALLOW_SHORT` | No | `true` | Enables short-side trade eligibility. |
-| `SESSION_DATE` | No | Empty | Optional fixed trading session date (`YYYY-MM-DD`) for cycle logic instead of current NY date. |
-| `RUN_DATE` | No | Empty | Historical one-shot report mode date (`YYYY-MM-DD`). If set, app generates report for that date and exits. |
-| `POLL_INTERVAL_SECONDS` | No | `20` | Wait interval between live loop cycles. |
-| `MAX_TOTAL_RISK` | No | `1000` | Basket-wide planned stop-loss dollar cap before normalization. |
+| `ALPACA_DATA_BASE_URL` | No | `https://data.alpaca.markets` | Base URL for market data endpoints. |
+| `ALPACA_DATA_FEED` | No | `iex` | Data feed selector used when requesting Alpaca market data. |
+| `ALPACA_TRADING_BASE_URL` | No | Mode-dependent (`https://paper-api.alpaca.markets` for `EMULATION`/`PAPER`, `https://api.alpaca.markets` for `LIVE`) | Optional override for trading/account endpoint base URL. |
+| `APCA_API_KEY_ID` | Yes | None | Alpaca API key ID. Required for all Alpaca data/account/order API calls. |
+| `APCA_API_SECRET_KEY` | Yes | None | Alpaca API secret key paired with `APCA_API_KEY_ID`. |
+| `APCA_PAPER` | No | `true` | Legacy setting kept in `.env`; execution mode is controlled by `RUN_MODE`. |
+| `ATR_STOP_MULTIPLE` | No | `1` | ATR multiplier used as one candidate stop-distance component in sizing fallback. |
+| `CANDLE_MINUTES` | No | `1` | Bar interval used by strategy logic. |
+| `FORCE_EXIT_TIME` | No | `15:55` | NY cutoff used for end-of-day position management and cycle close/report timing. |
 | `HARD_BASKET_CAP` | No | `25000` | Hard maximum total notional for the entire basket after normalization. |
-| `QUANTITY_TO_RETRIEVE` | No | `40` | Number of most-active symbols to request from Alpaca for candidate generation. |
+| `LAST_ENTRY_TIME` | No | `15:30` | Last allowed NY time for new entries in live loop mode. |
+| `LOG_LEVEL` | No | `debug` in development, `info` otherwise | Logger verbosity (`error`, `warn`, `info`, `debug`, etc.). |
 | `MAX_POSITIONS_PER_SIDE` | No | `3` | Max number of selected long candidates and short candidates each (top-N per side). |
 | `MAX_POSITION_NOTIONAL` | No | `5000` | Per-position notional cap applied before final basket scaling. |
-| `ATR_STOP_MULTIPLE` | No | `1` | ATR multiplier used as one candidate stop-distance component in sizing. |
+| `MAX_TOTAL_RISK` | No | `1000` | Basket-wide planned stop-loss dollar cap before normalization. |
 | `MIN_STOP_PCT` | No | `0.0075` | Minimum stop distance as a fraction of entry price (example: `0.0075` = 0.75%). |
-| `STOP_LOSS_PROFIT_RATIO` | No | `1:4` | Risk/reward ratio in `risk:reward` format. Example `1:2` gives a 2R target. |
-| `DRY_RUN` | No | `true` | When `true`, computes and logs trades without submitting orders. Set `false` to allow live order submission path. |
-| `LOG_LEVEL` | No | `debug` in development, `info` otherwise | Logger verbosity (`error`, `warn`, `info`, `debug`, etc.). |
 | `NODE_ENV` | No | `development` | Runtime environment mode used for logging format/verbosity defaults. |
+| `OPENING_RANGE_MINUTES` | No | `15` | Number of minutes used to build the opening range window. |
+| `POLL_INTERVAL_SECONDS` | No | `20` | Wait interval between live loop cycles. |
+| `QTY` | No | `1` | Baseline strategy quantity field in config. Not used by weighted basket sizing path. |
+| `QUANTITY_TO_RETRIEVE` | No | `40` | Number of most-active symbols to request from Alpaca for candidate generation. |
+| `RUN_DATE` | No | Empty | Historical one-shot report mode date (`YYYY-MM-DD`). If set, app generates report for that date and exits. |
+| `RUN_MODE` | No | `EMULATION` | Execution mode: `EMULATION` (Alpaca data, no order submission), `PAPER` (Alpaca paper trading), `LIVE` (Alpaca live trading). |
+| `SESSION_DATE` | No | Empty | Optional fixed trading session date (`YYYY-MM-DD`) for cycle logic instead of current NY date. |
+| `STOP_LOSS_PROFIT_RATIO` | No | `1:4` | Risk/reward ratio in `risk:reward` format. Example `1:2` gives a 2R target. |
+| `SYMBOL` | No | `SPY` | Strategy config symbol baseline (kept for config completeness; main scanner still uses most-active universe). |
 
 Notes:
 

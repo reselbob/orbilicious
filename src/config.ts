@@ -2,6 +2,8 @@ import 'dotenv/config';
 import { StrategyConfig } from './types';
 import { logger } from './logger';
 
+type RunMode = 'EMULATION' | 'PAPER' | 'LIVE';
+
 function required(name: string): string {
     const value = process.env[name];
     if (!value) {
@@ -60,13 +62,37 @@ function ratio(name: string, fallback: string): { raw: string; risk: number; rew
     };
 }
 
+function runMode(name: string, fallback: RunMode): RunMode {
+    const value = process.env[name];
+    if (value == null || value.trim() === '') return fallback;
+
+    const normalized = value.trim().toUpperCase();
+    if (normalized === 'DEVELOPMENT') return 'EMULATION';
+
+    if (normalized === 'EMULATION' || normalized === 'PAPER' || normalized === 'LIVE') {
+        return normalized;
+    }
+
+    logger.error('Invalid run mode environment variable', {
+        name,
+        value,
+        expected: 'EMULATION|PAPER|LIVE',
+    });
+    throw new Error(`Invalid run mode for ${name}: ${value}`);
+}
+
 const stopLossProfitRatio = ratio('STOP_LOSS_PROFIT_RATIO', '1:4');
+const configuredRunMode = runMode('RUN_MODE', 'EMULATION');
+const defaultTradingBaseUrlByMode = configuredRunMode === 'LIVE'
+    ? 'https://api.alpaca.markets'
+    : 'https://paper-api.alpaca.markets';
 
 export const env = {
     apiKey: required('APCA_API_KEY_ID'),
     apiSecret: required('APCA_API_SECRET_KEY'),
-    paper: bool('APCA_PAPER', true),
-    tradingBaseUrl: process.env.ALPACA_TRADING_BASE_URL || 'https://paper-api.alpaca.markets',
+    runMode: configuredRunMode,
+    paper: configuredRunMode !== 'LIVE',
+    tradingBaseUrl: process.env.ALPACA_TRADING_BASE_URL || defaultTradingBaseUrlByMode,
     dataBaseUrl: process.env.ALPACA_DATA_BASE_URL || 'https://data.alpaca.markets',
     dataFeed: process.env.ALPACA_DATA_FEED || 'iex',
     sessionDate: dateStr('SESSION_DATE', ''),
@@ -83,7 +109,7 @@ export const env = {
     stopLossRiskPart: stopLossProfitRatio.risk,
     takeProfitPart: stopLossProfitRatio.reward,
     takeProfitMultiple: stopLossProfitRatio.rewardMultiple,
-    dryRun: bool('DRY_RUN', true),
+    dryRun: configuredRunMode === 'EMULATION',
 };
 
 export const strategyConfig: StrategyConfig = {
@@ -101,6 +127,7 @@ export const strategyConfig: StrategyConfig = {
 };
 
 logger.info('Configuration loaded', {
+    runMode: env.runMode,
     paper: env.paper,
     tradingBaseUrl: env.tradingBaseUrl,
     dataBaseUrl: env.dataBaseUrl,
