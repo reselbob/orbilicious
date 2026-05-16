@@ -454,6 +454,29 @@ describe('basket integration', () => {
         expect(sellTPDistance).to.equal(sellStopDistance * takeProfitMultiple);
     });
 
+    it('discards symbols when entry and stop are equal at execution price precision', () => {
+        const trades = buildWeightedRiskTrades(
+            [
+                {
+                    symbol: 'EQUAL_EXECUTION_PRICE',
+                    side: 'buy' as const,
+                    price: 100.004,
+                    reason: 'breakout',
+                    score: 1,
+                    relativeBreakPct: 1,
+                    totalVolume: 100000,
+                    openingRangeHigh: 101,
+                    openingRangeLow: 99,
+                    preBreakoutWickPrice: 100.003,
+                },
+            ],
+            1000,
+            4
+        );
+
+        expect(trades).to.have.length(0);
+    });
+
     it('can weight all breakout candidates to never lose more than MAX_TOTAL_RISK', async function () {
         this.timeout(120_000); // Allow up to 2 minutes for live polling
 

@@ -84,6 +84,34 @@ class CapturingAlpacaClient extends AlpacaClient {
     }
 }
 
+class PositionManagementAlpacaClient extends AlpacaClient {
+    closedSymbols: string[] = [];
+
+    constructor(
+        private readonly barsBySymbol: Record<string, Bar[]>,
+        private readonly positionsBySymbol: Record<string, Position | null>
+    ) {
+        super();
+    }
+
+    async getMostActiveSymbols(): Promise<string[]> {
+        return Object.keys(this.barsBySymbol);
+    }
+
+    async getOpenPosition(symbol: string): Promise<Position | null> {
+        return this.positionsBySymbol[symbol] ?? null;
+    }
+
+    async getIntradayBars(symbol: string): Promise<Bar[]> {
+        return this.barsBySymbol[symbol] ?? [];
+    }
+
+    async closePosition(symbol: string): Promise<unknown> {
+        this.closedSymbols.push(symbol);
+        return { symbol, status: 'closed' };
+    }
+}
+
 describe('app trade execution', () => {
     it('retrieves active symbols using configured quantity and logs dry-run executions for breakout candidates', async () => {
         const sessionDate = '2099-05-13';
@@ -118,5 +146,42 @@ describe('app trade execution', () => {
         expect(trades).to.have.length(candidates.length);
         expect(trades.every((trade) => trade.takeProfitPrice > 0)).to.equal(true);
         expect(trades.every((trade) => trade.stopPrice > 0)).to.equal(true);
+    });
+
+    it('captures profit from force-exit window to close', async () => {
+        const sessionDate = '2099-05-13';
+        const makeBarsAtTimestamp = (symbol: string, timestamp: string, close: number): Bar[] =>
+            makeBreakoutBars(symbol, sessionDate).map((bar, index, rows) =>
+                index === rows.length - 1 ? { ...bar, timestamp, close } : bar
+            );
+
+        const barsBySymbol: Record<string, Bar[]> = {
+            LONG_PROFIT: makeBarsAtTimestamp('LONG_PROFIT', `${sessionDate}T19:56:00Z`, 101),
+            SHORT_PROFIT: makeBarsAtTimestamp('SHORT_PROFIT', `${sessionDate}T19:56:00Z`, 99),
+            LONG_NO_PROFIT: makeBarsAtTimestamp('LONG_NO_PROFIT', `${sessionDate}T19:56:00Z`, 99),
+            SHORT_NO_PROFIT: makeBarsAtTimestamp('SHORT_NO_PROFIT', `${sessionDate}T19:56:00Z`, 101),
+            LONG_PRE_WINDOW: makeBarsAtTimestamp('LONG_PRE_WINDOW', `${sessionDate}T19:50:00Z`, 101),
+        };
+
+        const positionsBySymbol: Record<string, Position | null> = {
+            LONG_PROFIT: { symbol: 'LONG_PROFIT', side: 'long', qty: 1, entryPrice: 100 },
+            SHORT_PROFIT: { symbol: 'SHORT_PROFIT', side: 'short', qty: 1, entryPrice: 100 },
+            LONG_NO_PROFIT: { symbol: 'LONG_NO_PROFIT', side: 'long', qty: 1, entryPrice: 100 },
+            SHORT_NO_PROFIT: { symbol: 'SHORT_NO_PROFIT', side: 'short', qty: 1, entryPrice: 100 },
+            LONG_PRE_WINDOW: { symbol: 'LONG_PRE_WINDOW', side: 'long', qty: 1, entryPrice: 100 },
+        };
+
+        const client = new PositionManagementAlpacaClient(barsBySymbol, positionsBySymbol);
+
+        const previousDryRun = env.dryRun;
+        env.dryRun = false;
+
+        try {
+            const candidates = await findBreakoutCandidates(client, sessionDate);
+            expect(candidates).to.have.length(0);
+            expect(client.closedSymbols.sort()).to.deep.equal(['LONG_PROFIT', 'SHORT_PROFIT']);
+        } finally {
+            env.dryRun = previousDryRun;
+        }
     });
 });

@@ -5,6 +5,7 @@ import { AlpacaClient } from "./alpaca";
 import {
     BreakoutCandidate,
     SizedTrade,
+    buildWeightedRiskTrades,
     computeCandidateScore,
     normalizeTradesToConstraints,
 } from "./basket";
@@ -161,54 +162,6 @@ export class Reports {
         const atr =
             atrWindow.reduce((sum, value) => sum + value, 0) / atrWindow.length;
         return atr > 0 ? atr : null;
-    }
-
-    private static buildAtrBasedTrades(
-        candidates: AtrBreakoutCandidate[],
-        maxTotalRisk: number,
-    ): SizedTrade[] {
-        const validCandidates = candidates.filter(
-            (candidate) => candidate.score > 0 && candidate.atr1m > 0,
-        );
-        if (!validCandidates.length) {
-            return [];
-        }
-
-        const totalScore = validCandidates.reduce(
-            (sum, candidate) => sum + candidate.score,
-            0,
-        );
-        if (totalScore <= 0) {
-            return [];
-        }
-
-        return validCandidates.map((candidate) => {
-            const assignedRiskDollars = maxTotalRisk * (candidate.score / totalScore);
-            const stopDistancePerShare = candidate.atr1m * 1.0;
-            const targetDistancePerShare = candidate.atr1m * 1.5;
-            const qty = assignedRiskDollars / stopDistancePerShare;
-            const stopPrice =
-                candidate.side === "buy"
-                    ? candidate.price - stopDistancePerShare
-                    : candidate.price + stopDistancePerShare;
-            const takeProfitPrice =
-                candidate.side === "buy"
-                    ? candidate.price + targetDistancePerShare
-                    : candidate.price - targetDistancePerShare;
-            const plannedRiskDollars = qty * stopDistancePerShare;
-            const estimatedNotional = qty * candidate.price;
-
-            return {
-                ...candidate,
-                assignedRiskDollars,
-                stopPrice,
-                stopDistancePerShare,
-                takeProfitPrice,
-                qty: Number(qty.toFixed(4)),
-                plannedRiskDollars,
-                estimatedNotional,
-            };
-        });
     }
 
     private static emulateExit(
@@ -370,6 +323,7 @@ export class Reports {
             let breakoutBar: Bar | null = null;
             let confirmationRetestBar: Bar | null = null;
             let side: "buy" | "sell" | "none" = "none";
+            let preBreakoutWickPrice: number | null = null;
 
             for (const evaluationBar of evaluationBars) {
                 if (evaluationBar.close > openingRangeHigh) {
@@ -386,6 +340,16 @@ export class Reports {
             }
 
             if (breakoutBar && side !== "none") {
+                const breakoutIndex = sessionBars.findIndex(
+                    (bar) => bar.timestamp === breakoutBar.timestamp,
+                );
+                const preBreakoutBar = breakoutIndex > 0 ? sessionBars[breakoutIndex - 1] : null;
+                preBreakoutWickPrice = preBreakoutBar
+                    ? side === "buy"
+                        ? preBreakoutBar.high
+                        : preBreakoutBar.low
+                    : null;
+
                 const postBreakoutBars = sessionBars.filter(
                     (bar) =>
                         new Date(bar.timestamp).getTime() >
@@ -463,13 +427,15 @@ export class Reports {
                 totalVolume: scoreMetrics.totalVolume,
                 openingRangeHigh,
                 openingRangeLow,
+                preBreakoutWickPrice: preBreakoutWickPrice ?? undefined,
                 atr1m,
             });
         }
 
-        const atrSizedTrades = Reports.buildAtrBasedTrades(
+        const atrSizedTrades = buildWeightedRiskTrades(
             breakoutCandidates,
             env.maxTotalRisk,
+            env.takeProfitMultiple,
         );
         const emulatedTrades = normalizeTradesToConstraints(
             atrSizedTrades,
@@ -576,11 +542,25 @@ export class Reports {
                 const closedProfitLoss = finalOutcome
                     ? finalOutcome.pnl.toFixed(2)
                     : "Open";
+                const exitPrice =
+                    finalOutcome?.exitPrice != null
+                        ? finalOutcome.exitPrice.toFixed(2)
+                        : "n/a";
                 const exitType = closedOutcome
                     ? "Stop/Target"
                     : finalOutcome
                         ? "Market Close"
                         : "Open";
+                const stopDistance =
+                    trade.side === "buy"
+                        ? trade.price - trade.stopPrice
+                        : trade.stopPrice - trade.price;
+                const targetDistance =
+                    trade.side === "buy"
+                        ? trade.takeProfitPrice - trade.price
+                        : trade.price - trade.takeProfitPrice;
+                const riskMultiple =
+                    stopDistance > 0 ? `${(targetDistance / stopDistance).toFixed(2)}R` : "n/a";
 
                 return `
                 <tr>
@@ -592,9 +572,12 @@ export class Reports {
                     <td>${Reports.escapeHtml(Reports.formatNyTime(row?.breakoutTimestamp ?? null) || "n/a")}</td>
                     <td>${row?.confirmationRetestPrice != null ? row.confirmationRetestPrice.toFixed(2) : "n/a"}</td>
                     <td>${Reports.escapeHtml(Reports.formatNyTime(row?.confirmationRetestTimestamp ?? null) || "n/a")}</td>
+                    <td>${trade.preBreakoutWickPrice != null ? trade.preBreakoutWickPrice.toFixed(2) : "n/a"}</td>
                     <td>${trade.price.toFixed(2)}</td>
                     <td>${trade.stopPrice.toFixed(2)}</td>
                     <td>${trade.takeProfitPrice.toFixed(2)}</td>
+                    <td>${riskMultiple}</td>
+                    <td>${exitPrice}</td>
                     <td>${closedProfitLoss}</td>
                     <td>${exitType}</td>
                 </tr>`;
@@ -700,19 +683,23 @@ export class Reports {
             border-collapse: collapse;
             overflow: hidden;
             border-radius: 16px;
+            table-layout: fixed;
         }
         thead th {
             background: #f1e6d7;
             color: #3f3f46;
-            font-size: 12px;
+            font-size: 10px;
             letter-spacing: 0.08em;
             text-transform: uppercase;
         }
         th, td {
-            padding: 12px 14px;
+            padding: 8px 8px;
             border-bottom: 1px solid var(--border);
             text-align: left;
             vertical-align: top;
+            font-size: 10px;
+            line-height: 1.2;
+            word-break: break-word;
         }
         tbody tr:nth-child(even) {
             background: #fffcf7;
@@ -773,6 +760,7 @@ export class Reports {
                     <tr><td>Number of Candidates Bought Short</td><td>${numberOfCandidatesBoughtShort}</td></tr>
                     <tr><td>Total cost of Breakout Candidate purchases</td><td>${totalCostOfBreakoutCandidatePurchases.toFixed(2)}</td></tr>
                     <tr><td>Total amount of cash at stop loss risk</td><td>${totalAmountOfCashAtStopLossRisk.toFixed(2)}</td></tr>
+                    <tr><td>Stop Loss Profit Ratio</td><td>${Reports.escapeHtml(env.stopLossProfitRatio)}</td></tr>
                     <tr><td>Total Profit (Loss) to Date</td><td>${totalProfitLossToDate.toFixed(2)}</td></tr>
                 </tbody>
             </table>
@@ -780,7 +768,7 @@ export class Reports {
 
         <section class="section">
             <h2>Breakout Candidates</h2>
-            <p class="section-copy">Detected breakout symbols, breakout timing, retest confirmation timing, and the emulated stop/target generated by the current risk algorithm.</p>
+            <p class="section-copy">Detected breakout symbols, breakout timing, retest confirmation timing, and emulated entry/exit details from the current risk algorithm.</p>
             <table>
                 <thead>
                     <tr>
@@ -792,9 +780,12 @@ export class Reports {
                         <th>Breakout Time</th>
                         <th>Retest Price</th>
                         <th>Retest Time</th>
+                        <th>Previous Candle Hi/Lo</th>
                         <th>Entry</th>
                         <th>Stop</th>
                         <th>Target</th>
+                        <th>Risk Multiple</th>
+                        <th>Exit Price</th>
                         <th>Profit (Loss)</th>
                         <th>Exit</th>
                     </tr>

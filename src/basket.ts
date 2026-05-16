@@ -12,6 +12,7 @@ export type BreakoutCandidate = {
     openingRangeHigh: number;
     openingRangeLow: number;
     atr1m?: number;
+    preBreakoutWickPrice?: number;
 };
 
 export type SizedTrade = BreakoutCandidate & {
@@ -26,6 +27,10 @@ export type SizedTrade = BreakoutCandidate & {
 
 export const MIN_QTY = 0.0001;
 export const MIN_SCORE = 0.0000001;
+
+function areEqualAtExecutionPrecision(a: number, b: number): boolean {
+    return Number(a.toFixed(2)) === Number(b.toFixed(2));
+}
 
 export function sumVolume(bars: Bar[]): number {
     return bars.reduce((sum, bar) => sum + bar.volume, 0);
@@ -110,23 +115,28 @@ export function buildWeightedRiskTrades(
         .map((candidate) => {
             const assignedRiskDollars = maxTotalRisk * (candidate.score / totalScore);
 
-            const openingRangeStopDistance =
-                candidate.side === 'buy'
-                    ? candidate.price - candidate.openingRangeLow
-                    : candidate.openingRangeHigh - candidate.price;
-            const atrStopDistance = (candidate.atr1m ?? 0) * env.atrStopMultiple;
-            const minimumStopDistance = candidate.price * env.minStopPct;
-            const stopDistancePerShare = Math.max(
-                openingRangeStopDistance,
-                atrStopDistance,
-                minimumStopDistance
-            );
-            if (stopDistancePerShare <= 0) return null;
-
+            const wickAnchoredStopPrice = candidate.preBreakoutWickPrice;
             const stopPrice =
+                wickAnchoredStopPrice != null
+                    ? wickAnchoredStopPrice
+                    : candidate.side === 'buy'
+                        ? Math.min(
+                            candidate.openingRangeLow,
+                            candidate.price - (candidate.atr1m ?? 0) * env.atrStopMultiple,
+                            candidate.price - candidate.price * env.minStopPct
+                        )
+                        : Math.max(
+                            candidate.openingRangeHigh,
+                            candidate.price + (candidate.atr1m ?? 0) * env.atrStopMultiple,
+                            candidate.price + candidate.price * env.minStopPct
+                        );
+
+            const stopDistancePerShare =
                 candidate.side === 'buy'
-                    ? candidate.price - stopDistancePerShare
-                    : candidate.price + stopDistancePerShare;
+                    ? candidate.price - stopPrice
+                    : stopPrice - candidate.price;
+            if (stopDistancePerShare <= 0) return null;
+            if (areEqualAtExecutionPrecision(candidate.price, stopPrice)) return null;
 
             const qty = assignedRiskDollars / stopDistancePerShare;
             if (qty < MIN_QTY) return null;

@@ -64,6 +64,22 @@ function calculateAtr1m(bars: Bar[], period = 14): number | null {
     return atr > 0 ? atr : null;
 }
 
+function shouldClosePositionForProfitCapture(params: {
+    side: 'long' | 'short';
+    entryPrice: number;
+    latestClose: number;
+}): boolean {
+    const { side, entryPrice, latestClose } = params;
+    return side === 'long' ? latestClose >= entryPrice : latestClose <= entryPrice;
+}
+
+function isInProfitCaptureWindow(bar: Bar): boolean {
+    const p = toNyParts(bar.timestamp, strategyConfig.sessionTimezone);
+    const barMinutes = p.hour * 60 + p.minute;
+    const startMinutes = minutesFromHHMM(strategyConfig.forceExitTimeHHMM);
+    return barMinutes >= startMinutes;
+}
+
 function buildConfirmedBreakoutCandidate(
     symbol: string,
     sessionDate: string,
@@ -103,6 +119,14 @@ function buildConfirmedBreakoutCandidate(
     if (!breakoutBar || side === 'none') {
         return null;
     }
+
+    const breakoutIndex = sessionBars.findIndex((bar) => bar.timestamp === breakoutBar.timestamp);
+    if (breakoutIndex <= 0) {
+        return null;
+    }
+
+    const preBreakoutBar = sessionBars[breakoutIndex - 1];
+    const preBreakoutWickPrice = side === 'buy' ? preBreakoutBar.high : preBreakoutBar.low;
 
     const postBreakoutBars = sessionBars.filter(
         (bar) => new Date(bar.timestamp).getTime() > new Date(breakoutBar.timestamp).getTime()
@@ -151,6 +175,7 @@ function buildConfirmedBreakoutCandidate(
         openingRangeHigh: openingRange.high,
         openingRangeLow: openingRange.low,
         atr1m,
+        preBreakoutWickPrice,
     };
 }
 
@@ -162,7 +187,75 @@ async function evaluateSymbol(
     try {
         const position = await client.getOpenPosition(symbol);
         if (position) {
-            logger.debug('Skipping symbol with existing position', { symbol, position });
+            if (position.entryPrice == null) {
+                logger.warn('Skipping position management due to missing entry price', {
+                    symbol,
+                    side: position.side,
+                    qty: position.qty,
+                });
+                return null;
+            }
+
+            const bars = await client.getIntradayBars(symbol, sessionDate);
+            const sessionBars = dedupeAndSortBars(bars).filter(
+                (bar) => toNyParts(bar.timestamp, strategyConfig.sessionTimezone).date === sessionDate
+            );
+            const latestBar = sessionBars[sessionBars.length - 1];
+
+            if (!latestBar) {
+                logger.debug('Skipping symbol with existing position and no session bars', {
+                    symbol,
+                    sessionDate,
+                    side: position.side,
+                    entryPrice: position.entryPrice,
+                });
+                return null;
+            }
+
+            if (!isInProfitCaptureWindow(latestBar)) {
+                logger.debug('Skipping profit-capture close outside end-of-day window', {
+                    symbol,
+                    side: position.side,
+                    entryPrice: position.entryPrice,
+                    latestClose: latestBar.close,
+                    latestTimestamp: latestBar.timestamp,
+                    forceExitTimeHHMM: strategyConfig.forceExitTimeHHMM,
+                });
+                return null;
+            }
+
+            const shouldClose = shouldClosePositionForProfitCapture({
+                side: position.side,
+                entryPrice: position.entryPrice,
+                latestClose: latestBar.close,
+            });
+
+            if (shouldClose) {
+                if (env.dryRun) {
+                    logger.info('Dry-run: profit-capture rule would close open position', {
+                        symbol,
+                        side: position.side,
+                        entryPrice: position.entryPrice,
+                        latestClose: latestBar.close,
+                    });
+                } else {
+                    await client.closePosition(symbol);
+                    logger.info('Closed open position for end-of-day profit capture', {
+                        symbol,
+                        side: position.side,
+                        entryPrice: position.entryPrice,
+                        latestClose: latestBar.close,
+                    });
+                }
+            } else {
+                logger.debug('Keeping open position; close is not yet favorable for profit capture', {
+                    symbol,
+                    side: position.side,
+                    entryPrice: position.entryPrice,
+                    latestClose: latestBar.close,
+                });
+            }
+
             return null;
         }
 

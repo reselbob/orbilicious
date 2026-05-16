@@ -32,10 +32,23 @@ describe('reporting tests', () => {
 
         if (!isWeekday || currentMinutes >= marketCloseMinutes) {
             // Market closed: generate report from current-day historical bars.
-            const result = await client.generateOrbReport(sessionDate);
-            expect(result.sessionDate).to.equal(sessionDate);
-            expect(fs.existsSync(result.pdfReportPath)).to.be.true;
-            return;
+            try {
+                const result = await client.generateOrbReport(sessionDate);
+                expect(result.sessionDate).to.equal(sessionDate);
+                expect(fs.existsSync(result.pdfReportPath)).to.be.true;
+                return;
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                if (message.includes('fewer than 30 session bars')) {
+                    logger.warn('No session bars. Not a trading day.', {
+                        sessionDate,
+                        error: message,
+                    });
+                    return;
+                }
+
+                throw error;
+            }
         }
 
         if (currentMinutes < marketOpenMinutes) {
@@ -128,20 +141,15 @@ describe('reporting tests', () => {
         }
     });
 
-    it('respects injected RUN_DATE', async function () {
+    it('respects RUN_DATE set in environment variable', async function () {
         this.timeout(150_000);
 
         const existingRunDate = process.env.RUN_DATE;
         let injectedRunDate: string | null = null;
 
         if (!existingRunDate || existingRunDate.trim() === '') {
-            // Inject one week ago only when RUN_DATE is not already set.
-            const today = new Date();
-            const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
-            const year = weekAgo.getFullYear();
-            const month = String(weekAgo.getMonth() + 1).padStart(2, '0');
-            const day = String(weekAgo.getDate()).padStart(2, '0');
-            injectedRunDate = `${year}-${month}-${day}`;
+            // Inject a known-good reporting date only when RUN_DATE is not already set.
+            injectedRunDate = '2026-05-14';
             process.env.RUN_DATE = injectedRunDate;
         }
 
@@ -156,6 +164,25 @@ describe('reporting tests', () => {
         try {
             const result = await new AlpacaClient().generateOrbReport(runDate!, {
                 usesHistoricData: true,
+            });
+
+            expect(result.sessionDate).to.equal(runDate!);
+
+            result.emulatedTrades.forEach((trade) => {
+                if (trade.preBreakoutWickPrice != null) {
+                    expect(trade.stopPrice).to.equal(trade.preBreakoutWickPrice);
+                }
+
+                const stopDistance =
+                    trade.side === 'buy'
+                        ? trade.price - trade.stopPrice
+                        : trade.stopPrice - trade.price;
+                const targetDistance =
+                    trade.side === 'buy'
+                        ? trade.takeProfitPrice - trade.price
+                        : trade.price - trade.takeProfitPrice;
+
+                expect(targetDistance).to.be.closeTo(stopDistance * env.takeProfitMultiple, 0.0001);
             });
 
             // Verify report path includes the target date.

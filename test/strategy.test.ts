@@ -4,6 +4,7 @@ import { computeOpeningRange, generateOrbSignal } from '../src/strategy';
 import { Bar, Position, StrategyConfig } from '../src/types';
 import { AlpacaClient } from '../src/alpaca';
 import { findBreakoutCandidates } from '../src/app';
+import { buildWeightedRiskTrades } from '../src/basket';
 import { env, strategyConfig } from '../src/config';
 import { logger } from '../src/logger';
 
@@ -74,6 +75,45 @@ function makeSymbolBreakoutBars(symbol: string, sessionDate: string): Bar[] {
     return bars;
 }
 
+function makeSymbolBreakdownBars(symbol: string, sessionDate: string): Bar[] {
+    const bars: Bar[] = [];
+    const [year, month, day] = sessionDate.split('-');
+
+    for (let minute = 30; minute <= 44; minute++) {
+        bars.push({
+            symbol,
+            timestamp: `${year}-${month}-${day}T13:${String(minute).padStart(2, '0')}:00Z`,
+            open: 100,
+            high: 101,
+            low: 99,
+            close: 100,
+            volume: 1000,
+        });
+    }
+
+    bars.push({
+        symbol,
+        timestamp: `${year}-${month}-${day}T13:45:00Z`,
+        open: 99,
+        high: 99.2,
+        low: 97.8,
+        close: 98,
+        volume: 5000,
+    });
+
+    bars.push({
+        symbol,
+        timestamp: `${year}-${month}-${day}T13:46:00Z`,
+        open: 98.8,
+        high: 99.2,
+        low: 98.2,
+        close: 98.5,
+        volume: 4500,
+    });
+
+    return bars;
+}
+
 class DeterministicStrategyClient extends AlpacaClient {
     requestedMostActiveLimit: number | undefined;
 
@@ -95,6 +135,29 @@ class DeterministicStrategyClient extends AlpacaClient {
 
     async getIntradayBars(symbol: string, _sessionDate: string): Promise<Bar[]> {
         return makeSymbolBreakoutBars(symbol, this.sessionDate);
+    }
+}
+
+class WickStopDeterministicClient extends AlpacaClient {
+    requestedMostActiveLimit: number | undefined;
+
+    constructor(
+        private readonly barsBySymbol: Record<string, Bar[]>
+    ) {
+        super();
+    }
+
+    async getMostActiveSymbols(limit = 40): Promise<string[]> {
+        this.requestedMostActiveLimit = limit;
+        return Object.keys(this.barsBySymbol);
+    }
+
+    async getOpenPosition(_symbol: string): Promise<Position | null> {
+        return null;
+    }
+
+    async getIntradayBars(symbol: string, _sessionDate: string): Promise<Bar[]> {
+        return this.barsBySymbol[symbol] ?? [];
     }
 }
 
@@ -229,5 +292,61 @@ describe('strategy integration', () => {
         expect(candidates).to.be.an('array');
         expect(candidates.map((candidate) => candidate.symbol)).to.deep.equal(mostActiveSymbols);
         expect(candidates.every((candidate) => candidate.side === 'buy')).to.equal(true);
+    });
+
+    it('stop loss limit set according to previous to breakout candlestick', async () => {
+        const sessionDate = '2099-05-14';
+        const longSymbol = 'AAPL';
+        const shortSymbol = 'TSLA';
+
+        const client = new WickStopDeterministicClient({
+            [longSymbol]: makeSymbolBreakoutBars(longSymbol, sessionDate),
+            [shortSymbol]: makeSymbolBreakdownBars(shortSymbol, sessionDate),
+        });
+
+        const candidates = await findBreakoutCandidates(client, sessionDate);
+        const trades = buildWeightedRiskTrades(candidates, 1000, env.takeProfitMultiple);
+
+        const longTrade = trades.find((trade) => trade.symbol === longSymbol);
+        const shortTrade = trades.find((trade) => trade.symbol === shortSymbol);
+
+        expect(longTrade).to.not.equal(undefined);
+        expect(shortTrade).to.not.equal(undefined);
+
+        const resolvedLongTrade = longTrade!;
+        const resolvedShortTrade = shortTrade!;
+
+        const expectedLongStop = 101;
+        const expectedShortStop = 99;
+
+        expect(resolvedLongTrade.stopPrice).to.equal(expectedLongStop);
+        expect(resolvedShortTrade.stopPrice).to.equal(expectedShortStop);
+
+        const expectedLongTakeProfit =
+            resolvedLongTrade.price + (resolvedLongTrade.price - expectedLongStop) * env.takeProfitMultiple;
+        const expectedShortTakeProfit =
+            resolvedShortTrade.price - (expectedShortStop - resolvedShortTrade.price) * env.takeProfitMultiple;
+
+        expect(resolvedLongTrade.takeProfitPrice).to.equal(expectedLongTakeProfit);
+        expect(resolvedShortTrade.takeProfitPrice).to.equal(expectedShortTakeProfit);
+
+        logger.info('Verified wick-anchored bracket exits from pre-breakout candle', {
+            stopLossProfitRatio: env.stopLossProfitRatio,
+            takeProfitMultiple: env.takeProfitMultiple,
+            long: {
+                symbol: resolvedLongTrade.symbol,
+                entry: resolvedLongTrade.price,
+                stop: resolvedLongTrade.stopPrice,
+                takeProfit: resolvedLongTrade.takeProfitPrice,
+                preBreakoutWick: expectedLongStop,
+            },
+            short: {
+                symbol: resolvedShortTrade.symbol,
+                entry: resolvedShortTrade.price,
+                stop: resolvedShortTrade.stopPrice,
+                takeProfit: resolvedShortTrade.takeProfitPrice,
+                preBreakoutWick: expectedShortStop,
+            },
+        });
     });
 });
