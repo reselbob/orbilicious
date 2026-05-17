@@ -1,5 +1,7 @@
 # ORB Alpaca Node
 
+![ORBilicious Web Client running with live trade monitor and daily P/L summary](docs/orb-05-17-2026-01.png)
+
 A complete Node + TypeScript starter project for a 15-minute Opening Range Breakout strategy on 1-minute bars with:
 
 - Alpaca market-data integration
