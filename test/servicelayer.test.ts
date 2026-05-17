@@ -28,6 +28,7 @@ class StubAlpacaClient extends AlpacaClient {
             evaluationRows: [],
             breakoutCandidates: [],
             emulatedTrades: [],
+            finalOutcomes: [],
             htmlReportPath: '/tmp/orb-report.html',
             pdfReportPath: '/tmp/orb-report.pdf',
             maxSessionBars: 30,
