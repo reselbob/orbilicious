@@ -24,10 +24,18 @@ const envSnapshot = { ...env };
 const strategySnapshot = { ...strategyConfig };
 let restores: RestoreFn[] = [];
 
+/**
+ * Registers a teardown callback that will be invoked in reverse order during
+ * the afterEach hook to undo any mutation performed by a test helper.
+ */
 function registerRestore(fn: RestoreFn) {
     restores.push(fn);
 }
 
+/**
+ * Replaces a single property on `target` with `replacement` and registers a
+ * restore callback so the original value is put back after each test.
+ */
 function stubProperty<T extends object, K extends keyof T>(target: T, key: K, replacement: T[K]) {
     const original = target[key];
     (target as T)[key] = replacement;
@@ -36,6 +44,12 @@ function stubProperty<T extends object, K extends keyof T>(target: T, key: K, re
     });
 }
 
+/**
+ * Monkey-patches `process.stdout.write` so every string written to stdout is
+ * collected into the returned array while still forwarding each write to the
+ * real stdout.  The patch is automatically reversed in afterEach via
+ * `stubProperty`.
+ */
 function captureStdout() {
     const writes: string[] = [];
     const originalWrite = process.stdout.write.bind(process.stdout);
@@ -46,6 +60,11 @@ function captureStdout() {
     return writes;
 }
 
+/**
+ * Stubs `logger.info` and `logger.warn` so that messages logged at those
+ * levels are captured into the returned arrays instead of (or in addition to)
+ * appearing in the console.  Both stubs are reversed in afterEach.
+ */
 function captureLogMessages() {
     const infoMessages: string[] = [];
     const warnMessages: string[] = [];
@@ -63,6 +82,12 @@ function captureLogMessages() {
     return { infoMessages, warnMessages };
 }
 
+/**
+ * Replaces the global `Date` constructor with a mock that advances through
+ * `isoValues` one entry per no-argument `new Date()` or `Date.now()` call.
+ * When the sequence is exhausted the last entry is repeated indefinitely.
+ * The real `Date` constructor is restored in afterEach.
+ */
 function withMockDateSequence(isoValues: string[]) {
     const RealDate = Date;
     let index = 0;
@@ -115,10 +140,21 @@ function withMockDateSequence(isoValues: string[]) {
     });
 }
 
+/**
+ * Removes the cached `src/config` module from Node's require cache so the
+ * next `require('../src/config')` call re-executes the module with whatever
+ * values are currently in `process.env`.
+ */
 function clearConfigModuleCache() {
     delete require.cache[require.resolve('../src/config')];
 }
 
+/**
+ * Populates `process.env` with the minimum valid set of environment variables
+ * required for `src/config` to load without throwing.  Tests that need to
+ * vary a single variable should call this first and then override the
+ * specific key.
+ */
 function withBaseProcessEnv() {
     process.env.APCA_API_KEY_ID = 'key';
     process.env.APCA_API_SECRET_KEY = 'secret';
@@ -139,12 +175,22 @@ function withBaseProcessEnv() {
     process.env.STOP_LOSS_PROFIT_RATIO = '1:4';
 }
 
+/**
+ * Converts an Eastern-Time hour and minute on `sessionDate` to a UTC ISO-8601
+ * timestamp string.  Assumes ET = UTC-4 (EDT).  Used by bar fixtures to
+ * produce realistic timestamps without a timezone library.
+ */
 function makeTimestamp(sessionDate: string, hourEt: number, minuteEt: number) {
     const [year, month, day] = sessionDate.split('-').map(Number);
     const utcHour = hourEt + 4;
     return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(utcHour).padStart(2, '0')}:${String(minuteEt).padStart(2, '0')}:00Z`;
 }
 
+/**
+ * Builds 15 one-minute bars spanning the 9:30–9:44 ET opening-range window.
+ * Every bar shares the same `openingHigh` / `openingLow` extremes and a
+ * `close` of 100, giving a clean, predictable opening range for unit tests.
+ */
 function makeOpeningRangeBars(symbol: string, sessionDate: string, openingHigh = 101, openingLow = 99): Bar[] {
     const bars: Bar[] = [];
     for (let minute = 30; minute <= 44; minute++) {
@@ -161,6 +207,12 @@ function makeOpeningRangeBars(symbol: string, sessionDate: string, openingHigh =
     return bars;
 }
 
+/**
+ * Produces a bar sequence that satisfies every long-breakout confirmation
+ * requirement: an opening range, a breakout bar at 9:45 that closes above the
+ * OR high, and a retest bar at 9:46 that dips back to the OR high and still
+ * closes above it.  Suitable as input to `findBreakoutCandidates`.
+ */
 function makeConfirmedLongCandidateBars(symbol: string, sessionDate: string): Bar[] {
     return [
         ...makeOpeningRangeBars(symbol, sessionDate),
@@ -185,6 +237,12 @@ function makeConfirmedLongCandidateBars(symbol: string, sessionDate: string): Ba
     ];
 }
 
+/**
+ * Produces a bar sequence that satisfies every short-breakout confirmation
+ * requirement: an opening range, a breakdown bar at 9:45 that closes below the
+ * OR low, and a retest bar at 9:46 that bounces back to the OR low and still
+ * closes below it.  Suitable as input to `findBreakoutCandidates`.
+ */
 function makeConfirmedShortCandidateBars(symbol: string, sessionDate: string): Bar[] {
     return [
         ...makeOpeningRangeBars(symbol, sessionDate),
@@ -209,6 +267,12 @@ function makeConfirmedShortCandidateBars(symbol: string, sessionDate: string): B
     ];
 }
 
+/**
+ * Produces a bar sequence where the breakout close occurs at 10:00, which is
+ * outside the one-opening-range-sized evaluation window (9:45–9:59 with
+ * default 15-minute settings).  Candidates built from these bars should be
+ * rejected by the late-breakout rule (rule 18).
+ */
 function makeLateBreakoutBars(symbol: string, sessionDate: string): Bar[] {
     const bars = makeOpeningRangeBars(symbol, sessionDate);
     for (let minute = 45; minute <= 59; minute++) {
@@ -234,6 +298,12 @@ function makeLateBreakoutBars(symbol: string, sessionDate: string): Bar[] {
     return bars;
 }
 
+/**
+ * Produces a bar sequence where a long breakout fires at 9:45 but the
+ * following bar never trades back down to the OR high — the low stays above
+ * the OR high throughout — so no retest confirmation occurs.  Candidates built
+ * from these bars should be rejected by the retest rule (rule 19).
+ */
 function makeNoRetestBars(symbol: string, sessionDate: string): Bar[] {
     return [
         ...makeOpeningRangeBars(symbol, sessionDate),
@@ -258,6 +328,12 @@ function makeNoRetestBars(symbol: string, sessionDate: string): Bar[] {
     ];
 }
 
+/**
+ * Builds a minimal but structurally complete `OrbReportResult` fixture for
+ * `sessionDate`.  Contains one evaluated symbol (SPY), one emulated long
+ * trade, and one profitable final outcome with a P/L of $8.  Used to satisfy
+ * the return type of stubbed `generateOrbReport` calls without hitting Alpaca.
+ */
 function makeHistoricalReport(sessionDate: string): OrbReportResult {
     return {
         sessionDate,
@@ -326,6 +402,10 @@ afterEach(() => {
 });
 
 describe('Operational Rules support', () => {
+    // Rules 1-2: Verifies that src/config correctly validates required env vars,
+    // normalises SESSION_DATE to YYYY-MM-DD, rejects invalid STOP_LOSS_PROFIT_RATIO
+    // and SESSION_MODE values, sets dryRun=false for PAPER and LIVE modes, and
+    // selects the appropriate Alpaca trading base URL for each mode.
     it('rules 1-2: validates environment configuration and derives execution mode settings', () => {
         const originalProcessEnv = { ...process.env };
         registerRestore(() => {
@@ -362,6 +442,11 @@ describe('Operational Rules support', () => {
         expect(() => require('../src/config')).to.throw('Invalid session mode');
     });
 
+    // Rules 3-6 and 31: Verifies that startApp in EMULATION mode with a past SESSION_DATE
+    // builds a weekday-only date range, emits the three-step UI progress sequence
+    // (__UI_STATUS__Determing open ranage → High/Low range prices → Waiting for breakouts)
+    // for each session, skips sessions that throw (rule 6), and emits the close UI
+    // message before the trade-monitor close event for profitable historical trades (rule 31).
     it('rules 3-6 and 31: historical emulation filters weekdays, emits progress UI messages, skips failures, and reports closes', async () => {
         env.sessionMode = 'EMULATION';
         env.sessionDate = '2026-05-14';
@@ -404,6 +489,10 @@ describe('Operational Rules support', () => {
         expect(output.indexOf('__UI_STATUS__Closing SPY for a profit of $8.00.')).to.be.lessThan(output.indexOf('"eventType":"close"'));
     });
 
+    // Rules 7 and 32: Verifies that the current-day scheduler (no SESSION_DATE) logs
+    // "Waiting for market open" when the mocked clock is before the NY open, then later
+    // generates exactly one end-of-day report once the clock advances past market close,
+    // and logs the one-shot exit message before terminating.
     it('rules 7 and 32: current-day scheduling waits before open and exits after generating one end-of-day report', async () => {
         env.sessionMode = 'PAPER';
         env.sessionDate = '';
@@ -434,6 +523,10 @@ describe('Operational Rules support', () => {
         expect(reportedSessions).to.deep.equal(['2026-05-18']);
     });
 
+    // Rules 8-9: Verifies that after the 15-minute opening-range window closes the app
+    // emits the opening-range completion status (__UI_STATUS__Determing open ranage.,
+    // __UI_STATUS__High range prices / Low range prices) and then appends the most-active
+    // symbol list to the Waiting for breakouts message.
     it('rules 8-9: current-day mode emits opening-range and waiting-for-breakouts UI messages after the OR window completes', async () => {
         env.sessionMode = 'PAPER';
         env.sessionDate = '';
@@ -468,6 +561,12 @@ describe('Operational Rules support', () => {
         expect(output).to.include('__UI_STATUS__Waiting for breakouts. Breakout candidate symbols: SPY, QQQ');
     });
 
+    // Rules 10-16: Verifies that runCycle immediately returns without querying the
+    // symbol universe when tradingBlocked=true (rule 10); that findBreakoutCandidates
+    // switches to profit-capture for existing positions and emits a close UI message
+    // (rules 12-14); that symbols with no intraday bars are silently skipped (rule 16);
+    // and that executeSizedTrades registers symbols in executedToday so a second call
+    // for the same session finds no eligible candidates (rule 15).
     it('rules 10-16: runCycle halts on trading block, and candidate evaluation handles positions, duplicates, and missing bars', async () => {
         class TradingBlockedClient extends AlpacaClient {
             mostActiveCalls = 0;
@@ -540,6 +639,11 @@ describe('Operational Rules support', () => {
         expect(secondPass).to.have.length(0);
     });
 
+    // Rules 17-22: Verifies that findBreakoutCandidates returns only symbols with
+    // a confirmed retest (LONG_OK and SHORT_OK pass; NO_RETEST and LATE_BREAKOUT are
+    // rejected), that the wick-anchor stop prices are taken from the pre-breakout bar's
+    // high/low (rule 20), that ATR is computed and is positive (rule 21), and that
+    // candidate scores exceed MIN_SCORE (rule 22).
     it('rules 17-22: builds only confirmed breakout candidates with wick anchors, ATR, and positive scores', async () => {
         class CandidateClient extends AlpacaClient {
             async getMostActiveSymbols(limit = 40) {
@@ -575,6 +679,12 @@ describe('Operational Rules support', () => {
         expect((bySymbol.get('LONG_OK')?.score ?? 0)).to.be.greaterThan(MIN_SCORE);
     });
 
+    // Rules 23-28: Verifies the full sizing pipeline using synthetic candidates.
+    // Confirms that rankAndSelectCandidates keeps the top-N per side by score (rule 23),
+    // that buildWeightedRiskTrades assigns wick-anchored stop prices and 4R profit targets
+    // (rules 25 and 27), that a zero-ATR candidate is dropped (rule 26), and that
+    // normalizeTradesToConstraints scales the basket so total risk, total notional, and
+    // per-position notional all stay within their caps (rule 28).
     it('rules 23-28: ranks candidates, assigns weighted risk, derives stops and 4R targets, and normalizes to constraints', () => {
         const candidates = [
             {
@@ -664,6 +774,11 @@ describe('Operational Rules support', () => {
         expect(normalized.every((trade) => Number(trade.qty.toFixed(4)) === trade.qty)).to.equal(true);
     });
 
+    // Rules 29-30: Verifies that executeSizedTrades skips a symbol on the second call
+    // for the same session date (duplicate protection, rule 29); that dryRun=true emits
+    // exactly one trade-monitor open event to stdout without calling submitBracketOrder
+    // (rule 30 EMULATION path); and that dryRun=false calls submitBracketOrder with the
+    // correct symbol, side, and quantity for a new session date (rule 30 LIVE path).
     it('rules 29-30: execution prevents duplicates, uses dry-run monitor events in EMULATION, and submits bracket orders outside dry-run', async () => {
         class ExecutionClient extends AlpacaClient {
             submitted: Array<{ symbol: string; side: 'buy' | 'sell'; qty: number }> = [];
