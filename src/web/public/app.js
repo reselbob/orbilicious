@@ -38,6 +38,7 @@ let tradeCursor = 0;
 let tradeEvents = [];
 let latestBacktestProgress = null;
 let activeTopLevelReportSrc = '';
+let latestOrbUiMessage = '';
 
 function todayIsoDate() {
     const now = new Date();
@@ -85,17 +86,23 @@ function syncEmulationControls() {
 
     const isLiveEmu = isLiveEmulation();
     const isContinuous = continuousMode.checked;
-    liveEmulationWarning.classList.toggle('d-none', !isLiveEmu);
+    const hasOrbUiMessage = typeof latestOrbUiMessage === 'string' && latestOrbUiMessage.trim() !== '';
+    const shouldShowWarning = isLiveEmu || (isEmulation && hasOrbUiMessage);
+    liveEmulationWarning.classList.toggle('d-none', !shouldShowWarning);
+
+    if (isEmulation && hasOrbUiMessage) {
+        liveEmulationWarningText.textContent = latestOrbUiMessage;
+    }
 
     // Update message based on continuous mode
-    if (isLiveEmu && isContinuous) {
+    if (isLiveEmu && isContinuous && !hasOrbUiMessage) {
         const marketsOpen = areNYMarketsOpen();
         if (marketsOpen) {
             liveEmulationWarningText.textContent = 'Emulation is running live and in continuous mode, but no trades will actually be executed against your account.';
         } else {
             liveEmulationWarningText.textContent = 'Emulation is running live and in continuous mode, but no trades will be executed until the NY Markets open.';
         }
-    } else if (isLiveEmu) {
+    } else if (isLiveEmu && !hasOrbUiMessage) {
         const marketsOpen = areNYMarketsOpen();
         if (marketsOpen) {
             liveEmulationWarningText.textContent = 'Emulation is running live, but no trades will actually be executed against your account.';
@@ -358,6 +365,7 @@ async function refreshStatus() {
         startBtn.disabled = payload.isRunning === true;
         stopBtn.disabled = payload.isRunning !== true;
         renderBacktestProgress(payload.backtestProgress || null);
+        latestOrbUiMessage = typeof payload.orbUiMessage === 'string' ? payload.orbUiMessage : '';
         syncEmulationControls();
 
         // Show market closed message if waiting for market open

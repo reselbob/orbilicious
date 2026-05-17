@@ -43,6 +43,10 @@ type BacktestProgressEvent = {
     completed: boolean;
 };
 
+type UiStatusEvent = {
+    message: string;
+};
+
 function emitTradeMonitorEvent(event: TradeMonitorEvent) {
     try {
         const payload = JSON.stringify(event);
@@ -58,6 +62,54 @@ function emitBacktestProgressEvent(event: BacktestProgressEvent) {
         process.stdout.write(`__BACKTEST_PROGRESS__${payload}\n`);
     } catch {
         // Keep failures silent so monitoring output never blocks strategy execution.
+    }
+}
+
+function emitUiStatusEvent(event: UiStatusEvent) {
+    try {
+        process.stdout.write(`__UI_STATUS__${event.message}\n`);
+    } catch {
+        // Keep failures silent so monitoring output never blocks strategy execution.
+    }
+}
+
+function emitTradeCloseUiStatus(symbol: string, pnl: number) {
+    const status = pnl > 0 ? 'profit' : pnl < 0 ? 'loss' : 'break even';
+    const amount = `$${Math.abs(pnl).toFixed(2)}`;
+    emitUiStatusEvent({ message: `Closing ${symbol} for a ${status} of ${amount}.` });
+}
+
+async function emitWaitingForBreakoutsUiStatus(client: AlpacaClient) {
+    try {
+        const symbols = await client.getMostActiveSymbols(env.quantityToRetrieve);
+        if (symbols.length) {
+            emitUiStatusEvent({
+                message: `Waiting for breakouts. Breakout candidate symbols: ${symbols.join(', ')}`,
+            });
+            return;
+        }
+    } catch {
+        // Fall through to default message if symbol lookup fails.
+    }
+
+    emitUiStatusEvent({ message: 'Waiting for breakouts' });
+}
+
+async function emitOpeningRangeUiStatusForSession(client: AlpacaClient, sessionDate: string) {
+    emitUiStatusEvent({ message: 'Determing open ranage.' });
+
+    try {
+        const bars = await client.getIntradayBars(strategyConfig.symbol, sessionDate);
+        const sessionBars = dedupeAndSortBars(bars).filter(
+            (bar) => toNyParts(bar.timestamp, strategyConfig.sessionTimezone).date === sessionDate
+        );
+        const openingRange = computeOpeningRange(sessionBars, sessionDate, strategyConfig);
+        emitUiStatusEvent({
+            message: `High range prices: ${openingRange.high.toFixed(2)}, Low range prices: ${openingRange.low.toFixed(2)}.`,
+        });
+        await emitWaitingForBreakoutsUiStatus(client);
+    } catch {
+        // If bars are unavailable, keep at least the initial status visible.
     }
 }
 
@@ -89,6 +141,7 @@ function emitHistoricalTradeMonitorEvents(report: OrbReportResult) {
             continue;
         }
 
+        emitTradeCloseUiStatus(trade.symbol, outcome.pnl);
         emitTradeMonitorEvent({
             eventType: 'close',
             sessionDate: report.sessionDate,
@@ -368,6 +421,10 @@ async function evaluateSymbol(
                     });
                 }
 
+                const closePnl = position.side === 'long'
+                    ? (latestBar.close - position.entryPrice) * position.qty
+                    : (position.entryPrice - latestBar.close) * position.qty;
+                emitTradeCloseUiStatus(symbol, closePnl);
                 emitTradeMonitorEvent({
                     eventType: 'close',
                     sessionDate,
@@ -378,9 +435,7 @@ async function evaluateSymbol(
                     qty: position.qty,
                     entryPrice: position.entryPrice,
                     closePrice: latestBar.close,
-                    pnl: position.side === 'long'
-                        ? (latestBar.close - position.entryPrice) * position.qty
-                        : (position.entryPrice - latestBar.close) * position.qty,
+                    pnl: closePnl,
                     reason: 'profit-capture close',
                 });
             } else {
@@ -652,6 +707,7 @@ export async function startApp(options?: StartAppOptions) {
 
         for (const sessionDate of weekdayDates) {
             try {
+                await emitOpeningRangeUiStatusForSession(client, sessionDate);
                 const report = await client.generateOrbReport(sessionDate, { usesHistoricData: true });
                 emitHistoricalTradeMonitorEvents(report);
                 processedDates += 1;
@@ -697,7 +753,10 @@ export async function startApp(options?: StartAppOptions) {
 
     const marketOpenMinutes = strategyConfig.sessionOpenHour * 60 + strategyConfig.sessionOpenMinute;
     const marketCloseMinutes = minutesFromHHMM(strategyConfig.forceExitTimeHHMM);
+    const openingRangeEndMinutes = marketOpenMinutes + strategyConfig.openingRangeMinutes;
     const isCurrentDayMode = !continuousMode;
+    const reportedOpeningRangeByDate = new Set<string>();
+    const reportedWaitingBreakoutsByDate = new Set<string>();
 
     logger.info('Starting ORB normalized weighted-risk runner (daily schedule)', {
         sessionDateMode: 'current-day',
@@ -732,6 +791,20 @@ export async function startApp(options?: StartAppOptions) {
             } else if (currentMinutes < marketOpenMinutes) {
                 logger.info('Waiting for market open', { sessionDate, currentTime: nyNow.hhmm });
             } else if (currentMinutes < marketCloseMinutes) {
+                if (currentMinutes < openingRangeEndMinutes) {
+                    emitUiStatusEvent({ message: 'Determing open ranage.' });
+                } else if (!reportedOpeningRangeByDate.has(sessionDate)) {
+                    try {
+                        await emitOpeningRangeUiStatusForSession(client, sessionDate);
+                        reportedOpeningRangeByDate.add(sessionDate);
+                    } catch {
+                        // Keep polling; opening-range bars may still be settling in the data source.
+                    }
+                } else if (!reportedWaitingBreakoutsByDate.has(sessionDate)) {
+                    await emitWaitingForBreakoutsUiStatus(client);
+                    reportedWaitingBreakoutsByDate.add(sessionDate);
+                }
+
                 await runCycle(client, sessionDate);
             } else if (!reportedDates.has(sessionDate)) {
                 logger.info('Market closed; generating end-of-day ORB report', {

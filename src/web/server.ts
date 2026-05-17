@@ -12,6 +12,7 @@ type AppState = {
     isRunning: boolean;
     startedAt: string | null;
     runtimeStatus: string;
+    orbUiMessage: string | null;
     continuous: boolean;
     sessionMode: SessionMode;
     emulationSessionDate: string | null;
@@ -87,6 +88,7 @@ const appState: AppState = {
     isRunning: false,
     startedAt: null,
     runtimeStatus: 'Idle',
+    orbUiMessage: null,
     continuous: false,
     sessionMode: 'EMULATION',
     emulationSessionDate: null,
@@ -262,6 +264,12 @@ function wireProcessOutput(stream: 'stdout' | 'stderr', source: NodeJS.ReadableS
                 continue;
             }
 
+            if (line.startsWith('__UI_STATUS__')) {
+                const payload = line.slice('__UI_STATUS__'.length).trim();
+                appState.orbUiMessage = payload || null;
+                continue;
+            }
+
             addActivityLine(stream, line);
         }
     });
@@ -293,6 +301,7 @@ function startOrbiliciousProcess(params: {
     tradeEvents = [];
     nextTradeEventId = 1;
     appState.backtestProgress = null;
+    appState.orbUiMessage = null;
     appState.isRunning = true;
     appState.startedAt = new Date().toISOString();
 
@@ -383,6 +392,7 @@ function startOrbiliciousProcess(params: {
         appState.isRunning = false;
         appState.pid = null;
         appState.runtimeStatus = 'Failed';
+        appState.orbUiMessage = null;
         appState.lastOutcome = 'failed';
         appState.lastError = error.message;
         addActivityLine('system', `Process error: ${error.message}`);
@@ -396,6 +406,7 @@ function startOrbiliciousProcess(params: {
         appState.isRunning = false;
         appState.pid = null;
         appState.runtimeStatus = 'Stopped';
+        appState.orbUiMessage = null;
 
         if (wasStopRequested || signal === 'SIGTERM') {
             appState.lastOutcome = 'completed';
