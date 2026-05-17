@@ -40,7 +40,7 @@ A complete Node + TypeScript starter project for a 15-minute Opening Range Break
 - Stop loss:
   - Long: opening-range low
   - Short: opening-range high
-- Profit target: 4R, where R is the entry-to-stop distance.
+- Profit target: 4R, where R is the entry-to-stop distance. by default (1:4), or the ratio declared in the environment variable `STOP_LOSS_PROFIT_RATIO`
 - Risk budget: total planned stop-loss exposure across the full basket defaults to $1000.
 - Basket normalization: trade sizes are scaled so the full basket fits both:
   - configured total stop-loss risk cap
