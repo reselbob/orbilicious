@@ -1,18 +1,5 @@
 # ORB Alpaca Node
 
-![ORBilicious Web Client running with live trade monitor and daily P/L summary](docs/orb-05-17-2026-01.png)
-
-A complete Node + TypeScript starter project for a 15-minute Opening Range Breakout strategy on 1-minute bars with:
-
-- Alpaca market-data integration
-- Alpaca bracket-order execution
-- Top-40 most active universe scan
-- Top-10 long and top-10 short candidate selection
-- Weighted total stop-risk sizing
-- Basket normalization to fit both total planned stop-loss risk and available buying power
-- Winston-based structured logging
-- Source-level ORB PDF report generation (end-of-day live or historical by date)
-
 ## Table of Contents
 
 - [Strategy rules](#strategy-rules)
@@ -31,12 +18,25 @@ A complete Node + TypeScript starter project for a 15-minute Opening Range Break
 - [Notes](#notes)
 - [Recommended next upgrades](#recommended-next-upgrades)
 
+![ORBilicious Web Client running with live trade monitor and daily P/L summary](docs/orb-05-17-2026-01.png)
+
+A complete Node + TypeScript starter project for a 15-minute Opening Range Breakout strategy on 1-minute bars with:
+
+- Alpaca market-data integration
+- Alpaca bracket-order execution
+- Top-40 most active universe scan
+- Top-10 long and top-10 short candidate selection
+- Weighted total stop-risk sizing
+- Basket normalization to fit both total planned stop-loss risk and available buying power
+- Winston-based structured logging
+- Source-level ORB PDF report generation (end-of-day live or historical by date)
+
 ## Strategy rules
 
 - Universe: top 40 most active stocks.
 - Opening range: 9:30 to 9:44 ET.
 - Entry confirmation: first 1-minute candle close above OR high for long, or below OR low for short.
-- Selection: top 10 longs and top 10 shorts by breakout score.
+- Selection: Breakout candidates for long and short trades determined by breakout score.
 - Stop loss:
   - Long: opening-range low
   - Short: opening-range high
