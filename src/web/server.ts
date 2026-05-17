@@ -2,13 +2,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { spawn, ChildProcessWithoutNullStreams } from 'node:child_process';
+import puppeteer from 'puppeteer';
 import { logger } from '../logger';
+import { OrbService } from '../services/orb-service';
 
 type SessionMode = 'EMULATION' | 'PAPER' | 'LIVE';
 
 type AppState = {
     isRunning: boolean;
     startedAt: string | null;
+    runtimeStatus: string;
     continuous: boolean;
     sessionMode: SessionMode;
     emulationSessionDate: string | null;
@@ -36,6 +39,13 @@ type StartRequest = {
     moneyInAccount?: number;
     maxRiskPerSession?: number;
     stopProfitRewardPart?: number;
+};
+
+type ReportKind = 'today' | 'week' | 'month';
+
+type GenerateReportRequest = {
+    reportType?: ReportKind;
+    anchorDate?: string;
 };
 
 type ActivityLine = {
@@ -76,6 +86,7 @@ const MAX_TRADE_EVENTS = 1000;
 const appState: AppState = {
     isRunning: false,
     startedAt: null,
+    runtimeStatus: 'Idle',
     continuous: false,
     sessionMode: 'EMULATION',
     emulationSessionDate: null,
@@ -94,6 +105,7 @@ let nextActivityId = 1;
 let tradeEvents: TradeEvent[] = [];
 let nextTradeEventId = 1;
 let stopRequested = false;
+const orbService = new OrbService();
 
 function contentTypeFor(filePath: string): string {
     if (filePath.endsWith('.html')) return 'text/html; charset=utf-8';
@@ -283,6 +295,9 @@ function startOrbiliciousProcess(params: {
     appState.backtestProgress = null;
     appState.isRunning = true;
     appState.startedAt = new Date().toISOString();
+    appState.runtimeStatus = sessionMode === 'EMULATION' && emulationSessionDate
+        ? 'Running historical emulation'
+        : 'Running in real time';
     appState.continuous = continuous;
     appState.sessionMode = sessionMode;
     appState.emulationSessionDate = emulationSessionDate;
@@ -310,7 +325,7 @@ function startOrbiliciousProcess(params: {
 
     addActivityLine(
         'system',
-        `Starting Orbilicious in ${sessionMode} mode${continuous ? ' (continuous)' : ''}${emulationSessionDate ? ` for ${emulationSessionDate}` : ''}${hardBasketCap ? ` | Basket Cap: $${hardBasketCap.toLocaleString()}` : ''}${maxTotalRisk ? ` | Max Risk: $${maxTotalRisk.toLocaleString()}` : ''}${stopProfitRewardPart ? ` | Stop/Profit: 1/${stopProfitRewardPart}` : ''}`
+        `Starting ORBilicious in ${sessionMode} mode${continuous ? ' (continuous)' : ''}${emulationSessionDate ? ` for ${emulationSessionDate}` : ''}${hardBasketCap ? ` | Basket Cap: $${hardBasketCap.toLocaleString()}` : ''}${maxTotalRisk ? ` | Max Risk: $${maxTotalRisk.toLocaleString()}` : ''}${stopProfitRewardPart ? ` | Stop/Profit: 1/${stopProfitRewardPart}` : ''}`
     );
 
     wireProcessOutput('stdout', child.stdout);
@@ -319,6 +334,7 @@ function startOrbiliciousProcess(params: {
     child.on('error', (error) => {
         appState.isRunning = false;
         appState.pid = null;
+        appState.runtimeStatus = 'Failed';
         appState.lastOutcome = 'failed';
         appState.lastError = error.message;
         addActivityLine('system', `Process error: ${error.message}`);
@@ -331,19 +347,20 @@ function startOrbiliciousProcess(params: {
 
         appState.isRunning = false;
         appState.pid = null;
+        appState.runtimeStatus = 'Stopped';
 
         if (wasStopRequested || signal === 'SIGTERM') {
             appState.lastOutcome = 'completed';
             appState.lastError = null;
-            addActivityLine('system', 'Orbilicious stopped.');
+            addActivityLine('system', 'ORBilicious stopped.');
         } else if (code === 0) {
             appState.lastOutcome = 'completed';
             appState.lastError = null;
-            addActivityLine('system', 'Orbilicious finished successfully.');
+            addActivityLine('system', 'ORBilicious finished successfully.');
         } else {
             appState.lastOutcome = 'failed';
             appState.lastError = `Exited with code ${code ?? 'unknown'}${signal ? ` (signal: ${signal})` : ''}`;
-            addActivityLine('system', `Orbilicious exited unexpectedly: ${appState.lastError}`);
+            addActivityLine('system', `ORBilicious exited unexpectedly: ${appState.lastError}`);
         }
 
         appProcess = null;
@@ -441,6 +458,410 @@ function listReports() {
     return files;
 }
 
+function nyDateString(date = new Date()): string {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/New_York',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    });
+    return formatter.format(date);
+}
+
+function parseAnchorDateInput(anchorDate?: string): { isoDate: string; dateUtc: Date } {
+    const raw = typeof anchorDate === 'string' && anchorDate.trim() !== ''
+        ? anchorDate.trim()
+        : nyDateString();
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+        throw new Error('Invalid anchor date. Use YYYY-MM-DD.');
+    }
+
+    const [year, month, day] = raw.split('-').map(Number);
+    const dateUtc = new Date(Date.UTC(year, month - 1, day));
+    if (Number.isNaN(dateUtc.getTime())) {
+        throw new Error('Invalid anchor date. Use YYYY-MM-DD.');
+    }
+
+    return {
+        isoDate: raw,
+        dateUtc,
+    };
+}
+
+function isoDateUTC(date: Date): string {
+    const year = String(date.getUTCFullYear()).padStart(4, '0');
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(date.getUTCDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function relativeReportPath(fullPath: string): string {
+    return path.relative(reportsDir, fullPath).split(path.sep).join('/');
+}
+
+function escapeHtml(text: string): string {
+    return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function writeHtmlReport(filePath: string, html: string) {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, html, 'utf8');
+}
+
+function pnlClass(value: number): 'pnl-profit' | 'pnl-loss' | 'pnl-flat' {
+    if (value > 0) return 'pnl-profit';
+    if (value < 0) return 'pnl-loss';
+    return 'pnl-flat';
+}
+
+async function renderHtmlToPdf(htmlPath: string, pdfPath: string) {
+    const browser = await puppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    });
+
+    try {
+        const page = await browser.newPage();
+        await page.goto(`file://${htmlPath}`, { waitUntil: 'networkidle0' });
+        await page.pdf({
+            path: pdfPath,
+            format: 'A4',
+            landscape: true,
+            printBackground: true,
+            margin: {
+                top: '0.5in',
+                right: '0.5in',
+                bottom: '0.5in',
+                left: '0.5in',
+            },
+        });
+    } finally {
+        await browser.close();
+    }
+}
+
+async function generateWeeklyTradingActivityReport(anchorDate: Date): Promise<{
+    title: string;
+    htmlRelativePath: string;
+    pdfRelativePath: string;
+    weekStartDate: string;
+    weekEndDate: string;
+    longs: number;
+    shorts: number;
+    pnl: number;
+}> {
+    const anchorIso = isoDateUTC(anchorDate);
+    const anchorWeekday = anchorDate.getUTCDay();
+    const mondayOffset = (anchorWeekday + 6) % 7;
+    const weekStart = new Date(Date.UTC(
+        anchorDate.getUTCFullYear(),
+        anchorDate.getUTCMonth(),
+        anchorDate.getUTCDate() - mondayOffset,
+    ));
+    const weekEnd = new Date(weekStart);
+    weekEnd.setUTCDate(weekStart.getUTCDate() + 4);
+
+    const weekStartDate = isoDateUTC(weekStart);
+    const weekEndDate = isoDateUTC(weekEnd);
+    const todayNy = nyDateString();
+
+    const effectiveEndDate = weekEndDate < todayNy ? weekEndDate : todayNy;
+
+    const dailyRowsData: Array<{
+        sessionDate: string;
+        longs: number;
+        shorts: number;
+        pnl: number;
+        detailLink: string;
+    }> = [];
+
+    for (const current = new Date(weekStart); isoDateUTC(current) <= effectiveEndDate; current.setUTCDate(current.getUTCDate() + 1)) {
+        const dayOfWeek = current.getUTCDay();
+        if (dayOfWeek === 0 || dayOfWeek === 6) {
+            continue;
+        }
+
+        const sessionDate = isoDateUTC(current);
+
+        try {
+            const daily = await orbService.generateDailyReport(sessionDate, { usesHistoricData: true });
+            dailyRowsData.push({
+                sessionDate,
+                longs: daily.numberOfCandidatesSoldLong,
+                shorts: daily.numberOfCandidatesBoughtShort,
+                pnl: daily.totalProfitLossToDate,
+                detailLink: `/reports/${encodeURI(relativeReportPath(daily.htmlReportPath))}`,
+            });
+        } catch {
+            // Skip unavailable sessions (future/holiday/no data) instead of failing entire weekly report.
+        }
+    }
+
+    const totalLongs = dailyRowsData.reduce((sum, day) => sum + day.longs, 0);
+    const totalShorts = dailyRowsData.reduce((sum, day) => sum + day.shorts, 0);
+    const totalPnl = dailyRowsData.reduce((sum, day) => sum + day.pnl, 0);
+
+    const reportDir = path.resolve(process.cwd(), 'reports');
+    const htmlReportPath = path.join(reportDir, `weekly-trading-activity-${weekEndDate}.html`);
+    const pdfReportPath = path.join(reportDir, `weekly-trading-activity-${weekEndDate}.pdf`);
+    const pdfSourceHtmlPath = path.join(reportDir, `weekly-trading-activity-${weekEndDate}-pdf-source.html`);
+
+    const dailyRows = dailyRowsData.length
+        ? dailyRowsData.map((day) => `
+        <tr>
+            <td>${escapeHtml(day.sessionDate)}</td>
+            <td>${day.longs}</td>
+            <td>${day.shorts}</td>
+            <td class="${pnlClass(day.pnl)}">${day.pnl.toFixed(2)}</td>
+            <td><a href="${day.detailLink}" target="_self">View Day Details</a></td>
+        </tr>`)
+        : [
+            `<tr>
+                <td colspan="5">No reportable trading sessions available yet for this week.</td>
+            </tr>`,
+        ];
+
+    const html = `<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Weekly Trading Activity ${escapeHtml(weekEndDate)}</title>
+    <style>
+        body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(180deg, #f4f7fb, #eef3f9); color: #102a43; padding: 24px; }
+        .panel { background: white; border-radius: 14px; padding: 20px; box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08); margin-bottom: 16px; border: 1px solid #e6edf5; }
+        h1, h2 { margin: 0 0 10px; letter-spacing: 0.01em; }
+        p { margin: 0; color: #334e68; }
+        table { width: 100%; border-collapse: collapse; border: 1px solid #d9e2ec; border-radius: 10px; overflow: hidden; }
+        th, td { border-bottom: 1px solid #d9e2ec; padding: 10px; text-align: left; }
+        thead th { background: #edf3fb; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+        tbody tr:nth-child(even) { background: #f9fbfe; }
+        tbody tr:hover { background: #f1f6fd; }
+        .pnl-profit { color: #198754; font-weight: 700; }
+        .pnl-loss { color: #dc3545; font-weight: 700; }
+        .pnl-flat { color: #6c757d; font-weight: 700; }
+        a { color: #0d6efd; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <section class="panel">
+        <h1>Weekly ORB Drilldown Report for the Week of ${escapeHtml(weekStartDate)} through ${escapeHtml(weekEndDate)}</h1>
+        <p>Totals | Longs: ${totalLongs} | Shorts: ${totalShorts} | P/L: <span class="${pnlClass(totalPnl)}">${totalPnl.toFixed(2)}</span></p>
+    </section>
+    <section class="panel">
+        <h2>Daily Drilldown</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Session Date</th>
+                    <th>Longs</th>
+                    <th>Shorts</th>
+                    <th>P/L</th>
+                    <th>Details</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${dailyRows.join('\n')}
+            </tbody>
+        </table>
+    </section>
+</body>
+</html>`;
+
+    writeHtmlReport(htmlReportPath, html);
+    writeHtmlReport(pdfSourceHtmlPath, html);
+    await renderHtmlToPdf(pdfSourceHtmlPath, pdfReportPath);
+    fs.unlinkSync(pdfSourceHtmlPath);
+
+    return {
+        title: `Weekly ORB Drilldown Report for the Week of ${weekStartDate} through ${weekEndDate}`,
+        htmlRelativePath: relativeReportPath(htmlReportPath),
+        pdfRelativePath: relativeReportPath(pdfReportPath),
+        weekStartDate,
+        weekEndDate,
+        longs: totalLongs,
+        shorts: totalShorts,
+        pnl: totalPnl,
+    };
+}
+
+async function generateMonthlyTradingActivityReport(anchorDate: Date): Promise<{
+    title: string;
+    htmlRelativePath: string;
+    pdfRelativePath: string;
+}> {
+    const year = anchorDate.getUTCFullYear();
+    const month = anchorDate.getUTCMonth() + 1;
+    const firstDay = new Date(Date.UTC(year, month - 1, 1));
+    const lastDay = new Date(Date.UTC(year, month, 0));
+
+    const mondayKeys = new Set<string>();
+    for (const day = new Date(firstDay); day.getTime() <= lastDay.getTime(); day.setUTCDate(day.getUTCDate() + 1)) {
+        const dayOfWeek = day.getUTCDay();
+        if (dayOfWeek === 0 || dayOfWeek === 6) {
+            continue;
+        }
+        const monday = new Date(day);
+        monday.setUTCDate(day.getUTCDate() - ((dayOfWeek + 6) % 7));
+        mondayKeys.add(isoDateUTC(monday));
+    }
+
+    const weekAnchors = [...mondayKeys]
+        .sort()
+        .map((iso) => new Date(`${iso}T00:00:00Z`));
+
+    const weeklyReports: Array<{
+        title: string;
+        htmlRelativePath: string;
+        pdfRelativePath: string;
+        weekStartDate: string;
+        weekEndDate: string;
+        longs: number;
+        shorts: number;
+        pnl: number;
+    }> = [];
+
+    for (const weekAnchor of weekAnchors) {
+        try {
+            const weeklyReport = await generateWeeklyTradingActivityReport(weekAnchor);
+            weeklyReports.push(weeklyReport);
+        } catch {
+            // Skip weeks with no available market session data instead of failing the whole month report.
+        }
+    }
+
+    if (!weeklyReports.length) {
+        throw new Error(`No reportable weekly data available for month ${year}-${String(month).padStart(2, '0')}.`);
+    }
+
+    const totalLongs = weeklyReports.reduce((sum, report) => sum + report.longs, 0);
+    const totalShorts = weeklyReports.reduce((sum, report) => sum + report.shorts, 0);
+    const totalPnl = weeklyReports.reduce((sum, report) => sum + report.pnl, 0);
+    const monthLabel = `${year}-${String(month).padStart(2, '0')}`;
+
+    const reportDir = path.resolve(process.cwd(), 'reports');
+    const htmlReportPath = path.join(reportDir, `monthly-trading-activity-${monthLabel}.html`);
+    const pdfReportPath = path.join(reportDir, `monthly-trading-activity-${monthLabel}.pdf`);
+    const pdfSourceHtmlPath = path.join(reportDir, `monthly-trading-activity-${monthLabel}-pdf-source.html`);
+
+    const weeklyRows = weeklyReports.map((week) => `
+        <tr>
+            <td>${escapeHtml(`${week.weekStartDate} to ${week.weekEndDate}`)}</td>
+            <td>${week.longs}</td>
+            <td>${week.shorts}</td>
+            <td class="${pnlClass(week.pnl)}">${week.pnl.toFixed(2)}</td>
+            <td><a href="/reports/${encodeURI(week.htmlRelativePath)}" target="_self">View Week Details</a></td>
+        </tr>`).join('\n');
+
+    const summaryRow = `
+        <tr>
+            <th>Total</th>
+            <th>${totalLongs}</th>
+            <th>${totalShorts}</th>
+            <th class="${pnlClass(totalPnl)}">${totalPnl.toFixed(2)}</th>
+            <th>-</th>
+        </tr>`;
+
+    const html = `<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Monthly Trading Activity ${escapeHtml(monthLabel)}</title>
+    <style>
+        body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(180deg, #f4f7fb, #eef3f9); color: #102a43; padding: 24px; }
+        .panel { background: white; border-radius: 14px; padding: 20px; box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08); margin-bottom: 16px; border: 1px solid #e6edf5; }
+        h1, h2 { margin: 0 0 10px; letter-spacing: 0.01em; }
+        p { margin: 0; color: #334e68; }
+        table { width: 100%; border-collapse: collapse; border: 1px solid #d9e2ec; border-radius: 10px; overflow: hidden; }
+        th, td { border-bottom: 1px solid #d9e2ec; padding: 10px; text-align: left; }
+        thead th { background: #edf3fb; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+        tfoot th { background: #e6edf5; }
+        tbody tr:nth-child(even) { background: #f9fbfe; }
+        tbody tr:hover { background: #f1f6fd; }
+        .pnl-profit { color: #198754; font-weight: 700; }
+        .pnl-loss { color: #dc3545; font-weight: 700; }
+        .pnl-flat { color: #6c757d; font-weight: 700; }
+        a { color: #0d6efd; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <section class="panel">
+        <h1>Month's Trading Activity</h1>
+        <p>Month: ${escapeHtml(monthLabel)}</p>
+        <p>Totals | Longs: ${totalLongs} | Shorts: ${totalShorts} | P/L: <span class="${pnlClass(totalPnl)}">${totalPnl.toFixed(2)}</span></p>
+    </section>
+    <section class="panel">
+        <h2>Weekly Drilldown</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Week</th>
+                    <th>Longs</th>
+                    <th>Shorts</th>
+                    <th>P/L</th>
+                    <th>Details</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${weeklyRows}
+            </tbody>
+            <tfoot>
+                ${summaryRow}
+            </tfoot>
+        </table>
+    </section>
+</body>
+</html>`;
+
+    writeHtmlReport(htmlReportPath, html);
+    writeHtmlReport(pdfSourceHtmlPath, html);
+    await renderHtmlToPdf(pdfSourceHtmlPath, pdfReportPath);
+    fs.unlinkSync(pdfSourceHtmlPath);
+
+    return {
+        title: "Month's trading activity",
+        htmlRelativePath: relativeReportPath(htmlReportPath),
+        pdfRelativePath: relativeReportPath(pdfReportPath),
+    };
+}
+
+async function generateReportByType(reportType: ReportKind, anchorDate?: string): Promise<{
+    title: string;
+    htmlRelativePath: string;
+    pdfRelativePath: string;
+}> {
+    const anchor = parseAnchorDateInput(anchorDate);
+
+    if (reportType === 'today') {
+        const daily = await orbService.generateDailyReport(anchor.isoDate, { usesHistoricData: true });
+        return {
+            title: "Today's trading activity",
+            htmlRelativePath: relativeReportPath(daily.htmlReportPath),
+            pdfRelativePath: relativeReportPath(daily.pdfReportPath),
+        };
+    }
+
+    if (reportType === 'week') {
+        const weekly = await generateWeeklyTradingActivityReport(anchor.dateUtc);
+        return {
+            title: weekly.title,
+            htmlRelativePath: weekly.htmlRelativePath,
+            pdfRelativePath: weekly.pdfRelativePath,
+        };
+    }
+
+    return generateMonthlyTradingActivityReport(anchor.dateUtc);
+}
+
 async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: string, url: URL) {
     if (req.method === 'GET' && pathname === '/api/health') {
         sendJson(res, 200, { ok: true, service: 'orbilicious-web' });
@@ -476,7 +897,7 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
         if (appState.isRunning) {
             sendJson(res, 409, {
                 ok: false,
-                message: 'Orbilicious is already running',
+                message: 'ORBilicious is already running',
                 state: appState,
             });
             return;
@@ -523,7 +944,7 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
 
         sendJson(res, 202, {
             ok: true,
-            message: `Orbilicious started in ${sessionMode} mode`,
+            message: `ORBilicious started in ${sessionMode} mode`,
             state: appState,
         });
         return;
@@ -534,7 +955,7 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
         if (!didSendSignal) {
             sendJson(res, 409, {
                 ok: false,
-                message: 'Orbilicious is not running',
+                message: 'ORBilicious is not running',
                 state: appState,
             });
             return;
@@ -542,14 +963,47 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
 
         sendJson(res, 202, {
             ok: true,
-            message: 'Stop signal sent to Orbilicious',
+            message: 'Stop signal sent to ORBilicious',
             state: appState,
         });
         return;
     }
 
-    if (req.method === 'GET' && pathname === '/api/reports') {
-        sendJson(res, 200, { reports: listReports() });
+    if (req.method === 'POST' && pathname === '/api/reports/generate') {
+        let payload: GenerateReportRequest;
+        try {
+            payload = await parseJsonBody<GenerateReportRequest>(req);
+        } catch (error) {
+            sendJson(res, 400, {
+                ok: false,
+                message: error instanceof Error ? error.message : 'Bad request payload',
+            });
+            return;
+        }
+
+        const reportType = payload.reportType;
+        if (reportType !== 'today' && reportType !== 'week' && reportType !== 'month') {
+            sendJson(res, 400, {
+                ok: false,
+                message: 'Invalid report type. Use today, week, or month.',
+            });
+            return;
+        }
+
+        try {
+            const report = await generateReportByType(reportType, payload.anchorDate);
+            sendJson(res, 200, {
+                ok: true,
+                report,
+                generatedAt: new Date().toISOString(),
+            });
+        } catch (error) {
+            logger.error('Failed generating report', { reportType, anchorDate: payload.anchorDate, error });
+            sendJson(res, 500, {
+                ok: false,
+                message: error instanceof Error ? error.message : 'Failed generating report',
+            });
+        }
         return;
     }
 

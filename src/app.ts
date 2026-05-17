@@ -580,6 +580,7 @@ export type StartAppOptions = {
 export async function startApp(options?: StartAppOptions) {
     const client = new AlpacaClient();
     const continuousMode = options?.continuous === true;
+    const shouldRunHistorical = env.sessionMode === 'EMULATION' && Boolean(env.sessionDate);
 
     if (continuousMode) {
         logger.info('Program is running in Continuous mode', {
@@ -587,7 +588,14 @@ export async function startApp(options?: StartAppOptions) {
         });
     }
 
-    if (env.sessionDate) {
+    if (env.sessionMode !== 'EMULATION') {
+        logger.info('Running in real time', {
+            sessionMode: env.sessionMode,
+            continuousMode,
+        });
+    }
+
+    if (shouldRunHistorical) {
         logger.info('Starting historical ORB report runner', {
             sessionDate: env.sessionDate,
             quantityToRetrieve: env.quantityToRetrieve,

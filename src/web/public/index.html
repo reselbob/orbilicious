@@ -4,7 +4,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Orbilicious Control Panel</title>
+    <title>ORBilicious Control Panel</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
         integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous" />
     <style>
@@ -88,6 +88,63 @@
             color: #b58100 !important;
             font-weight: 600;
         }
+
+        #dailySummaryHeaderValue.result-profit {
+            color: #198754;
+            font-weight: 700;
+        }
+
+        #dailySummaryHeaderValue.result-loss {
+            color: #dc3545;
+            font-weight: 700;
+        }
+
+        #dailySummaryHeaderValue.result-open {
+            color: #6c757d;
+            font-weight: 700;
+        }
+
+        .confirmation-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.45);
+            z-index: 1050;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+
+        .confirmation-backdrop.d-none {
+            display: none !important;
+        }
+
+        .confirmation-pane {
+            width: min(560px, 100%);
+            background: #fff;
+            border: 1px solid #dee2e6;
+            border-radius: 0.75rem;
+            box-shadow: 0 1rem 3rem rgba(15, 23, 42, 0.2);
+        }
+
+        .confirmation-kv {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            column-gap: 1rem;
+            row-gap: 0.4rem;
+            font-size: 0.95rem;
+        }
+
+        .confirmation-kv dt {
+            color: #6c757d;
+            margin: 0;
+        }
+
+        .confirmation-kv dd {
+            margin: 0;
+            font-weight: 600;
+            text-align: right;
+        }
     </style>
 </head>
 
@@ -95,7 +152,7 @@
     <main class="container py-4">
         <div class="row g-4">
             <div class="col-12">
-                <h1 class="h3 mb-1">Orbilicious Web Client</h1>
+                <h1 class="h3 mb-1">ORBilicious Web Client</h1>
             </div>
 
             <div class="col-12">
@@ -149,19 +206,20 @@
                         </div>
 
                         <div class="mb-3 d-flex gap-2 align-items-center">
-                            <label class="form-label mb-0" for="maxRiskPerSession">Max Amount to Risk Per Trading Day</label>
+                            <label class="form-label mb-0" for="maxRiskPerSession">Max Amount to Risk Per Trading
+                                Day</label>
                             <select id="maxRiskPerSession" class="form-select" style="width: auto;"></select>
                         </div>
 
                         <div class="mb-3 d-flex gap-2 align-items-center">
                             <label class="form-label mb-0" for="stopProfitRatio">Stop/Profit Limit Ratio 1:</label>
-                            <input type="number" id="stopProfitRatio" class="form-control" min="1" max="20"
-                                value="4" style="width: 70px;" />
+                            <input type="number" id="stopProfitRatio" class="form-control" min="1" max="20" value="4"
+                                style="width: 70px;" />
                         </div>
 
                         <div class="d-flex gap-2 mb-3">
-                            <button id="startBtn" class="btn btn-primary">Start Orbilicious</button>
-                            <button id="stopBtn" class="btn btn-outline-danger">Stop Orbilicious</button>
+                            <button id="startBtn" class="btn btn-primary">Start ORBilicious</button>
+                            <button id="stopBtn" class="btn btn-outline-danger">Stop ORBilicious</button>
                             <button id="refreshStatusBtn" class="btn btn-outline-secondary">Refresh Status</button>
                         </div>
 
@@ -215,7 +273,13 @@
 
                 <div class="card shadow-sm mt-3">
                     <div class="card-header card-header-actions">
-                        <span>Daily Summary</span>
+                        <div>
+                            <div>Daily Summary</div>
+                            <div id="dailySummaryHeaderDetail" class="small">
+                                <span class="fw-bold">P/L to date:</span>
+                                <span id="dailySummaryHeaderValue" class="trade-price result-open">0.00</span>
+                            </div>
+                        </div>
                         <button class="btn btn-sm btn-outline-secondary pane-expand-btn" type="button"
                             data-target="dailySummaryPane" aria-expanded="false">Expand</button>
                     </div>
@@ -244,18 +308,28 @@
                     <div class="card-header">Reports</div>
                     <div class="card-body">
                         <div class="row g-2 align-items-end mb-3">
-                            <div class="col-12 col-md-8">
-                                <label class="form-label" for="reportSelect">Select a report</label>
+                            <div class="col-12 col-md-3">
+                                <label class="form-label" for="reportSelect">Report Type</label>
                                 <select id="reportSelect" class="form-select">
-                                    <option value="">Choose a report...</option>
+                                    <option value="today">Today's trading activity</option>
+                                    <option value="week">Week's trading activity</option>
+                                    <option value="month">Month's trading activity</option>
                                 </select>
                             </div>
-                            <div class="col-12 col-md-4 d-grid d-md-block">
-                                <button id="refreshReportsBtn"
-                                    class="btn btn-outline-secondary w-100 mb-2 mb-md-0">Refresh List</button>
-                                <button id="openReportBtn" class="btn btn-success w-100">Open Report</button>
+                            <div class="col-12 col-md-3">
+                                <label class="form-label" for="reportAnchorDate">Report Date</label>
+                                <input id="reportAnchorDate" type="date" class="form-control" />
+                            </div>
+                            <div class="col-6 col-md-3 d-grid">
+                                <button id="generateReportBtn" class="btn btn-success w-100">Generate Report</button>
+                            </div>
+                            <div class="col-6 col-md-3 d-grid">
+                                <button id="closeReportDetailBtn" class="btn btn-outline-secondary w-100"
+                                    type="button">Close Detail</button>
                             </div>
                         </div>
+
+                        <div id="reportGenerationStatus" class="small text-muted mb-2 d-none">Generating...</div>
 
                         <iframe id="reportFrame" class="report-frame" title="Selected report"></iframe>
                     </div>
@@ -264,6 +338,36 @@
 
         </div>
     </main>
+
+    <div id="startConfirmationPane" class="confirmation-backdrop d-none" role="dialog" aria-modal="true"
+        aria-labelledby="startConfirmTitle">
+        <div class="confirmation-pane">
+            <div class="p-3 border-bottom">
+                <h2 id="startConfirmTitle" class="h5 mb-1">Confirm Start Settings</h2>
+                <p class="text-muted mb-0">Review your configuration before launching ORBilicious.</p>
+            </div>
+            <div class="p-3">
+                <dl class="confirmation-kv mb-0">
+                    <dt>Session mode</dt>
+                    <dd id="confirmSessionMode">-</dd>
+                    <dt>Emulation date</dt>
+                    <dd id="confirmEmulationDate">-</dd>
+                    <dt>Continuous mode</dt>
+                    <dd id="confirmContinuousMode">-</dd>
+                    <dt>Money in account</dt>
+                    <dd id="confirmMoneyInAccount">-</dd>
+                    <dt>Max risk per trading day</dt>
+                    <dd id="confirmMaxRiskPerSession">-</dd>
+                    <dt>Stop/Profit ratio</dt>
+                    <dd id="confirmStopProfitRatio">-</dd>
+                </dl>
+            </div>
+            <div class="p-3 border-top d-flex justify-content-between">
+                <button id="cancelStartBtn" type="button" class="btn btn-outline-secondary">Cancel</button>
+                <button id="confirmStartBtn" type="button" class="btn btn-primary">Continue</button>
+            </div>
+        </div>
+    </div>
 
     <script src="./app.js"></script>
 </body>

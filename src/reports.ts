@@ -422,11 +422,11 @@ export class Reports {
             sessionBarsBySymbol.set(symbol, sessionBars);
         }
 
-        const totalCandidatesBoughtAtStart = emulatedTrades.length;
-        const numberOfCandidatesSoldLong = emulatedTrades.filter(
+        const totalCandidatesBoughtAtStart = breakoutCandidates.length;
+        const numberOfCandidatesSoldLong = breakoutCandidates.filter(
             (trade) => trade.side === "buy",
         ).length;
-        const numberOfCandidatesBoughtShort = emulatedTrades.filter(
+        const numberOfCandidatesBoughtShort = breakoutCandidates.filter(
             (trade) => trade.side === "sell",
         ).length;
         const totalCostOfBreakoutCandidatePurchases = emulatedTrades.reduce(
@@ -1107,13 +1107,18 @@ export class Reports {
             )
             .join("");
 
-        const confirmedTradeRowsHtml = emulatedTrades
-            .map((trade, index) => {
+        const emulatedTradeBySymbol = new Map(
+            emulatedTrades.map((trade) => [trade.symbol, trade]),
+        );
+
+        const confirmedTradeRowsHtml = breakoutCandidates
+            .map((candidate, index) => {
+                const trade = emulatedTradeBySymbol.get(candidate.symbol);
                 const row = evaluationRows.find(
-                    (evaluationRow) => evaluationRow.symbol === trade.symbol,
+                    (evaluationRow) => evaluationRow.symbol === candidate.symbol,
                 );
-                const closedOutcome = closedOutcomeBySymbol.get(trade.symbol);
-                const finalOutcome = finalOutcomeBySymbol.get(trade.symbol);
+                const closedOutcome = closedOutcomeBySymbol.get(candidate.symbol);
+                const finalOutcome = finalOutcomeBySymbol.get(candidate.symbol);
                 const closedProfitLoss = finalOutcome
                     ? finalOutcome.pnl.toFixed(2)
                     : "Open";
@@ -1126,31 +1131,33 @@ export class Reports {
                     : finalOutcome
                         ? "Market Close"
                         : "Open";
-                const stopDistance =
-                    trade.side === "buy"
+                const stopDistance = trade
+                    ? (trade.side === "buy"
                         ? trade.price - trade.stopPrice
-                        : trade.stopPrice - trade.price;
-                const targetDistance =
-                    trade.side === "buy"
+                        : trade.stopPrice - trade.price)
+                    : 0;
+                const targetDistance = trade
+                    ? (trade.side === "buy"
                         ? trade.takeProfitPrice - trade.price
-                        : trade.price - trade.takeProfitPrice;
+                        : trade.price - trade.takeProfitPrice)
+                    : 0;
                 const riskMultiple =
                     stopDistance > 0 ? `${(targetDistance / stopDistance).toFixed(2)}R` : "n/a";
 
                 return `
                 <tr>
                     <td>${index + 1}</td>
-                    <td>${Reports.escapeHtml(trade.symbol)}</td>
-                    <td>${trade.qty.toFixed(4)}</td>
-                    <td>${Reports.escapeHtml(trade.side)}</td>
+                    <td>${Reports.escapeHtml(candidate.symbol)}</td>
+                    <td>${trade ? trade.qty.toFixed(4) : "n/a"}</td>
+                    <td>${Reports.escapeHtml(candidate.side)}</td>
                     <td>${row?.breakoutPrice != null ? row.breakoutPrice.toFixed(2) : "n/a"}</td>
                     <td>${Reports.escapeHtml(Reports.formatNyTime(row?.breakoutTimestamp ?? null) || "n/a")}</td>
                     <td>${row?.confirmationRetestPrice != null ? row.confirmationRetestPrice.toFixed(2) : "n/a"}</td>
                     <td>${Reports.escapeHtml(Reports.formatNyTime(row?.confirmationRetestTimestamp ?? null) || "n/a")}</td>
-                    <td>${trade.preBreakoutWickPrice != null ? trade.preBreakoutWickPrice.toFixed(2) : "n/a"}</td>
-                    <td>${trade.price.toFixed(2)}</td>
-                    <td>${trade.stopPrice.toFixed(2)}</td>
-                    <td>${trade.takeProfitPrice.toFixed(2)}</td>
+                    <td>${candidate.preBreakoutWickPrice != null ? candidate.preBreakoutWickPrice.toFixed(2) : "n/a"}</td>
+                    <td>${candidate.price.toFixed(2)}</td>
+                    <td>${trade ? trade.stopPrice.toFixed(2) : "n/a"}</td>
+                    <td>${trade ? trade.takeProfitPrice.toFixed(2) : "n/a"}</td>
                     <td>${riskMultiple}</td>
                     <td>${exitPrice}</td>
                     <td>${closedProfitLoss}</td>
@@ -1159,13 +1166,14 @@ export class Reports {
             })
             .join("");
 
-        const interactiveCandidateCardsHtml = emulatedTrades
-            .map((trade) => {
+        const interactiveCandidateCardsHtml = breakoutCandidates
+            .map((candidate) => {
+                const trade = emulatedTradeBySymbol.get(candidate.symbol);
                 const row = evaluationRows.find(
-                    (evaluationRow) => evaluationRow.symbol === trade.symbol,
+                    (evaluationRow) => evaluationRow.symbol === candidate.symbol,
                 );
-                const closedOutcome = closedOutcomeBySymbol.get(trade.symbol);
-                const finalOutcome = finalOutcomeBySymbol.get(trade.symbol);
+                const closedOutcome = closedOutcomeBySymbol.get(candidate.symbol);
+                const finalOutcome = finalOutcomeBySymbol.get(candidate.symbol);
                 const exitPrice =
                     finalOutcome?.exitPrice != null
                         ? finalOutcome.exitPrice.toFixed(2)
@@ -1177,12 +1185,12 @@ export class Reports {
                         : "Open";
 
                 return `
-                <details class="candidate-card" id="candidate-${Reports.escapeHtml(trade.symbol)}">
+                <details class="candidate-card" id="candidate-${Reports.escapeHtml(candidate.symbol)}">
                     <summary class="candidate-summary">
-                        <span class="candidate-symbol">${Reports.escapeHtml(trade.symbol)}</span>
-                        <span>${Reports.escapeHtml(trade.side)}</span>
-                        <span>${trade.qty.toFixed(4)}</span>
-                        <span>${trade.price.toFixed(2)}</span>
+                        <span class="candidate-symbol">${Reports.escapeHtml(candidate.symbol)}</span>
+                        <span>${Reports.escapeHtml(candidate.side)}</span>
+                        <span>${trade ? trade.qty.toFixed(4) : "n/a"}</span>
+                        <span>${candidate.price.toFixed(2)}</span>
                         <span>${exitPrice}</span>
                         <span>${finalOutcome ? finalOutcome.pnl.toFixed(2) : "Open"}</span>
                     </summary>
@@ -1192,9 +1200,9 @@ export class Reports {
                                 <tr><th>Breakout Price</th><td>${row?.breakoutPrice != null ? row.breakoutPrice.toFixed(2) : "n/a"}</td></tr>
                                 <tr><th>Breakout Time</th><td>${Reports.escapeHtml(Reports.formatNyTime(row?.breakoutTimestamp ?? null) || "n/a")}</td></tr>
                                 <tr><th>Retest Time</th><td>${Reports.escapeHtml(Reports.formatNyTime(row?.confirmationRetestTimestamp ?? null) || "n/a")}</td></tr>
-                                <tr><th>Previous Candle Hi/Lo</th><td>${trade.preBreakoutWickPrice != null ? trade.preBreakoutWickPrice.toFixed(2) : "n/a"}</td></tr>
-                                <tr><th>Stop</th><td>${trade.stopPrice.toFixed(2)}</td></tr>
-                                <tr><th>Target</th><td>${trade.takeProfitPrice.toFixed(2)}</td></tr>
+                                <tr><th>Previous Candle Hi/Lo</th><td>${candidate.preBreakoutWickPrice != null ? candidate.preBreakoutWickPrice.toFixed(2) : "n/a"}</td></tr>
+                                <tr><th>Stop</th><td>${trade ? trade.stopPrice.toFixed(2) : "n/a"}</td></tr>
+                                <tr><th>Target</th><td>${trade ? trade.takeProfitPrice.toFixed(2) : "n/a"}</td></tr>
                                 <tr><th>Exit Price</th><td>${exitPrice}</td></tr>
                                 <tr><th>Exit Type</th><td>${Reports.escapeHtml(exitType)}</td></tr>
                             </tbody>
@@ -1312,13 +1320,13 @@ export class Reports {
     <main class="page">
         <section class="hero">
             <h1>ORB Drilldown Report</h1>
-            <p class="subtitle">${Reports.buildReportSubtitle(sessionDate, options?.usesHistoricData === true)}</p>
         </section>
 
         <section class="section">
             <h2>Summary</h2>
             <table class="summary-table">
                 <tbody>
+                    <tr><th>Total Breakout Candidates Detected</th><td>${breakoutCandidates.length}</td></tr>
                     <tr><th>Total Number of Candidates Bought at Start</th><td>${totalCandidatesBoughtAtStart}</td></tr>
                     <tr><th>Number of Candidates Sold Long</th><td>${numberOfCandidatesSoldLong}</td></tr>
                     <tr><th>Number of Candidates Bought Short</th><td>${numberOfCandidatesBoughtShort}</td></tr>
