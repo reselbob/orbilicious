@@ -295,9 +295,57 @@ function startOrbiliciousProcess(params: {
     appState.backtestProgress = null;
     appState.isRunning = true;
     appState.startedAt = new Date().toISOString();
-    appState.runtimeStatus = sessionMode === 'EMULATION' && emulationSessionDate
-        ? 'Running historical emulation'
-        : 'Running in real time';
+
+    // Determine initial runtime status
+    if (sessionMode === 'EMULATION' && emulationSessionDate) {
+        // Check if this is live emulation (today's date) with continuous mode
+        const nyNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+        const nyYear = nyNow.getFullYear();
+        const nyMonth = String(nyNow.getMonth() + 1).padStart(2, '0');
+        const nyDay = String(nyNow.getDate()).padStart(2, '0');
+        const nyTodayDate = `${nyYear}-${nyMonth}-${nyDay}`;
+        const isLiveEmu = emulationSessionDate === nyTodayDate;
+
+        if (isLiveEmu && continuous) {
+            // For live emulation continuous mode, check if markets are open
+            const dayOfWeek = nyNow.getDay();
+            const hours = nyNow.getHours();
+            const minutes = nyNow.getMinutes();
+            const currentMinutes = hours * 60 + minutes;
+            const isWeekday = dayOfWeek !== 0 && dayOfWeek !== 6;
+            const marketOpenMinutes = 9 * 60 + 30;  // 9:30 AM
+            const marketCloseMinutes = 16 * 60;     // 4:00 PM
+            const marketsOpen = isWeekday && currentMinutes >= marketOpenMinutes && currentMinutes < marketCloseMinutes;
+
+            if (marketsOpen) {
+                appState.runtimeStatus = 'Running in real time (emulation)';
+            } else {
+                appState.runtimeStatus = 'Waiting for market open';
+            }
+        } else {
+            appState.runtimeStatus = 'Running historical emulation';
+        }
+    } else if (continuous && sessionMode !== 'EMULATION') {
+        // For live continuous mode, check if markets are open
+        const nyNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+        const dayOfWeek = nyNow.getDay();
+        const hours = nyNow.getHours();
+        const minutes = nyNow.getMinutes();
+        const currentMinutes = hours * 60 + minutes;
+        const isWeekday = dayOfWeek !== 0 && dayOfWeek !== 6;
+        const marketOpenMinutes = 9 * 60 + 30;  // 9:30 AM
+        const marketCloseMinutes = 16 * 60;     // 4:00 PM
+        const marketsOpen = isWeekday && currentMinutes >= marketOpenMinutes && currentMinutes < marketCloseMinutes;
+
+        if (marketsOpen) {
+            appState.runtimeStatus = 'Running in real time';
+        } else {
+            appState.runtimeStatus = 'Waiting for market open';
+        }
+    } else {
+        appState.runtimeStatus = 'Running in real time';
+    }
+
     appState.continuous = continuous;
     appState.sessionMode = sessionMode;
     appState.emulationSessionDate = emulationSessionDate;

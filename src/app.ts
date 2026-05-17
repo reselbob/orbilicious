@@ -582,6 +582,10 @@ export async function startApp(options?: StartAppOptions) {
     const continuousMode = options?.continuous === true;
     const shouldRunHistorical = env.sessionMode === 'EMULATION' && Boolean(env.sessionDate);
 
+    const nyToday = toNyParts(new Date(), strategyConfig.sessionTimezone).date;
+    const isLiveEmulation = env.sessionMode === 'EMULATION' && env.sessionDate === nyToday;
+    const isHistoricalEmulation = shouldRunHistorical && !isLiveEmulation;
+
     if (continuousMode) {
         logger.info('Program is running in Continuous mode', {
             pollIntervalSeconds: env.pollIntervalSeconds,
@@ -595,7 +599,14 @@ export async function startApp(options?: StartAppOptions) {
         });
     }
 
-    if (shouldRunHistorical) {
+    if (isLiveEmulation && !isHistoricalEmulation) {
+        logger.info('Running live emulation with continuous mode', {
+            sessionDate: env.sessionDate,
+            continuousMode,
+            liveMarketData: true,
+            tradesExecuted: false,
+        });
+    } else if (isHistoricalEmulation) {
         logger.info('Starting historical ORB report runner', {
             sessionDate: env.sessionDate,
             quantityToRetrieve: env.quantityToRetrieve,

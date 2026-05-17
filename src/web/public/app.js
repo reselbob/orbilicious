@@ -6,6 +6,8 @@ const continuousMode = document.getElementById('continuousMode');
 const sessionMode = document.getElementById('sessionMode');
 const emulationDateGroup = document.getElementById('emulationDateGroup');
 const emulationDateInput = document.getElementById('emulationDate');
+const liveEmulationWarning = document.getElementById('liveEmulationWarning');
+const liveEmulationWarningText = document.getElementById('liveEmulationWarningText');
 const reportSelect = document.getElementById('reportSelect');
 const reportAnchorDateInput = document.getElementById('reportAnchorDate');
 const generateReportBtn = document.getElementById('generateReportBtn');
@@ -45,19 +47,64 @@ function todayIsoDate() {
     return `${year}-${month}-${day}`;
 }
 
+function areNYMarketsOpen() {
+    const now = new Date();
+    const nyTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const dayOfWeek = nyTime.getDay();
+    const hours = nyTime.getHours();
+    const minutes = nyTime.getMinutes();
+    const currentMinutes = hours * 60 + minutes;
+
+    // Markets closed on weekends (0 = Sunday, 6 = Saturday)
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+        return false;
+    }
+
+    // Market open: 9:30 AM to 4:00 PM (16:00) NY time
+    const marketOpenMinutes = 9 * 60 + 30;  // 9:30 AM = 570 minutes
+    const marketCloseMinutes = 16 * 60;     // 4:00 PM = 960 minutes
+
+    return currentMinutes >= marketOpenMinutes && currentMinutes < marketCloseMinutes;
+}
+
 function isEmulationMode() {
     return sessionMode.value === 'EMULATION';
+}
+
+function isLiveEmulation() {
+    if (!isEmulationMode()) return false;
+    const emulationDate = emulationDateInput.value;
+    if (!emulationDate) return false;
+    const today = todayIsoDate();
+    return emulationDate === today;
 }
 
 function syncEmulationControls() {
     const isEmulation = isEmulationMode();
     emulationDateGroup.classList.toggle('d-none', !isEmulation);
 
-    if (isEmulation) {
-        continuousMode.checked = false;
+    const isLiveEmu = isLiveEmulation();
+    const isContinuous = continuousMode.checked;
+    liveEmulationWarning.classList.toggle('d-none', !isLiveEmu);
+
+    // Update message based on continuous mode
+    if (isLiveEmu && isContinuous) {
+        const marketsOpen = areNYMarketsOpen();
+        if (marketsOpen) {
+            liveEmulationWarningText.textContent = 'Emulation is running live and in continuous mode, but no trades will actually be executed against your account.';
+        } else {
+            liveEmulationWarningText.textContent = 'Emulation is running live and in continuous mode, but no trades will actually be executed against your account until the NY Markets open.';
+        }
+    } else if (isLiveEmu) {
+        liveEmulationWarningText.textContent = 'Emulation is running live, but no trades will actually be executed against your account.';
     }
 
-    continuousMode.disabled = isEmulation;
+    if (isEmulation && !isLiveEmu) {
+        continuousMode.checked = false;
+        continuousMode.disabled = true;
+    } else {
+        continuousMode.disabled = false;
+    }
 }
 
 function formatPrice(value) {
@@ -307,6 +354,24 @@ async function refreshStatus() {
         stopBtn.disabled = payload.isRunning !== true;
         renderBacktestProgress(payload.backtestProgress || null);
         syncEmulationControls();
+
+        // Show market closed message if waiting for market open
+        const statusContainer = statusBox.parentElement;
+        const existingAlert = statusContainer?.querySelector('.market-closed-alert');
+
+        if (payload.runtimeStatus === 'Waiting for market open') {
+            if (!existingAlert && statusContainer) {
+                const infoMsg = document.createElement('div');
+                infoMsg.className = 'alert alert-info mt-2 market-closed-alert';
+                infoMsg.textContent = 'Markets are closed. Will start to run continuously once the markets open.';
+                statusContainer.insertBefore(infoMsg, statusBox.nextSibling);
+            }
+        } else {
+            if (existingAlert) {
+                existingAlert.remove();
+            }
+        }
+
         return payload;
     } catch (error) {
         setStatusText(`Status request failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -355,6 +420,10 @@ async function submitStartOrbilicious() {
     stopBtn.disabled = true;
 
     try {
+        const marketsOpen = areNYMarketsOpen();
+        const isContinuous = continuousMode.checked;
+        const showMarketClosedMessage = isContinuous && !marketsOpen;
+
         const response = await fetch('/api/orbilicious/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -377,6 +446,17 @@ async function submitStartOrbilicious() {
 
         await refreshStatus();
         await refreshTrades();
+
+        if (showMarketClosedMessage) {
+            const infoMsg = document.createElement('div');
+            infoMsg.className = 'alert alert-info mt-2';
+            infoMsg.textContent = 'Markets are closed. Will start to run continuously once the markets open.';
+            const statusContainer = statusBox.parentElement;
+            if (statusContainer) {
+                statusContainer.insertBefore(infoMsg, statusBox.nextSibling);
+                setTimeout(() => infoMsg.remove(), 10000);
+            }
+        }
     } catch (error) {
         alert(`Failed to start ORBilicious: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -529,6 +609,8 @@ generateReportBtn.addEventListener('click', generateSelectedReport);
 closeReportDetailBtn.addEventListener('click', closeReportDetail);
 clearActivityBtn.addEventListener('click', clearActivity);
 sessionMode.addEventListener('change', syncEmulationControls);
+emulationDateInput.addEventListener('change', syncEmulationControls);
+continuousMode.addEventListener('change', syncEmulationControls);
 
 for (const button of paneExpandButtons) {
     button.addEventListener('click', () => togglePaneExpansion(button));
