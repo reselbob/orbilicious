@@ -93,10 +93,15 @@ function syncEmulationControls() {
         if (marketsOpen) {
             liveEmulationWarningText.textContent = 'Emulation is running live and in continuous mode, but no trades will actually be executed against your account.';
         } else {
-            liveEmulationWarningText.textContent = 'Emulation is running live and in continuous mode, but no trades will actually be executed against your account until the NY Markets open.';
+            liveEmulationWarningText.textContent = 'Emulation is running live and in continuous mode, but no trades will be executed until the NY Markets open.';
         }
     } else if (isLiveEmu) {
-        liveEmulationWarningText.textContent = 'Emulation is running live, but no trades will actually be executed against your account.';
+        const marketsOpen = areNYMarketsOpen();
+        if (marketsOpen) {
+            liveEmulationWarningText.textContent = 'Emulation is running live, but no trades will actually be executed against your account.';
+        } else {
+            liveEmulationWarningText.textContent = 'Emulation is running live, but no trades will be executed until the NY Markets open.';
+        }
     }
 
     if (isEmulation && !isLiveEmu) {
