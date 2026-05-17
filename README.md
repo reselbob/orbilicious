@@ -112,7 +112,7 @@ npm install
 
 ### Configure `.env`
 
-Use [.env.example](/home/reselbob/Projects/orbilicious/.env.example) as the starting template for your local runtime configuration.
+Use [.env.example](.env.example) as the starting template for your local runtime configuration.
 
 Copy the file into `.env`:
 
@@ -123,9 +123,9 @@ cp .env.example .env
 Then edit `.env` for operational use:
 
 1. Set `APCA_API_KEY_ID` and `APCA_API_SECRET_KEY` to your own Alpaca credentials.
-2. Set `SESSION_MODE` to the mode you intend to run: `EMULATION`, `PAPER`, or `LIVE`.
-3. Set `SESSION_DATE` to a historical date for historical emulation, or leave it blank for current-day operation.
-4. Review trading controls such as `MAX_TOTAL_RISK`, `HARD_BASKET_CAP`, `MAX_POSITION_NOTIONAL`, and `MAX_POSITIONS_PER_SIDE` before running.
+2. Set `SESSION_MODE` to the mode you intend to run: `EMULATION`, `PAPER`, or `LIVE`. (This value is reset automatically when the UI resets the value.)
+3. Set `SESSION_DATE` to a historical date for historical emulation, or leave it blank for current-day operation. (This value is reset automatically when the UI resets the value.)
+4. Review trading controls such as `MAX_TOTAL_RISK`, `HARD_BASKET_CAP`, `MAX_POSITION_NOTIONAL`, and `MAX_POSITIONS_PER_SIDE` before running. (This value is reset automatically when the UI resets the value.)
 5. If you are operating against live capital, verify `ALPACA_TRADING_BASE_URL`, `SESSION_MODE=LIVE`, and all risk settings before starting the app.
 
 The comments in [.env.example](/home/reselbob/Projects/orbilicious/.env.example) explain the meaning of each variable inline.
