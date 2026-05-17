@@ -13,6 +13,24 @@ A complete Node + TypeScript starter project for a 15-minute Opening Range Break
 - Winston-based structured logging
 - Source-level ORB PDF report generation (end-of-day live or historical by date)
 
+## Table of Contents
+
+- [Strategy rules](#strategy-rules)
+- [Operational Rules](#operational-rules)
+- [Logging](#logging)
+- [Setup](#setup)
+  - [Configure `.env`](#configure-env)
+- [Web UI Usage](#web-ui-usage)
+  - [Runtime Controls](#runtime-controls)
+  - [Trade Monitor](#trade-monitor)
+  - [Daily Summary](#daily-summary)
+  - [Reports](#reports)
+- [Environment variables](#environment-variables)
+- [Report modes and scheduling](#report-modes-and-scheduling)
+- [Tests](#tests)
+- [Notes](#notes)
+- [Recommended next upgrades](#recommended-next-upgrades)
+
 ## Strategy rules
 
 - Universe: top 40 most active stocks.
