@@ -17,6 +17,15 @@ import type { OrbReportResult } from './reports';
 const executedToday = new Set<string>();
 const reportedDates = new Set<string>();
 
+interface SimulatedPosition {
+    side: 'long' | 'short';
+    entryPrice: number;
+    stopPrice: number;
+    takeProfitPrice: number;
+    qty: number;
+}
+const simulatedPositions = new Map<string, SimulatedPosition>();
+
 type TradeMonitorEvent = {
     eventType: 'open' | 'close';
     sessionDate: string;
@@ -358,7 +367,12 @@ async function evaluateSymbol(
     sessionDate: string
 ): Promise<BreakoutCandidate | null> {
     try {
-        const position = await client.getOpenPosition(symbol);
+        // In dryRun mode use the in-memory simulated position table; live modes query Alpaca.
+        const rawSim = env.dryRun ? simulatedPositions.get(symbol) : undefined;
+        const position = rawSim
+            ? { symbol, side: rawSim.side, qty: rawSim.qty, entryPrice: rawSim.entryPrice }
+            : (!env.dryRun ? await client.getOpenPosition(symbol) : null);
+
         if (position) {
             if (position.entryPrice == null) {
                 logger.warn('Skipping position management due to missing entry price', {
@@ -382,6 +396,69 @@ async function evaluateSymbol(
                     side: position.side,
                     entryPrice: position.entryPrice,
                 });
+                return null;
+            }
+
+            // Dry-run mode: evaluate stop-loss and take-profit on every cycle using bar high/low.
+            if (env.dryRun && rawSim) {
+                const stopHit = rawSim.side === 'long'
+                    ? latestBar.low <= rawSim.stopPrice
+                    : latestBar.high >= rawSim.stopPrice;
+                const targetHit = rawSim.side === 'long'
+                    ? latestBar.high >= rawSim.takeProfitPrice
+                    : latestBar.low <= rawSim.takeProfitPrice;
+
+                if (stopHit || targetHit || isInProfitCaptureWindow(latestBar)) {
+                    const exitPrice = stopHit
+                        ? rawSim.stopPrice
+                        : targetHit
+                            ? rawSim.takeProfitPrice
+                            : latestBar.close;
+                    const exitReason = stopHit
+                        ? 'stop-loss hit'
+                        : targetHit
+                            ? 'take-profit hit'
+                            : 'profit-capture close';
+                    const pnl = rawSim.side === 'long'
+                        ? (exitPrice - rawSim.entryPrice) * rawSim.qty
+                        : (rawSim.entryPrice - exitPrice) * rawSim.qty;
+
+                    simulatedPositions.delete(symbol);
+                    logger.info('Dry-run: simulated position closed', {
+                        symbol,
+                        side: rawSim.side,
+                        exitReason,
+                        exitPrice,
+                        entryPrice: rawSim.entryPrice,
+                        pnl,
+                    });
+                    emitTradeCloseUiStatus(symbol, pnl);
+                    emitTradeMonitorEvent({
+                        eventType: 'close',
+                        sessionDate,
+                        timestamp: latestBar.timestamp,
+                        symbol,
+                        side: rawSim.side === 'long' ? 'sell' : 'buy',
+                        position: rawSim.side,
+                        qty: rawSim.qty,
+                        entryPrice: rawSim.entryPrice,
+                        closePrice: exitPrice,
+                        pnl,
+                        reason: exitReason,
+                    });
+                } else {
+                    logger.debug('Dry-run: keeping simulated position open', {
+                        symbol,
+                        side: rawSim.side,
+                        entryPrice: rawSim.entryPrice,
+                        stopPrice: rawSim.stopPrice,
+                        takeProfitPrice: rawSim.takeProfitPrice,
+                        latestClose: latestBar.close,
+                        latestLow: latestBar.low,
+                        latestHigh: latestBar.high,
+                    });
+                }
+
                 return null;
             }
 
@@ -545,6 +622,14 @@ export async function executeSizedTrades(
                 stopPrice: trade.stopPrice,
                 targetPrice: trade.takeProfitPrice,
                 reason: 'dry-run simulated entry',
+            });
+
+            simulatedPositions.set(trade.symbol, {
+                side: trade.side === 'buy' ? 'long' : 'short',
+                entryPrice: trade.price,
+                stopPrice: trade.stopPrice,
+                takeProfitPrice: trade.takeProfitPrice,
+                qty: trade.qty,
             });
         }
 

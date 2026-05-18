@@ -3,8 +3,12 @@ import path from 'node:path';
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { spawn, ChildProcessWithoutNullStreams } from 'node:child_process';
 import puppeteer from 'puppeteer';
+import { env, strategyConfig } from '../config';
 import { logger } from '../logger';
+import { findLiquidityZonesForSymbol } from '../liquidity';
 import { OrbService } from '../services/orb-service';
+import { toNyParts } from '../time';
+import { AlpacaClient } from '../alpaca';
 
 type SessionMode = 'EMULATION' | 'PAPER' | 'LIVE';
 
@@ -114,6 +118,9 @@ function contentTypeFor(filePath: string): string {
     if (filePath.endsWith('.js')) return 'application/javascript; charset=utf-8';
     if (filePath.endsWith('.css')) return 'text/css; charset=utf-8';
     if (filePath.endsWith('.json')) return 'application/json; charset=utf-8';
+    if (filePath.endsWith('.svg')) return 'image/svg+xml';
+    if (filePath.endsWith('.ico')) return 'image/x-icon';
+    if (filePath.endsWith('.png')) return 'image/png';
     if (filePath.endsWith('.pdf')) return 'application/pdf';
     return 'application/octet-stream';
 }
@@ -949,6 +956,72 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
         const events = tradeEvents.filter((event) => event.id > lowerBound);
         const nextCursor = tradeEvents.length ? tradeEvents[tradeEvents.length - 1].id : lowerBound;
         sendJson(res, 200, { events, nextCursor });
+        return;
+    }
+
+    if (req.method === 'GET' && pathname === '/api/liquidity-zones') {
+        const sessionDateParam = url.searchParams.get('sessionDate') || '';
+        const sessionDate = sessionDateParam.trim() || toNyParts(new Date(), strategyConfig.sessionTimezone).date;
+        const limitParam = Number(url.searchParams.get('limit') || env.quantityToRetrieve);
+        const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(Math.floor(limitParam), 50) : env.quantityToRetrieve;
+        const maxZonesPerSymbol = 3;
+
+        if (!isValidSessionDate(sessionDate)) {
+            sendJson(res, 400, {
+                ok: false,
+                message: 'Invalid sessionDate. Use YYYY-MM-DD and do not select a future date.',
+            });
+            return;
+        }
+
+        try {
+            const client = new AlpacaClient();
+            const symbols = await client.getMostActiveSymbols(limit);
+            const settled = await Promise.all(
+                symbols.map(async (symbol) => {
+                    try {
+                        const bars = await client.getIntradayBars(symbol, sessionDate);
+                        return findLiquidityZonesForSymbol(symbol, sessionDate, bars, maxZonesPerSymbol);
+                    } catch (error) {
+                        logger.warn('Skipping liquidity scan for symbol due to data error', {
+                            symbol,
+                            sessionDate,
+                            error,
+                        });
+                        return null;
+                    }
+                })
+            );
+
+            const symbolsWithZones = settled.filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+            const zones = symbolsWithZones
+                .flatMap((entry) => entry.zones)
+                .sort((left, right) => {
+                    if (right.strengthScore !== left.strengthScore) {
+                        return right.strengthScore - left.strengthScore;
+                    }
+
+                    return left.nearestPriceDistancePct - right.nearestPriceDistancePct;
+                });
+
+            sendJson(res, 200, {
+                ok: true,
+                sessionDate,
+                requestedLimit: limit,
+                retrievedSymbols: symbols.length,
+                scannedSymbols: symbolsWithZones.length,
+                maxZonesPerSymbol,
+                zones,
+                symbols: symbolsWithZones,
+                generatedAt: new Date().toISOString(),
+            });
+        } catch (error) {
+            logger.error('Failed generating liquidity zones', { sessionDate, limit, error });
+            sendJson(res, 500, {
+                ok: false,
+                message: error instanceof Error ? error.message : 'Failed generating liquidity zones',
+            });
+        }
         return;
     }
 
