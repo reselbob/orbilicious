@@ -176,7 +176,7 @@ This launches both the trading app and web server on port 8787 (or use `WEB_PORT
 Use these controls together to reduce false breakouts while keeping enough opportunities for your session goals.
 
 - **Breakout Confirmation Candle (minutes)** controls how long the breakout candle is. The breakout must close outside the opening range on this timeframe.
-- **Breakout Quality Filters** turns quality gating on or off.
+- **Breakout Quality Filters** turns quality gating on or off. Quality gating means a breakout must pass all enabled quality checks before it is considered tradeable (volume expansion, relative strength/weakness, and higher-timeframe trend alignment).
 - **Min Volume Expansion** requires breakout-candle volume to exceed recent confirmation-candle volume by a minimum ratio.
 - **Min Relative Strength (%)** requires the breakout close to clear the opening-range boundary by a minimum percentage.
 - **Trend Timeframe (minutes)** and **Trend Lookback Bars** define higher-timeframe trend alignment.
