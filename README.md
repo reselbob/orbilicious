@@ -9,6 +9,7 @@
   - [Configure `.env`](#configure-env)
 - [Web UI Usage](#web-ui-usage)
   - [Runtime Controls](#runtime-controls)
+  - [How to use the Breakout Confirmation and Quality Filters](#how-to-use-the-breakout-confirmation-and-quality-filters)
   - [Trade Monitor](#trade-monitor)
   - [Daily Summary](#daily-summary)
   - [Reports](#reports)
@@ -169,6 +170,41 @@ This launches both the trading app and web server on port 8787 (or use `WEB_PORT
 - **Max Amount to Risk Per Trading Day**: Maximum total stop-loss risk per day (default $1,000). Overrides `MAX_TOTAL_RISK` env var.
 - **Current status**: Real-time execution state (running, stopped, error details).
 - **Backtest progress**: For historical runs, shows current date, total dates, and completion.
+
+### How to use the Breakout Confirmation and Quality Filters
+
+Use these controls together to reduce false breakouts while keeping enough opportunities for your session goals.
+
+- **Breakout Confirmation Candle (minutes)** controls how long the breakout candle is. The breakout must close outside the opening range on this timeframe.
+- **Breakout Quality Filters** turns quality gating on or off.
+- **Min Volume Expansion** requires breakout-candle volume to exceed recent confirmation-candle volume by a minimum ratio.
+- **Min Relative Strength (%)** requires the breakout close to clear the opening-range boundary by a minimum percentage.
+- **Trend Timeframe (minutes)** and **Trend Lookback Bars** define higher-timeframe trend alignment.
+
+Suggested workflow:
+
+1. Start with defaults (`5` minute confirmation, quality filters enabled, volume `1.2`, relative strength `0.25`, trend timeframe `5`, lookback `3`).
+2. Run emulation for several recent sessions and watch candidate count, pass/fail behavior, and P/L consistency.
+3. Tighten filters when you see too many weak or whipsaw entries.
+4. Relax filters when you see too few candidates or missed valid breakouts.
+5. Change one setting at a time so you can attribute the impact.
+
+Concrete examples:
+
+1. **Noisy open, too many fake breaks**
+Configuration purpose: make confirmation stricter so brief spikes do not qualify as breakouts.
+Configuration: set Breakout Confirmation Candle to `10` and keep Quality Filters enabled.
+Expected outcome: fewer breakout candidates, later but higher-confidence entries, and reduced churn from quick reversals.
+
+2. **Strong trend day, but valid breakouts are being missed**
+Configuration purpose: allow more momentum names through without fully removing quality checks.
+Configuration: keep confirmation at `5`, lower Min Relative Strength to `0.15`, and lower Min Volume Expansion to `1.1`.
+Expected outcome: more candidates pass during broad directional moves, with a moderate increase in trade frequency and slightly more variance in results.
+
+3. **Choppy session with mixed direction and weak follow-through**
+Configuration purpose: require stronger alignment so only the cleanest breakouts survive.
+Configuration: keep confirmation at `5`, raise Min Volume Expansion to `1.5`, raise Min Relative Strength to `0.35`, set Trend Timeframe to `15`, and Trend Lookback Bars to `4`.
+Expected outcome: candidate list shrinks meaningfully, entries align better with sustained trend context, and whipsaw exposure is reduced at the cost of fewer total trades.
 
 ### Trade Monitor
 

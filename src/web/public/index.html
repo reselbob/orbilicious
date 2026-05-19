@@ -26,6 +26,11 @@
             font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
         }
 
+        #statusBox {
+            max-height: 170px;
+            overflow: auto;
+        }
+
         .trade-monitor-wrap {
             border: 1px solid #e9ecef;
             border-radius: 0.5rem;
@@ -136,6 +141,37 @@
             padding: 0.55rem 0.75rem;
             border-bottom: 1px solid #e2e8f0;
             gap: 0.75rem;
+        }
+
+        .trade-chart-tooltip-header-left {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+
+        .trade-chart-tooltip-header-right {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+
+        .trade-chart-tooltip-pnl {
+            font-size: 0.82rem;
+            font-weight: 700;
+            min-width: 72px;
+            text-align: right;
+        }
+
+        .trade-chart-tooltip-pnl.result-profit {
+            color: #198754;
+        }
+
+        .trade-chart-tooltip-pnl.result-loss {
+            color: #dc3545;
+        }
+
+        .trade-chart-tooltip-pnl.result-open {
+            color: #6c757d;
         }
 
         .trade-chart-tooltip-body {
@@ -405,7 +441,7 @@
                 <div id="dashboardTab" class="top-tab-panel active" role="tabpanel"
                     aria-labelledby="dashboardTabButton">
                     <div class="row g-4">
-                        <div class="col-12 col-lg-5">
+                        <div class="col-12 order-2">
                             <div class="card shadow-sm">
                                 <div class="card-header">Runtime Controls</div>
                                 <div class="card-body">
@@ -413,39 +449,160 @@
                                         Default startup mode is <strong>EMULATION</strong>.
                                     </div>
 
-                                    <div class="mb-3">
-                                        <div class="help-label-row mb-1">
-                                            <label class="form-label mb-0" for="sessionMode">Session mode</label>
-                                            <button class="btn btn-outline-secondary field-help-btn" type="button"
-                                                data-help-key="sessionMode" aria-label="Help for Session mode"
-                                                title="Help for Session mode">?</button>
-                                        </div>
-                                        <select id="sessionMode" class="form-select">
-                                            <option value="EMULATION" selected>EMULATION</option>
-                                            <option value="PAPER">PAPER</option>
-                                            <option value="LIVE">LIVE</option>
-                                        </select>
-                                    </div>
+                                    <div class="row g-3 mb-3">
+                                        <div class="col-12 col-xl-7">
+                                            <div class="d-flex gap-2 mt-3 mb-3 flex-wrap">
+                                                <button id="startBtn" class="btn btn-primary">Start ORBilicious</button>
+                                                <button id="stopBtn" class="btn btn-outline-danger">Stop
+                                                    ORBilicious</button>
+                                                <button id="refreshStatusBtn" class="btn btn-outline-secondary">Refresh
+                                                    Status</button>
+                                            </div>
 
-                                    <div id="emulationDateGroup" class="mb-3">
-                                        <div class="help-label-row mb-1">
-                                            <label class="form-label mb-0" for="emulationDate">Emulation session
-                                                date</label>
-                                            <button class="btn btn-outline-secondary field-help-btn" type="button"
-                                                data-help-key="emulationDate"
-                                                aria-label="Help for Emulation session date"
-                                                title="Help for Emulation session date">?</button>
-                                        </div>
-                                        <input id="emulationDate" type="date" class="form-control" />
-                                        <div class="form-text">Choose a current or past trading day for historical
-                                            EMULATION runs.
-                                        </div>
-                                    </div>
+                                            <div class="mb-3">
+                                                <div class="help-label-row mb-1">
+                                                    <label class="form-label mb-0" for="sessionMode">Session
+                                                        mode</label>
+                                                    <button class="btn btn-outline-secondary field-help-btn"
+                                                        type="button" data-help-key="sessionMode"
+                                                        aria-label="Help for Session mode"
+                                                        title="Help for Session mode">?</button>
+                                                </div>
+                                                <select id="sessionMode" class="form-select">
+                                                    <option value="EMULATION" selected>EMULATION</option>
+                                                    <option value="PAPER">PAPER</option>
+                                                    <option value="LIVE">LIVE</option>
+                                                </select>
+                                            </div>
 
-                                    <div id="liveEmulationWarning" class="alert alert-warning py-2 d-none" role="alert">
-                                        <span id="liveEmulationWarningText">Emulation is running live, but no trades
-                                            will actually
-                                            be executed against your account.</span>
+                                            <div id="emulationDateGroup" class="mb-3">
+                                                <div class="help-label-row mb-1">
+                                                    <label class="form-label mb-0" for="emulationDate">Emulation session
+                                                        date</label>
+                                                    <button class="btn btn-outline-secondary field-help-btn"
+                                                        type="button" data-help-key="emulationDate"
+                                                        aria-label="Help for Emulation session date"
+                                                        title="Help for Emulation session date">?</button>
+                                                </div>
+                                                <input id="emulationDate" type="date" class="form-control" />
+                                                <div class="form-text">Choose a current or past trading day for
+                                                    historical
+                                                    EMULATION runs.
+                                                </div>
+                                            </div>
+
+                                            <div id="liveEmulationWarning" class="alert alert-warning py-2 d-none"
+                                                role="alert">
+                                                <span id="liveEmulationWarningText">Emulation is running live, but no
+                                                    trades
+                                                    will actually
+                                                    be executed against your account.</span>
+                                            </div>
+                                        </div>
+
+                                        <div class="col-12 col-xl-5">
+                                            <div class="border rounded p-3 h-100">
+                                                <div class="help-label-row mb-2">
+                                                    <span class="help-field-title">Breakout Confirmation and Quality
+                                                        Filters</span>
+                                                </div>
+
+                                                <div class="row g-2 align-items-end mb-2">
+                                                    <div class="col-12 col-md-6">
+                                                        <div class="help-label-row mb-1">
+                                                            <label class="form-label mb-0"
+                                                                for="breakoutConfirmationCandleMinutes">Breakout
+                                                                confirmation
+                                                                candle (minutes)</label>
+                                                            <button class="btn btn-outline-secondary field-help-btn"
+                                                                type="button"
+                                                                data-help-key="breakoutConfirmationCandleMinutes"
+                                                                aria-label="Help for breakout confirmation candle"
+                                                                title="Help for breakout confirmation candle">?</button>
+                                                        </div>
+                                                        <input id="breakoutConfirmationCandleMinutes" type="number"
+                                                            class="form-control" min="1" max="30" value="5" />
+                                                    </div>
+                                                    <div class="col-12 col-md-6 d-flex align-items-center">
+                                                        <div class="form-check mb-0 mt-3 mt-md-0">
+                                                            <input class="form-check-input" type="checkbox"
+                                                                id="breakoutQualityFiltersEnabled" />
+                                                            <span class="help-label-row">
+                                                                <label class="form-check-label"
+                                                                    for="breakoutQualityFiltersEnabled">Enable breakout
+                                                                    quality
+                                                                    filters</label>
+                                                                <button class="btn btn-outline-secondary field-help-btn"
+                                                                    type="button"
+                                                                    data-help-key="breakoutQualityFiltersEnabled"
+                                                                    aria-label="Help for breakout quality filters"
+                                                                    title="Help for breakout quality filters">?</button>
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div class="row g-2 align-items-end">
+                                                    <div class="col-12 col-md-4">
+                                                        <div class="help-label-row mb-1">
+                                                            <label class="form-label mb-0"
+                                                                for="breakoutMinVolumeExpansion">Min
+                                                                volume expansion</label>
+                                                            <button class="btn btn-outline-secondary field-help-btn"
+                                                                type="button" data-help-key="breakoutMinVolumeExpansion"
+                                                                aria-label="Help for min volume expansion"
+                                                                title="Help for min volume expansion">?</button>
+                                                        </div>
+                                                        <input id="breakoutMinVolumeExpansion" type="number"
+                                                            class="form-control" min="0.5" max="10" step="0.1"
+                                                            value="1.2" />
+                                                    </div>
+                                                    <div class="col-12 col-md-4">
+                                                        <div class="help-label-row mb-1">
+                                                            <label class="form-label mb-0"
+                                                                for="breakoutMinRelativeStrengthPct">Min relative
+                                                                strength
+                                                                (%)</label>
+                                                            <button class="btn btn-outline-secondary field-help-btn"
+                                                                type="button"
+                                                                data-help-key="breakoutMinRelativeStrengthPct"
+                                                                aria-label="Help for min relative strength"
+                                                                title="Help for min relative strength">?</button>
+                                                        </div>
+                                                        <input id="breakoutMinRelativeStrengthPct" type="number"
+                                                            class="form-control" min="0" max="5" step="0.05"
+                                                            value="0.25" />
+                                                    </div>
+                                                    <div class="col-12 col-md-2">
+                                                        <div class="help-label-row mb-1">
+                                                            <label class="form-label mb-0"
+                                                                for="breakoutTrendTimeframeMinutes">Trend TF
+                                                                (min)</label>
+                                                            <button class="btn btn-outline-secondary field-help-btn"
+                                                                type="button"
+                                                                data-help-key="breakoutTrendTimeframeMinutes"
+                                                                aria-label="Help for trend timeframe"
+                                                                title="Help for trend timeframe">?</button>
+                                                        </div>
+                                                        <input id="breakoutTrendTimeframeMinutes" type="number"
+                                                            class="form-control" min="1" max="60" step="1" value="5" />
+                                                    </div>
+                                                    <div class="col-12 col-md-2">
+                                                        <div class="help-label-row mb-1">
+                                                            <label class="form-label mb-0"
+                                                                for="breakoutTrendLookbackBars">Trend
+                                                                bars</label>
+                                                            <button class="btn btn-outline-secondary field-help-btn"
+                                                                type="button" data-help-key="breakoutTrendLookbackBars"
+                                                                aria-label="Help for trend lookback bars"
+                                                                title="Help for trend lookback bars">?</button>
+                                                        </div>
+                                                        <input id="breakoutTrendLookbackBars" type="number"
+                                                            class="form-control" min="2" max="20" step="1" value="3" />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
 
                                     <div class="d-flex align-items-center gap-4 mb-3 flex-wrap">
@@ -503,96 +660,6 @@
                                         </div>
                                     </div>
 
-                                    <div class="border rounded p-3 mb-3">
-                                        <div class="help-label-row mb-2">
-                                            <span class="help-field-title">Breakout Confirmation and Quality
-                                                Filters</span>
-                                        </div>
-
-                                        <div class="row g-2 align-items-end mb-2">
-                                            <div class="col-12 col-md-6">
-                                                <div class="help-label-row mb-1">
-                                                    <label class="form-label mb-0"
-                                                        for="breakoutConfirmationCandleMinutes">Breakout confirmation
-                                                        candle (minutes)</label>
-                                                    <button class="btn btn-outline-secondary field-help-btn"
-                                                        type="button" data-help-key="breakoutConfirmationCandleMinutes"
-                                                        aria-label="Help for breakout confirmation candle"
-                                                        title="Help for breakout confirmation candle">?</button>
-                                                </div>
-                                                <input id="breakoutConfirmationCandleMinutes" type="number"
-                                                    class="form-control" min="1" max="30" value="5" />
-                                            </div>
-                                            <div class="col-12 col-md-6 d-flex align-items-center">
-                                                <div class="form-check mb-0 mt-3 mt-md-0">
-                                                    <input class="form-check-input" type="checkbox"
-                                                        id="breakoutQualityFiltersEnabled" checked />
-                                                    <span class="help-label-row">
-                                                        <label class="form-check-label"
-                                                            for="breakoutQualityFiltersEnabled">Enable breakout quality
-                                                            filters</label>
-                                                        <button class="btn btn-outline-secondary field-help-btn"
-                                                            type="button" data-help-key="breakoutQualityFiltersEnabled"
-                                                            aria-label="Help for breakout quality filters"
-                                                            title="Help for breakout quality filters">?</button>
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <div class="row g-2 align-items-end">
-                                            <div class="col-12 col-md-4">
-                                                <div class="help-label-row mb-1">
-                                                    <label class="form-label mb-0" for="breakoutMinVolumeExpansion">Min
-                                                        volume expansion</label>
-                                                    <button class="btn btn-outline-secondary field-help-btn"
-                                                        type="button" data-help-key="breakoutMinVolumeExpansion"
-                                                        aria-label="Help for min volume expansion"
-                                                        title="Help for min volume expansion">?</button>
-                                                </div>
-                                                <input id="breakoutMinVolumeExpansion" type="number"
-                                                    class="form-control" min="0.5" max="10" step="0.1" value="1.2" />
-                                            </div>
-                                            <div class="col-12 col-md-4">
-                                                <div class="help-label-row mb-1">
-                                                    <label class="form-label mb-0"
-                                                        for="breakoutMinRelativeStrengthPct">Min relative strength
-                                                        (%)</label>
-                                                    <button class="btn btn-outline-secondary field-help-btn"
-                                                        type="button" data-help-key="breakoutMinRelativeStrengthPct"
-                                                        aria-label="Help for min relative strength"
-                                                        title="Help for min relative strength">?</button>
-                                                </div>
-                                                <input id="breakoutMinRelativeStrengthPct" type="number"
-                                                    class="form-control" min="0" max="5" step="0.05" value="0.25" />
-                                            </div>
-                                            <div class="col-12 col-md-2">
-                                                <div class="help-label-row mb-1">
-                                                    <label class="form-label mb-0"
-                                                        for="breakoutTrendTimeframeMinutes">Trend TF (min)</label>
-                                                    <button class="btn btn-outline-secondary field-help-btn"
-                                                        type="button" data-help-key="breakoutTrendTimeframeMinutes"
-                                                        aria-label="Help for trend timeframe"
-                                                        title="Help for trend timeframe">?</button>
-                                                </div>
-                                                <input id="breakoutTrendTimeframeMinutes" type="number"
-                                                    class="form-control" min="1" max="60" step="1" value="5" />
-                                            </div>
-                                            <div class="col-12 col-md-2">
-                                                <div class="help-label-row mb-1">
-                                                    <label class="form-label mb-0" for="breakoutTrendLookbackBars">Trend
-                                                        bars</label>
-                                                    <button class="btn btn-outline-secondary field-help-btn"
-                                                        type="button" data-help-key="breakoutTrendLookbackBars"
-                                                        aria-label="Help for trend lookback bars"
-                                                        title="Help for trend lookback bars">?</button>
-                                                </div>
-                                                <input id="breakoutTrendLookbackBars" type="number" class="form-control"
-                                                    min="2" max="20" step="1" value="3" />
-                                            </div>
-                                        </div>
-                                    </div>
-
                                     <div class="mb-3 d-flex gap-2 align-items-center">
                                         <span class="help-label-row">
                                             <label class="form-label mb-0" for="moneyInAccount">Money in Account</label>
@@ -629,13 +696,6 @@
                                             value="4" style="width: 70px;" />
                                     </div>
 
-                                    <div class="d-flex gap-2 mb-3">
-                                        <button id="startBtn" class="btn btn-primary">Start ORBilicious</button>
-                                        <button id="stopBtn" class="btn btn-outline-danger">Stop ORBilicious</button>
-                                        <button id="refreshStatusBtn" class="btn btn-outline-secondary">Refresh
-                                            Status</button>
-                                    </div>
-
                                     <div class="small text-muted mb-2">Current status</div>
                                     <pre id="statusBox" class="p-2 bg-light border rounded mono mb-0">Loading...</pre>
 
@@ -647,7 +707,7 @@
                             </div>
                         </div>
 
-                        <div class="col-12 col-lg-7">
+                        <div class="col-12 order-1">
                             <div class="card shadow-sm">
                                 <div class="card-header card-header-actions">
                                     <span>Trade Monitor</span>
@@ -691,7 +751,9 @@
                                     </div>
                                 </div>
                             </div>
+                        </div>
 
+                        <div class="col-12 order-3">
                             <div class="card shadow-sm mt-3">
                                 <div class="card-header card-header-actions">
                                     <div>
@@ -723,7 +785,6 @@
                                     </div>
                                 </div>
                             </div>
-
                         </div>
                     </div>
                 </div>
@@ -925,8 +986,14 @@
     <div id="tradeChartTooltip" class="trade-chart-tooltip d-none" role="dialog" aria-modal="false"
         aria-labelledby="tradeChartTooltipTitle" aria-describedby="tradeChartTooltipBody">
         <div class="trade-chart-tooltip-header">
-            <strong id="tradeChartTooltipTitle" class="small">Candidate Chart</strong>
-            <button id="closeTradeChartTooltipBtn" type="button" class="btn btn-sm btn-outline-secondary">Close</button>
+            <div class="trade-chart-tooltip-header-left">
+                <strong id="tradeChartTooltipTitle" class="small">Candidate Chart</strong>
+                <span id="tradeChartTooltipPnl" class="trade-chart-tooltip-pnl result-open">P/L: -</span>
+            </div>
+            <div class="trade-chart-tooltip-header-right">
+                <button id="closeTradeChartTooltipBtn" type="button"
+                    class="btn btn-sm btn-outline-secondary">Close</button>
+            </div>
         </div>
         <div id="tradeChartTooltipBody" class="trade-chart-tooltip-body text-light small">Loading chart...</div>
     </div>

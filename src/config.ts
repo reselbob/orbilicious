@@ -121,7 +121,7 @@ export const env = {
     hardBasketCap: num('HARD_BASKET_CAP', 25000),
     quantityToRetrieve: num('QUANTITY_TO_RETRIEVE', 40),
     breakoutConfirmationCandleMinutes: num('BREAKOUT_CONFIRMATION_CANDLE_MINUTES', 5),
-    breakoutQualityFiltersEnabled: bool('BREAKOUT_QUALITY_FILTERS_ENABLED', true),
+    breakoutQualityFiltersEnabled: bool('BREAKOUT_QUALITY_FILTERS_ENABLED', false),
     breakoutMinVolumeExpansion: num('BREAKOUT_MIN_VOLUME_EXPANSION', 1.2),
     breakoutMinRelativeStrengthPct: num('BREAKOUT_MIN_RELATIVE_STRENGTH_PCT', 0.25),
     breakoutTrendTimeframeMinutes: num('BREAKOUT_TREND_TIMEFRAME_MINUTES', 5),

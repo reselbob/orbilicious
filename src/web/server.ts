@@ -730,10 +730,12 @@ function renderCandidateChartSvg(params: {
     bars: Bar[];
     sessionDate: string;
     determinationTimestamp: string;
+    entryTimestamp?: string;
     entryPrice: number;
     stopPrice: number;
     targetPrice: number;
     closePrice: number | null;
+    closeTimestamp?: string | null;
     openingRangeMinutes: number;
     maxBarsAfterDetermination: number;
 }): string {
@@ -741,10 +743,12 @@ function renderCandidateChartSvg(params: {
         bars,
         sessionDate,
         determinationTimestamp,
+        entryTimestamp,
         entryPrice,
         stopPrice,
         targetPrice,
         closePrice,
+        closeTimestamp,
         openingRangeMinutes,
         maxBarsAfterDetermination,
     } = params;
@@ -754,10 +758,29 @@ function renderCandidateChartSvg(params: {
     }
 
     const determinationMs = new Date(determinationTimestamp).getTime();
+    const entryMs = typeof entryTimestamp === 'string' && entryTimestamp.trim() !== ''
+        ? new Date(entryTimestamp).getTime()
+        : determinationMs;
+    const hasEntryTimestamp = Number.isFinite(entryMs);
+    const closeMs = typeof closeTimestamp === 'string' ? new Date(closeTimestamp).getTime() : Number.NaN;
+    const hasCloseTimestamp = Number.isFinite(closeMs);
     const sortedBars = [...bars].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
     const determinationIndex = sortedBars.findIndex((bar) => new Date(bar.timestamp).getTime() >= determinationMs);
     const determinationCutoff = determinationIndex >= 0 ? determinationIndex : sortedBars.length - 1;
-    const chartBars = sortedBars.slice(0, Math.min(sortedBars.length, determinationCutoff + 1 + maxBarsAfterDetermination));
+    const closeIndex = hasCloseTimestamp
+        ? sortedBars.findIndex((bar) => new Date(bar.timestamp).getTime() >= closeMs)
+        : -1;
+    const entryIndex = hasEntryTimestamp
+        ? sortedBars.findIndex((bar) => new Date(bar.timestamp).getTime() >= entryMs)
+        : -1;
+    const closeCutoff = hasCloseTimestamp
+        ? (closeIndex >= 0 ? closeIndex : sortedBars.length - 1)
+        : -1;
+    const entryCutoff = hasEntryTimestamp
+        ? (entryIndex >= 0 ? entryIndex : sortedBars.length - 1)
+        : -1;
+    const eventCutoff = Math.max(determinationCutoff, closeCutoff, entryCutoff, 0);
+    const chartBars = sortedBars.slice(0, Math.min(sortedBars.length, eventCutoff + 1 + maxBarsAfterDetermination));
 
     if (!chartBars.length) {
         return '<div class="small text-muted">No bars found in chart window.</div>';
@@ -765,7 +788,7 @@ function renderCandidateChartSvg(params: {
 
     const plotWidth = 820;
     const plotHeight = 250;
-    const margin = { top: 14, right: 18, bottom: 24, left: 52 };
+    const margin = { top: 14, right: 18, bottom: 90, left: 52 };
     const width = plotWidth + margin.left + margin.right;
     const height = plotHeight + margin.top + margin.bottom;
 
@@ -794,6 +817,15 @@ function renderCandidateChartSvg(params: {
     const openingRangeEndIndex = chartBars.findIndex((bar) => new Date(bar.timestamp).getTime() >= openingRangeEndMs);
     const openingRangeStopIndex = openingRangeEndIndex >= 0 ? openingRangeEndIndex : Math.min(chartBars.length - 1, openingRangeMinutes - 1);
     const openingRangeShadeWidth = Math.max(0, xForIndex(openingRangeStopIndex) - xForIndex(0));
+    const openingRangeBars = chartBars.filter(
+        (bar) => new Date(bar.timestamp).getTime() < openingRangeEndMs
+    );
+    const openingRangeHigh = openingRangeBars.length
+        ? Math.max(...openingRangeBars.map((bar) => bar.high))
+        : null;
+    const openingRangeLow = openingRangeBars.length
+        ? Math.min(...openingRangeBars.map((bar) => bar.low))
+        : null;
 
     const yTicks = Array.from({ length: 5 }, (_, i) => {
         const value = yMin + (range * i) / 4;
@@ -840,6 +872,51 @@ function renderCandidateChartSvg(params: {
         .join(' ');
 
     const xDetermination = xForIndex(Math.min(Math.max(determinationCutoff, 0), chartBars.length - 1));
+    const closeCutoffInChart = hasCloseTimestamp
+        ? chartBars.findIndex((bar) => new Date(bar.timestamp).getTime() >= closeMs)
+        : -1;
+    const xClose = hasCloseTimestamp
+        ? xForIndex(Math.min(Math.max(closeCutoffInChart >= 0 ? closeCutoffInChart : chartBars.length - 1, 0), chartBars.length - 1))
+        : null;
+    const entryCutoffInChart = hasEntryTimestamp
+        ? chartBars.findIndex((bar) => new Date(bar.timestamp).getTime() >= entryMs)
+        : -1;
+    const xEntry = hasEntryTimestamp
+        ? xForIndex(Math.min(Math.max(entryCutoffInChart >= 0 ? entryCutoffInChart : chartBars.length - 1, 0), chartBars.length - 1))
+        : null;
+
+    const labelBaseY = margin.top + plotHeight + 8;
+    const timeLabelY = margin.top + plotHeight + 20;
+    const legendY = margin.top + plotHeight + 34;
+    const legendStartX = margin.left + 4;
+    const yEntry = Number.isFinite(entryPrice) ? yForPrice(entryPrice) : null;
+    const entryMarkerSvg = xEntry == null || yEntry == null
+        ? ''
+        : `<polygon points="${xEntry},${yEntry - 8} ${xEntry - 6},${yEntry + 4} ${xEntry + 6},${yEntry + 4}" fill="#38bdf8" stroke="#0ea5e9" stroke-width="1" />`;
+    const lineLegendItems = [
+        { label: 'OR High/Low', color: '#facc15', dash: '4 4' },
+        { label: 'Stop', color: '#f97316', dash: '6 3' },
+        { label: 'Target', color: '#22c55e', dash: '6 3' },
+        ...(typeof closePrice === 'number' && Number.isFinite(closePrice)
+            ? [{ label: 'Close', color: '#a78bfa', dash: '2 3' }]
+            : []),
+    ] as const;
+    const entryLegendX = legendStartX;
+    const lineLegendStartX = legendStartX + 132;
+    const legendSvg = [
+        `<g>
+            <polygon points="${entryLegendX + 10},${legendY - 7} ${entryLegendX + 4},${legendY + 5} ${entryLegendX + 16},${legendY + 5}" fill="#38bdf8" stroke="#0ea5e9" stroke-width="1" />
+            <text x="${entryLegendX + 24}" y="${legendY + 4}" fill="#cbd5e1" font-size="11">Entry triangle</text>
+        </g>`,
+        ...lineLegendItems.map((item, index) => {
+            const itemWidth = 126;
+            const x = lineLegendStartX + index * itemWidth;
+            return `<g>
+                <line x1="${x}" y1="${legendY}" x2="${x + 22}" y2="${legendY}" stroke="${item.color}" stroke-width="1.8" stroke-dasharray="${item.dash}" />
+                <text x="${x + 28}" y="${legendY + 4}" fill="#cbd5e1" font-size="11">${item.label}</text>
+            </g>`;
+        }),
+    ].join('');
 
     return `<svg class="candidate-live-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Live candidate candlestick chart">
         <rect x="0" y="0" width="${width}" height="${height}" fill="rgba(15,23,42,0.72)" rx="8" />
@@ -848,16 +925,21 @@ function renderCandidateChartSvg(params: {
         <line x1="${margin.left}" y1="${margin.top + plotHeight}" x2="${margin.left + plotWidth}" y2="${margin.top + plotHeight}" stroke="#475569" stroke-width="1" />
         <line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${margin.top + plotHeight}" stroke="#475569" stroke-width="1" />
         ${yTicks.map((tick) => `<g><line x1="${margin.left}" y1="${tick.y}" x2="${margin.left + plotWidth}" y2="${tick.y}" stroke="rgba(148,163,184,0.18)" /><text x="${margin.left - 8}" y="${tick.y + 4}" fill="#cbd5e1" font-size="11" text-anchor="end">${tick.label}</text></g>`).join('')}
-        ${xTicks.map((tick) => `<text x="${tick.x}" y="${height - 8}" fill="#cbd5e1" font-size="11" text-anchor="middle">${tick.label}</text>`).join('')}
-        ${overlayLine(entryPrice, '#38bdf8', '3 3')}
+        ${xTicks.map((tick) => `<text x="${tick.x}" y="${timeLabelY}" fill="#cbd5e1" font-size="11" text-anchor="middle">${tick.label}</text>`).join('')}
+        ${overlayLine(openingRangeHigh, '#facc15', '4 4')}
+        ${overlayLine(openingRangeLow, '#facc15', '4 4')}
         ${overlayLine(stopPrice, '#f97316', '6 3')}
         ${overlayLine(targetPrice, '#22c55e', '6 3')}
         ${overlayLine(closePrice, '#a78bfa', '2 3')}
         ${candlesSvg}
+        ${entryMarkerSvg}
         <line x1="${xDetermination}" y1="${margin.top}" x2="${xDetermination}" y2="${margin.top + plotHeight}" stroke="#60a5fa" stroke-width="1" stroke-dasharray="5 4" />
+        ${xClose == null ? '' : `<line x1="${xClose}" y1="${margin.top}" x2="${xClose}" y2="${margin.top + plotHeight}" stroke="#a78bfa" stroke-width="1" stroke-dasharray="3 3" />`}
         ${postClosePolylinePoints ? `<polyline points="${postClosePolylinePoints}" fill="none" stroke="#60a5fa" stroke-width="1.7" />` : ''}
         <text x="${margin.left + 6}" y="${margin.top + 14}" fill="#94a3b8" font-size="11">OR window</text>
-        <text x="${xDetermination + 6}" y="${margin.top + 14}" fill="#93c5fd" font-size="11">Determination end</text>
+        <text x="${xDetermination}" y="${labelBaseY}" fill="#93c5fd" font-size="11" text-anchor="start" transform="rotate(90 ${xDetermination} ${labelBaseY})">Determination end</text>
+        ${xClose == null ? '' : `<text x="${xClose}" y="${labelBaseY}" fill="#c4b5fd" font-size="11" text-anchor="start" transform="rotate(90 ${xClose} ${labelBaseY})">Trade close</text>`}
+        ${legendSvg}
     </svg>`;
 }
 
@@ -904,10 +986,12 @@ async function buildLiveCandidateCharts(limit = 8): Promise<CandidateChartCard[]
                 bars: sessionBars,
                 sessionDate,
                 determinationTimestamp: openEvent.timestamp,
+                entryTimestamp: openEvent.timestamp,
                 entryPrice: openEvent.entryPrice,
                 stopPrice: openEvent.stopPrice,
                 targetPrice: openEvent.targetPrice,
                 closePrice: typeof closeEvent?.closePrice === 'number' ? closeEvent.closePrice : null,
+                closeTimestamp: closeEvent?.timestamp ?? null,
                 openingRangeMinutes: strategyConfig.openingRangeMinutes,
                 maxBarsAfterDetermination: 30,
             });
@@ -1339,24 +1423,32 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
         const symbolRaw = url.searchParams.get('symbol') || '';
         const sessionDateRaw = url.searchParams.get('sessionDate') || '';
         const determinationTimestampRaw = url.searchParams.get('determinationTimestamp') || '';
+        const entryTimestampRaw = url.searchParams.get('entryTimestamp') || '';
         const entryPrice = Number(url.searchParams.get('entryPrice'));
         const stopPrice = Number(url.searchParams.get('stopPrice'));
         const targetPrice = Number(url.searchParams.get('targetPrice'));
         const closePriceParam = url.searchParams.get('closePrice');
         const closePrice = closePriceParam == null || closePriceParam === '' ? null : Number(closePriceParam);
+        const closeTimestampRaw = url.searchParams.get('closeTimestamp') || '';
 
         const symbol = symbolRaw.trim().toUpperCase();
         const sessionDate = sessionDateRaw.trim();
         const determinationTimestamp = determinationTimestampRaw.trim();
+        const entryTimestamp = entryTimestampRaw.trim() || determinationTimestamp;
+        const closeTimestamp = closeTimestampRaw.trim() || null;
         const hasValidSessionDate = /^\d{4}-\d{2}-\d{2}$/.test(sessionDate);
         const determinationMs = new Date(determinationTimestamp).getTime();
+        const entryMs = new Date(entryTimestamp).getTime();
+        const closeMs = closeTimestamp === null ? Number.NaN : new Date(closeTimestamp).getTime();
         const hasValidCoreParams = symbol.length > 0
             && hasValidSessionDate
             && Number.isFinite(determinationMs)
+            && Number.isFinite(entryMs)
             && Number.isFinite(entryPrice)
             && Number.isFinite(stopPrice)
             && Number.isFinite(targetPrice)
-            && (closePrice === null || Number.isFinite(closePrice));
+            && (closePrice === null || Number.isFinite(closePrice))
+            && (closeTimestamp === null || Number.isFinite(closeMs));
 
         if (!hasValidCoreParams) {
             sendJson(res, 400, {
@@ -1374,10 +1466,12 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
                 bars: sessionBars,
                 sessionDate,
                 determinationTimestamp,
+                entryTimestamp,
                 entryPrice,
                 stopPrice,
                 targetPrice,
                 closePrice,
+                closeTimestamp,
                 openingRangeMinutes: strategyConfig.openingRangeMinutes,
                 maxBarsAfterDetermination: 30,
             });

@@ -67,6 +67,7 @@ const closeFieldHelpBtn = document.getElementById('closeFieldHelpBtn');
 const tradeChartTooltip = document.getElementById('tradeChartTooltip');
 const tradeChartTooltipTitle = document.getElementById('tradeChartTooltipTitle');
 const tradeChartTooltipBody = document.getElementById('tradeChartTooltipBody');
+const tradeChartTooltipPnl = document.getElementById('tradeChartTooltipPnl');
 const closeTradeChartTooltipBtn = document.getElementById('closeTradeChartTooltipBtn');
 
 let tradeCursor = 0;
@@ -400,15 +401,24 @@ function chartButtonMarkup(rowEvent, sourceEvent) {
     const closePrice = rowEvent.eventType === 'close' && typeof rowEvent.closePrice === 'number'
         ? rowEvent.closePrice
         : '';
+    const closeTimestamp = rowEvent.eventType === 'close' && typeof rowEvent.timestamp === 'string'
+        ? rowEvent.timestamp
+        : '';
+    const pnlValue = rowEvent.eventType === 'close' && typeof rowEvent.pnl === 'number' && !Number.isNaN(rowEvent.pnl)
+        ? rowEvent.pnl
+        : '';
 
     return `<button type="button" class="btn btn-sm btn-outline-secondary trade-chart-trigger"
         data-symbol="${sourceEvent.symbol}"
         data-session-date="${sessionDate}"
         data-determination-timestamp="${sourceEvent.timestamp}"
+        data-entry-timestamp="${sourceEvent.timestamp}"
         data-entry-price="${sourceEvent.entryPrice}"
         data-stop-price="${sourceEvent.stopPrice}"
         data-target-price="${sourceEvent.targetPrice}"
         data-close-price="${closePrice}"
+        data-close-timestamp="${closeTimestamp}"
+        data-pnl="${pnlValue}"
         aria-label="Show chart for ${sourceEvent.symbol}"
         title="Show chart">
         <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false" fill="currentColor">
@@ -426,11 +436,14 @@ async function openTradeChartTooltip(button) {
     const symbol = button.dataset.symbol || '';
     const sessionDate = button.dataset.sessionDate || '';
     const determinationTimestamp = button.dataset.determinationTimestamp || '';
+    const entryTimestamp = button.dataset.entryTimestamp || '';
     const entryPrice = button.dataset.entryPrice || '';
     const stopPrice = button.dataset.stopPrice || '';
     const targetPrice = button.dataset.targetPrice || '';
     const closePrice = button.dataset.closePrice || '';
-    const requestKey = `${symbol}|${sessionDate}|${determinationTimestamp}|${entryPrice}|${stopPrice}|${targetPrice}|${closePrice}`;
+    const closeTimestamp = button.dataset.closeTimestamp || '';
+    const pnl = button.dataset.pnl || '';
+    const requestKey = `${symbol}|${sessionDate}|${determinationTimestamp}|${entryTimestamp}|${entryPrice}|${stopPrice}|${targetPrice}|${closePrice}|${closeTimestamp}|${pnl}`;
 
     if (activeTradeChartAnchor === button && !tradeChartTooltip.classList.contains('d-none')) {
         closeTradeChartTooltip();
@@ -442,6 +455,15 @@ async function openTradeChartTooltip(button) {
     tradeChartTooltip.classList.remove('d-none');
     tradeChartTooltip.style.visibility = 'hidden';
     tradeChartTooltipTitle.textContent = `${symbol || '-'} ${sessionDate || ''}`.trim();
+    if (tradeChartTooltipPnl) {
+        const pnlNum = Number(pnl);
+        const hasPnl = pnl !== '' && Number.isFinite(pnlNum);
+        const pnlText = hasPnl ? `P/L: ${formatPnl(pnlNum)}` : 'P/L: Open';
+        const pnlClass = hasPnl ? (pnlNum > 0 ? 'result-profit' : pnlNum < 0 ? 'result-loss' : 'result-open') : 'result-open';
+        tradeChartTooltipPnl.textContent = pnlText;
+        tradeChartTooltipPnl.classList.remove('result-profit', 'result-loss', 'result-open');
+        tradeChartTooltipPnl.classList.add(pnlClass);
+    }
     tradeChartTooltipBody.innerHTML = '<div class="text-light small">Loading chart...</div>';
 
     requestAnimationFrame(() => {
@@ -455,12 +477,16 @@ async function openTradeChartTooltip(button) {
             symbol,
             sessionDate,
             determinationTimestamp,
+            entryTimestamp,
             entryPrice,
             stopPrice,
             targetPrice,
         });
         if (closePrice) {
             query.set('closePrice', closePrice);
+        }
+        if (closeTimestamp) {
+            query.set('closeTimestamp', closeTimestamp);
         }
 
         const response = await fetch(`/api/orbilicious/candidate-chart?${query.toString()}`);
