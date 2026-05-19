@@ -37,6 +37,12 @@ const topTabPanels = document.querySelectorAll('.top-tab-panel');
 const moneyInAccountSelect = document.getElementById('moneyInAccount');
 const maxRiskPerSessionSelect = document.getElementById('maxRiskPerSession');
 const stopProfitRatioSpinner = document.getElementById('stopProfitRatio');
+const breakoutConfirmationCandleMinutesInput = document.getElementById('breakoutConfirmationCandleMinutes');
+const breakoutQualityFiltersEnabledInput = document.getElementById('breakoutQualityFiltersEnabled');
+const breakoutMinVolumeExpansionInput = document.getElementById('breakoutMinVolumeExpansion');
+const breakoutMinRelativeStrengthPctInput = document.getElementById('breakoutMinRelativeStrengthPct');
+const breakoutTrendTimeframeMinutesInput = document.getElementById('breakoutTrendTimeframeMinutes');
+const breakoutTrendLookbackBarsInput = document.getElementById('breakoutTrendLookbackBars');
 const startConfirmationPane = document.getElementById('startConfirmationPane');
 const confirmStartBtn = document.getElementById('confirmStartBtn');
 const cancelStartBtn = document.getElementById('cancelStartBtn');
@@ -47,11 +53,21 @@ const confirmCandidateTradeType = document.getElementById('confirmCandidateTrade
 const confirmMoneyInAccount = document.getElementById('confirmMoneyInAccount');
 const confirmMaxRiskPerSession = document.getElementById('confirmMaxRiskPerSession');
 const confirmStopProfitRatio = document.getElementById('confirmStopProfitRatio');
+const confirmBreakoutConfirmationCandleMinutes = document.getElementById('confirmBreakoutConfirmationCandleMinutes');
+const confirmBreakoutQualityFiltersEnabled = document.getElementById('confirmBreakoutQualityFiltersEnabled');
+const confirmBreakoutMinVolumeExpansion = document.getElementById('confirmBreakoutMinVolumeExpansion');
+const confirmBreakoutMinRelativeStrengthPct = document.getElementById('confirmBreakoutMinRelativeStrengthPct');
+const confirmBreakoutTrendTimeframeMinutes = document.getElementById('confirmBreakoutTrendTimeframeMinutes');
+const confirmBreakoutTrendLookbackBars = document.getElementById('confirmBreakoutTrendLookbackBars');
 const fieldHelpPopover = document.getElementById('fieldHelpPopover');
 const fieldHelpTitle = document.getElementById('fieldHelpTitle');
 const fieldHelpSubtitle = document.getElementById('fieldHelpSubtitle');
 const fieldHelpText = document.getElementById('fieldHelpText');
 const closeFieldHelpBtn = document.getElementById('closeFieldHelpBtn');
+const tradeChartTooltip = document.getElementById('tradeChartTooltip');
+const tradeChartTooltipTitle = document.getElementById('tradeChartTooltipTitle');
+const tradeChartTooltipBody = document.getElementById('tradeChartTooltipBody');
+const closeTradeChartTooltipBtn = document.getElementById('closeTradeChartTooltipBtn');
 
 let tradeCursor = 0;
 let tradeEvents = [];
@@ -63,6 +79,8 @@ let latestIsRunning = false;
 let latestLiquidityPayload = null;
 let sipProbeUnsupported = false;
 let activeFieldHelpAnchor = null;
+let activeTradeChartAnchor = null;
+let activeTradeChartKey = '';
 
 const fieldHelpContent = {
     sessionMode: {
@@ -105,7 +123,43 @@ const fieldHelpContent = {
         subtitle: 'Set the reward multiple after the stop loss.',
         text: 'A ratio of 1:4 means the profit target is four times the stop distance. Larger ratios seek more reward for the same risk and smaller ratios exit sooner.',
     },
+    breakoutConfirmationCandleMinutes: {
+        title: 'Breakout Confirmation Candle',
+        subtitle: 'Require a close outside the range on this timeframe.',
+        text: 'Default is 5 minutes to reduce 1-minute noise spikes. Lower values react faster; higher values are stricter.',
+    },
+    breakoutQualityFiltersEnabled: {
+        title: 'Breakout Quality Filters',
+        subtitle: 'Enable quality gating before candidate acceptance.',
+        text: 'When enabled, candidates must pass volume expansion, relative strength/weakness, and higher-timeframe trend alignment checks.',
+    },
+    breakoutMinVolumeExpansion: {
+        title: 'Min Volume Expansion',
+        subtitle: 'Volume requirement for breakout quality.',
+        text: 'Breakout-candle volume must be at least this multiple of recent confirmation-candle volume. Example: 1.2 means 20% higher volume.',
+    },
+    breakoutMinRelativeStrengthPct: {
+        title: 'Min Relative Strength (%)',
+        subtitle: 'Distance outside opening range required on breakout close.',
+        text: 'For longs, close must be at least this percent above OR high. For shorts, this percent below OR low.',
+    },
+    breakoutTrendTimeframeMinutes: {
+        title: 'Trend Timeframe (minutes)',
+        subtitle: 'Higher-timeframe bars used for trend alignment.',
+        text: 'Defines the aggregation period used to measure trend direction before breakout quality is approved.',
+    },
+    breakoutTrendLookbackBars: {
+        title: 'Trend Lookback Bars',
+        subtitle: 'How many higher-timeframe bars define trend context.',
+        text: 'Higher values smooth trend checks; lower values react faster but can be noisier.',
+    },
 };
+
+function clampNumber(value, fallback, min, max) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.min(max, Math.max(min, parsed));
+}
 
 function positionFieldHelpPopover(anchor) {
     if (!fieldHelpPopover || !anchor) return;
@@ -261,8 +315,8 @@ function formatTradeDateTime(iso) {
         return '-';
     }
 
-    const datePart = value.toLocaleDateString([], { year: 'numeric', month: '2-digit', day: '2-digit' });
-    const timePart = value.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const datePart = value.toLocaleDateString([], { month: '2-digit', day: '2-digit' });
+    const timePart = value.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     return `${datePart} ${timePart}`;
 }
 
@@ -272,6 +326,166 @@ function formatPnl(value) {
     }
 
     return `${value > 0 ? '+' : ''}${value.toFixed(2)}`;
+}
+
+function positionTradeChartTooltip(anchor) {
+    if (!tradeChartTooltip || !anchor) return;
+
+    const rect = anchor.getBoundingClientRect();
+    const tooltipWidth = Math.min(780, window.innerWidth - 16);
+    const tooltipHeight = tradeChartTooltip.offsetHeight || 380;
+    const gap = 10;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    const showBelow = spaceBelow >= tooltipHeight + gap || spaceBelow >= spaceAbove;
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - tooltipWidth - 8));
+    const top = showBelow
+        ? Math.min(rect.bottom + gap, window.innerHeight - tooltipHeight - 8)
+        : Math.max(8, rect.top - tooltipHeight - gap);
+
+    tradeChartTooltip.style.left = `${left}px`;
+    tradeChartTooltip.style.top = `${top}px`;
+}
+
+function closeTradeChartTooltip() {
+    if (!tradeChartTooltip) return;
+    tradeChartTooltip.classList.add('d-none');
+    tradeChartTooltip.style.visibility = '';
+    activeTradeChartAnchor = null;
+    activeTradeChartKey = '';
+}
+
+function chartSourceEvent(events, rowIndex) {
+    const event = events[rowIndex];
+    if (!event || !event.symbol) {
+        return null;
+    }
+
+    const hasOpenFields = typeof event.entryPrice === 'number'
+        && typeof event.stopPrice === 'number'
+        && typeof event.targetPrice === 'number';
+
+    if (event.eventType === 'open' && hasOpenFields) {
+        return event;
+    }
+
+    for (let i = rowIndex - 1; i >= 0; i -= 1) {
+        const candidate = events[i];
+        if (
+            candidate
+            && candidate.eventType === 'open'
+            && candidate.symbol === event.symbol
+            && eventSessionDate(candidate) === eventSessionDate(event)
+            && typeof candidate.entryPrice === 'number'
+            && typeof candidate.stopPrice === 'number'
+            && typeof candidate.targetPrice === 'number'
+        ) {
+            return candidate;
+        }
+    }
+
+    return null;
+}
+
+function chartButtonMarkup(rowEvent, sourceEvent) {
+    if (!sourceEvent) {
+        return '<span class="text-muted">-</span>';
+    }
+
+    const sessionDate = eventSessionDate(sourceEvent);
+    if (!sessionDate || typeof sourceEvent.timestamp !== 'string') {
+        return '<span class="text-muted">-</span>';
+    }
+
+    const closePrice = rowEvent.eventType === 'close' && typeof rowEvent.closePrice === 'number'
+        ? rowEvent.closePrice
+        : '';
+
+    return `<button type="button" class="btn btn-sm btn-outline-secondary trade-chart-trigger"
+        data-symbol="${sourceEvent.symbol}"
+        data-session-date="${sessionDate}"
+        data-determination-timestamp="${sourceEvent.timestamp}"
+        data-entry-price="${sourceEvent.entryPrice}"
+        data-stop-price="${sourceEvent.stopPrice}"
+        data-target-price="${sourceEvent.targetPrice}"
+        data-close-price="${closePrice}"
+        aria-label="Show chart for ${sourceEvent.symbol}"
+        title="Show chart">
+        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false" fill="currentColor">
+            <path d="M1.25 1.25a.75.75 0 0 1 .75.75v11.5h11.5a.75.75 0 0 1 0 1.5h-12A1.25 1.25 0 0 1 .25 13.75v-12a.75.75 0 0 1 .75-.75Z"/>
+            <path d="M4.47 11.03a.75.75 0 0 1 0-1.06l2.53-2.53a.75.75 0 0 1 1.06 0l1.19 1.19 2.78-3.58a.75.75 0 1 1 1.18.92l-3.3 4.25a.75.75 0 0 1-1.11.08L7.53 9.03l-2 2a.75.75 0 0 1-1.06 0Z"/>
+        </svg>
+    </button>`;
+}
+
+async function openTradeChartTooltip(button) {
+    if (!tradeChartTooltip || !tradeChartTooltipBody || !tradeChartTooltipTitle) {
+        return;
+    }
+
+    const symbol = button.dataset.symbol || '';
+    const sessionDate = button.dataset.sessionDate || '';
+    const determinationTimestamp = button.dataset.determinationTimestamp || '';
+    const entryPrice = button.dataset.entryPrice || '';
+    const stopPrice = button.dataset.stopPrice || '';
+    const targetPrice = button.dataset.targetPrice || '';
+    const closePrice = button.dataset.closePrice || '';
+    const requestKey = `${symbol}|${sessionDate}|${determinationTimestamp}|${entryPrice}|${stopPrice}|${targetPrice}|${closePrice}`;
+
+    if (activeTradeChartAnchor === button && !tradeChartTooltip.classList.contains('d-none')) {
+        closeTradeChartTooltip();
+        return;
+    }
+
+    activeTradeChartAnchor = button;
+    activeTradeChartKey = requestKey;
+    tradeChartTooltip.classList.remove('d-none');
+    tradeChartTooltip.style.visibility = 'hidden';
+    tradeChartTooltipTitle.textContent = `${symbol || '-'} ${sessionDate || ''}`.trim();
+    tradeChartTooltipBody.innerHTML = '<div class="text-light small">Loading chart...</div>';
+
+    requestAnimationFrame(() => {
+        if (tradeChartTooltip.classList.contains('d-none')) return;
+        positionTradeChartTooltip(activeTradeChartAnchor);
+        tradeChartTooltip.style.visibility = 'visible';
+    });
+
+    try {
+        const query = new URLSearchParams({
+            symbol,
+            sessionDate,
+            determinationTimestamp,
+            entryPrice,
+            stopPrice,
+            targetPrice,
+        });
+        if (closePrice) {
+            query.set('closePrice', closePrice);
+        }
+
+        const response = await fetch(`/api/orbilicious/candidate-chart?${query.toString()}`);
+        const payload = await readJson(response);
+        if (requestKey !== activeTradeChartKey) {
+            return;
+        }
+
+        if (!response.ok) {
+            tradeChartTooltipBody.innerHTML = `<div class="text-warning small">${payload.message || 'Unable to load chart.'}</div>`;
+            positionTradeChartTooltip(activeTradeChartAnchor);
+            return;
+        }
+
+        tradeChartTooltipBody.innerHTML = typeof payload.svg === 'string'
+            ? payload.svg
+            : '<div class="text-warning small">No chart content returned.</div>';
+        positionTradeChartTooltip(activeTradeChartAnchor);
+    } catch {
+        if (requestKey !== activeTradeChartKey) {
+            return;
+        }
+        tradeChartTooltipBody.innerHTML = '<div class="text-warning small">Unable to load chart.</div>';
+        positionTradeChartTooltip(activeTradeChartAnchor);
+    }
 }
 
 function formatPercent(value) {
@@ -348,10 +562,12 @@ function renderTrades() {
         return;
     }
 
-    const rows = tradeEvents
+    const sortedEvents = tradeEvents
         .slice()
-        .sort((a, b) => (a.id || 0) - (b.id || 0))
-        .map((event) => {
+        .sort((a, b) => (a.id || 0) - (b.id || 0));
+
+    const rows = sortedEvents
+        .map((event, index) => {
             const statusBadge = event.eventType === 'open'
                 ? '<span class="badge text-bg-success">OPEN</span>'
                 : '<span class="badge text-bg-secondary">CLOSED</span>';
@@ -393,12 +609,19 @@ function renderTrades() {
                     ? 'result-loss'
                     : 'result-open';
             const pnl = event.eventType === 'close' ? formatPnl(event.pnl) : 'Open';
+            const sourceEvent = chartSourceEvent(sortedEvents, index);
+            const chartButton = chartButtonMarkup(event, sourceEvent);
 
             return `
                 <tr>
-                    <td>${formatTradeDateTime(event.timestamp)}</td>
+                    <td class="trade-datetime" title="${formatTradeDateTime(event.timestamp)}">${formatTradeDateTime(event.timestamp)}</td>
                     <td>${statusBadge}</td>
-                    <td><span class="trade-symbol">${event.symbol || '-'}</span></td>
+                    <td>
+                        <div class="d-inline-flex align-items-center gap-2">
+                            <span class="trade-symbol">${event.symbol || '-'}</span>
+                            ${chartButton}
+                        </div>
+                    </td>
                     <td>${sideBadge}</td>
                     <td class="trade-price">${formatQty(event.qty)}</td>
                     <td class="trade-price">${entry}</td>
@@ -474,6 +697,12 @@ function showStartConfirmationPane() {
     const moneyInAccount = getMoneyInAccount();
     const maxRiskPerSession = getMaxRiskPerSession();
     const stopProfitRatio = getStopProfitRatio();
+    const breakoutConfirmationCandleMinutes = getBreakoutConfirmationCandleMinutes();
+    const breakoutQualityFiltersEnabled = getBreakoutQualityFiltersEnabled();
+    const breakoutMinVolumeExpansion = getBreakoutMinVolumeExpansion();
+    const breakoutMinRelativeStrengthPct = getBreakoutMinRelativeStrengthPct();
+    const breakoutTrendTimeframeMinutes = getBreakoutTrendTimeframeMinutes();
+    const breakoutTrendLookbackBars = getBreakoutTrendLookbackBars();
 
     confirmSessionMode.textContent = session;
     confirmEmulationDate.textContent = emulationDate;
@@ -482,6 +711,12 @@ function showStartConfirmationPane() {
     confirmMoneyInAccount.textContent = formatCurrency(moneyInAccount);
     confirmMaxRiskPerSession.textContent = formatCurrency(maxRiskPerSession);
     confirmStopProfitRatio.textContent = `1:${stopProfitRatio}`;
+    confirmBreakoutConfirmationCandleMinutes.textContent = `${breakoutConfirmationCandleMinutes}m`;
+    confirmBreakoutQualityFiltersEnabled.textContent = breakoutQualityFiltersEnabled ? 'Enabled' : 'Disabled';
+    confirmBreakoutMinVolumeExpansion.textContent = breakoutMinVolumeExpansion.toFixed(2);
+    confirmBreakoutMinRelativeStrengthPct.textContent = `${breakoutMinRelativeStrengthPct.toFixed(2)}%`;
+    confirmBreakoutTrendTimeframeMinutes.textContent = `${breakoutTrendTimeframeMinutes}m`;
+    confirmBreakoutTrendLookbackBars.textContent = String(breakoutTrendLookbackBars);
 
     startConfirmationPane.classList.remove('d-none');
 }
@@ -529,9 +764,28 @@ function syncDropdownsFromServer(payload) {
     if (typeof payload.emulationSessionDate === 'string' && payload.emulationSessionDate) {
         emulationDateInput.value = payload.emulationSessionDate;
     }
-    if (payload.isRunning === true && typeof payload.candidateTradeType === 'string' && candidateTradeType) {
+    if (typeof payload.candidateTradeType === 'string' && candidateTradeType) {
         candidateTradeType.value = payload.candidateTradeType;
     }
+    if (typeof payload.breakoutConfirmationCandleMinutes === 'number') {
+        breakoutConfirmationCandleMinutesInput.value = String(payload.breakoutConfirmationCandleMinutes);
+    }
+    if (typeof payload.breakoutQualityFiltersEnabled === 'boolean') {
+        breakoutQualityFiltersEnabledInput.checked = payload.breakoutQualityFiltersEnabled;
+    }
+    if (typeof payload.breakoutMinVolumeExpansion === 'number') {
+        breakoutMinVolumeExpansionInput.value = String(payload.breakoutMinVolumeExpansion);
+    }
+    if (typeof payload.breakoutMinRelativeStrengthPct === 'number') {
+        breakoutMinRelativeStrengthPctInput.value = String(payload.breakoutMinRelativeStrengthPct);
+    }
+    if (typeof payload.breakoutTrendTimeframeMinutes === 'number') {
+        breakoutTrendTimeframeMinutesInput.value = String(payload.breakoutTrendTimeframeMinutes);
+    }
+    if (typeof payload.breakoutTrendLookbackBars === 'number') {
+        breakoutTrendLookbackBarsInput.value = String(payload.breakoutTrendLookbackBars);
+    }
+    applyBreakoutQualityInputsEnabled();
     syncEmulationControls();
 }
 
@@ -581,6 +835,12 @@ async function submitStartOrbilicious() {
                 moneyInAccount: getMoneyInAccount(),
                 maxRiskPerSession: getMaxRiskPerSession(),
                 stopProfitRewardPart: getStopProfitRatio(),
+                breakoutConfirmationCandleMinutes: getBreakoutConfirmationCandleMinutes(),
+                breakoutQualityFiltersEnabled: getBreakoutQualityFiltersEnabled(),
+                breakoutMinVolumeExpansion: getBreakoutMinVolumeExpansion(),
+                breakoutMinRelativeStrengthPct: getBreakoutMinRelativeStrengthPct(),
+                breakoutTrendTimeframeMinutes: getBreakoutTrendTimeframeMinutes(),
+                breakoutTrendLookbackBars: getBreakoutTrendLookbackBars(),
             }),
         });
 
@@ -591,7 +851,8 @@ async function submitStartOrbilicious() {
             return;
         }
 
-        await refreshStatus();
+        const statusPayload = await refreshStatus();
+        syncDropdownsFromServer(statusPayload);
         await refreshTrades();
 
         if (showMarketClosedMessage) {
@@ -870,6 +1131,38 @@ function getStopProfitRatio() {
     return Math.max(1, Math.min(20, value));
 }
 
+function getBreakoutConfirmationCandleMinutes() {
+    return Math.floor(clampNumber(breakoutConfirmationCandleMinutesInput.value, 5, 1, 30));
+}
+
+function getBreakoutQualityFiltersEnabled() {
+    return breakoutQualityFiltersEnabledInput.checked === true;
+}
+
+function getBreakoutMinVolumeExpansion() {
+    return clampNumber(breakoutMinVolumeExpansionInput.value, 1.2, 0.5, 10);
+}
+
+function getBreakoutMinRelativeStrengthPct() {
+    return clampNumber(breakoutMinRelativeStrengthPctInput.value, 0.25, 0, 5);
+}
+
+function getBreakoutTrendTimeframeMinutes() {
+    return Math.floor(clampNumber(breakoutTrendTimeframeMinutesInput.value, 5, 1, 60));
+}
+
+function getBreakoutTrendLookbackBars() {
+    return Math.floor(clampNumber(breakoutTrendLookbackBarsInput.value, 3, 2, 20));
+}
+
+function applyBreakoutQualityInputsEnabled() {
+    const enabled = getBreakoutQualityFiltersEnabled();
+    breakoutMinVolumeExpansionInput.disabled = !enabled;
+    breakoutMinRelativeStrengthPctInput.disabled = !enabled;
+    breakoutTrendTimeframeMinutesInput.disabled = !enabled;
+    breakoutTrendLookbackBarsInput.disabled = !enabled;
+}
+
 function updateBrowserLocalTime() {
     if (!browserLocalTime) {
         return;
@@ -890,6 +1183,12 @@ document.addEventListener('click', (event) => {
     const target = event.target instanceof Element ? event.target : null;
     if (!target) return;
 
+    const chartButton = target.closest('.trade-chart-trigger');
+    if (chartButton instanceof HTMLElement) {
+        openTradeChartTooltip(chartButton);
+        return;
+    }
+
     const helpButton = target.closest('[data-help-key]');
     if (helpButton) {
         const key = helpButton.getAttribute('data-help-key');
@@ -902,32 +1201,53 @@ document.addEventListener('click', (event) => {
     if (fieldHelpPopover && !fieldHelpPopover.classList.contains('d-none') && !target.closest('#fieldHelpPopover')) {
         closeFieldHelp();
     }
+
+    if (tradeChartTooltip && !tradeChartTooltip.classList.contains('d-none') && !target.closest('#tradeChartTooltip')) {
+        closeTradeChartTooltip();
+    }
 });
 
 if (closeFieldHelpBtn) {
     closeFieldHelpBtn.addEventListener('click', closeFieldHelp);
 }
 
+if (closeTradeChartTooltipBtn) {
+    closeTradeChartTooltipBtn.addEventListener('click', closeTradeChartTooltip);
+}
+
 document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
         closeFieldHelp();
+        closeTradeChartTooltip();
     }
 });
 
 window.addEventListener('resize', () => {
     if (!fieldHelpPopover || fieldHelpPopover.classList.contains('d-none') || !activeFieldHelpAnchor) {
+        if (tradeChartTooltip && !tradeChartTooltip.classList.contains('d-none') && activeTradeChartAnchor) {
+            positionTradeChartTooltip(activeTradeChartAnchor);
+        }
         return;
     }
 
     positionFieldHelpPopover(activeFieldHelpAnchor);
+    if (tradeChartTooltip && !tradeChartTooltip.classList.contains('d-none') && activeTradeChartAnchor) {
+        positionTradeChartTooltip(activeTradeChartAnchor);
+    }
 });
 
 window.addEventListener('scroll', () => {
     if (!fieldHelpPopover || fieldHelpPopover.classList.contains('d-none') || !activeFieldHelpAnchor) {
+        if (tradeChartTooltip && !tradeChartTooltip.classList.contains('d-none') && activeTradeChartAnchor) {
+            positionTradeChartTooltip(activeTradeChartAnchor);
+        }
         return;
     }
 
     positionFieldHelpPopover(activeFieldHelpAnchor);
+    if (tradeChartTooltip && !tradeChartTooltip.classList.contains('d-none') && activeTradeChartAnchor) {
+        positionTradeChartTooltip(activeTradeChartAnchor);
+    }
 }, true);
 
 startBtn.addEventListener('click', showStartConfirmationPane);
@@ -950,6 +1270,7 @@ liquiditySortMode.addEventListener('change', () => {
 sessionMode.addEventListener('change', syncEmulationControls);
 emulationDateInput.addEventListener('change', syncEmulationControls);
 continuousMode.addEventListener('change', syncEmulationControls);
+breakoutQualityFiltersEnabledInput.addEventListener('change', applyBreakoutQualityInputsEnabled);
 
 realTimeDataFeed.addEventListener('change', async () => {
     if (!realTimeDataFeed.checked) {
@@ -997,6 +1318,7 @@ liquiditySessionDateInput.value = today;
 liquiditySessionDateInput.max = today;
 syncEmulationControls();
 initializeAccountAndRiskSpinners();
+applyBreakoutQualityInputsEnabled();
 activateTopTab('dashboardTab');
 
 refreshStatus().then((payload) => {

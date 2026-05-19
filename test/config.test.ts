@@ -87,4 +87,44 @@ describe('config integration', () => {
 
         expect(mod.env.candidateTradeType).to.equal('SHORT');
     });
+
+    it('loads breakout confirmation and quality filter defaults', () => {
+        withBaseConfigEnv();
+        delete process.env.BREAKOUT_CONFIRMATION_CANDLE_MINUTES;
+        delete process.env.BREAKOUT_QUALITY_FILTERS_ENABLED;
+        delete process.env.BREAKOUT_MIN_VOLUME_EXPANSION;
+        delete process.env.BREAKOUT_MIN_RELATIVE_STRENGTH_PCT;
+        delete process.env.BREAKOUT_TREND_TIMEFRAME_MINUTES;
+        delete process.env.BREAKOUT_TREND_LOOKBACK_BARS;
+
+        clearConfigModuleCache();
+        const mod = require('../src/config');
+
+        expect(mod.env.breakoutConfirmationCandleMinutes).to.equal(5);
+        expect(mod.env.breakoutQualityFiltersEnabled).to.equal(true);
+        expect(mod.env.breakoutMinVolumeExpansion).to.equal(1.2);
+        expect(mod.env.breakoutMinRelativeStrengthPct).to.equal(0.25);
+        expect(mod.env.breakoutTrendTimeframeMinutes).to.equal(5);
+        expect(mod.env.breakoutTrendLookbackBars).to.equal(3);
+    });
+
+    it('loads breakout confirmation and quality filter overrides', () => {
+        withBaseConfigEnv();
+        process.env.BREAKOUT_CONFIRMATION_CANDLE_MINUTES = '1';
+        process.env.BREAKOUT_QUALITY_FILTERS_ENABLED = 'false';
+        process.env.BREAKOUT_MIN_VOLUME_EXPANSION = '1.5';
+        process.env.BREAKOUT_MIN_RELATIVE_STRENGTH_PCT = '0.4';
+        process.env.BREAKOUT_TREND_TIMEFRAME_MINUTES = '15';
+        process.env.BREAKOUT_TREND_LOOKBACK_BARS = '4';
+
+        clearConfigModuleCache();
+        const mod = require('../src/config');
+
+        expect(mod.env.breakoutConfirmationCandleMinutes).to.equal(1);
+        expect(mod.env.breakoutQualityFiltersEnabled).to.equal(false);
+        expect(mod.env.breakoutMinVolumeExpansion).to.equal(1.5);
+        expect(mod.env.breakoutMinRelativeStrengthPct).to.equal(0.4);
+        expect(mod.env.breakoutTrendTimeframeMinutes).to.equal(15);
+        expect(mod.env.breakoutTrendLookbackBars).to.equal(4);
+    });
 });

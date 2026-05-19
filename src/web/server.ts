@@ -9,6 +9,7 @@ import { findLiquidityZonesForSymbol } from '../liquidity';
 import { OrbService } from '../services/orb-service';
 import { toNyParts } from '../time';
 import { AlpacaClient } from '../alpaca';
+import type { Bar } from '../types';
 
 type SessionMode = 'EMULATION' | 'PAPER' | 'LIVE';
 type CandidateTradeType = 'LONG' | 'SHORT' | 'LONG_AND_SHORT';
@@ -39,6 +40,12 @@ type AppState = {
     realtimeDataFeed: boolean;
     realtimeDataFeedError: boolean;
     candidateTradeType: CandidateTradeType;
+    breakoutConfirmationCandleMinutes: number;
+    breakoutQualityFiltersEnabled: boolean;
+    breakoutMinVolumeExpansion: number;
+    breakoutMinRelativeStrengthPct: number;
+    breakoutTrendTimeframeMinutes: number;
+    breakoutTrendLookbackBars: number;
 };
 
 type StartRequest = {
@@ -50,6 +57,12 @@ type StartRequest = {
     stopProfitRewardPart?: number;
     realTimeData?: boolean;
     candidateTradeType?: CandidateTradeType;
+    breakoutConfirmationCandleMinutes?: number;
+    breakoutQualityFiltersEnabled?: boolean;
+    breakoutMinVolumeExpansion?: number;
+    breakoutMinRelativeStrengthPct?: number;
+    breakoutTrendTimeframeMinutes?: number;
+    breakoutTrendLookbackBars?: number;
 };
 
 type ReportKind = 'today' | 'week' | 'month';
@@ -83,6 +96,21 @@ type TradeEvent = {
     reason?: string;
 };
 
+type CandidateChartCard = {
+    symbol: string;
+    sessionDate: string;
+    side: 'buy' | 'sell';
+    position: 'long' | 'short';
+    qty: number;
+    entryPrice: number;
+    stopPrice: number;
+    targetPrice: number;
+    closePrice: number | null;
+    closeTimestamp: string | null;
+    svg: string;
+    determinationTimestamp: string;
+};
+
 const DEFAULT_PORT = 8787;
 const publicDirCandidates = [
     path.resolve(__dirname, 'public'),
@@ -112,6 +140,12 @@ const appState: AppState = {
     realtimeDataFeed: false,
     realtimeDataFeedError: false,
     candidateTradeType: env.candidateTradeType,
+    breakoutConfirmationCandleMinutes: env.breakoutConfirmationCandleMinutes,
+    breakoutQualityFiltersEnabled: env.breakoutQualityFiltersEnabled,
+    breakoutMinVolumeExpansion: env.breakoutMinVolumeExpansion,
+    breakoutMinRelativeStrengthPct: env.breakoutMinRelativeStrengthPct,
+    breakoutTrendTimeframeMinutes: env.breakoutTrendTimeframeMinutes,
+    breakoutTrendLookbackBars: env.breakoutTrendLookbackBars,
 };
 
 let appProcess: ChildProcessWithoutNullStreams | null = null;
@@ -226,6 +260,19 @@ function normalizedCandidateTradeType(
     return fallback;
 }
 
+function normalizedPositiveNumber(value: unknown, fallback: number, min: number, max: number): number {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return fallback;
+    }
+
+    return Math.min(max, Math.max(min, value));
+}
+
+function normalizedPositiveInteger(value: unknown, fallback: number, min: number, max: number): number {
+    const normalized = normalizedPositiveNumber(value, fallback, min, max);
+    return Math.floor(normalized);
+}
+
 function isValidSessionDate(value: string): boolean {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
         return false;
@@ -338,8 +385,29 @@ function startOrbiliciousProcess(params: {
     stopProfitRewardPart?: number;
     realTimeData?: boolean;
     candidateTradeType: CandidateTradeType;
+    breakoutConfirmationCandleMinutes: number;
+    breakoutQualityFiltersEnabled: boolean;
+    breakoutMinVolumeExpansion: number;
+    breakoutMinRelativeStrengthPct: number;
+    breakoutTrendTimeframeMinutes: number;
+    breakoutTrendLookbackBars: number;
 }) {
-    const { continuous, sessionMode, emulationSessionDate, hardBasketCap, maxTotalRisk, stopProfitRewardPart, realTimeData, candidateTradeType } = params;
+    const {
+        continuous,
+        sessionMode,
+        emulationSessionDate,
+        hardBasketCap,
+        maxTotalRisk,
+        stopProfitRewardPart,
+        realTimeData,
+        candidateTradeType,
+        breakoutConfirmationCandleMinutes,
+        breakoutQualityFiltersEnabled,
+        breakoutMinVolumeExpansion,
+        breakoutMinRelativeStrengthPct,
+        breakoutTrendTimeframeMinutes,
+        breakoutTrendLookbackBars,
+    } = params;
     const entry = resolveAppEntryPoint();
     const args = [...entry.args];
     if (continuous) {
@@ -415,6 +483,12 @@ function startOrbiliciousProcess(params: {
     appState.realtimeDataFeed = realTimeData === true;
     appState.realtimeDataFeedError = false;
     appState.candidateTradeType = candidateTradeType;
+    appState.breakoutConfirmationCandleMinutes = breakoutConfirmationCandleMinutes;
+    appState.breakoutQualityFiltersEnabled = breakoutQualityFiltersEnabled;
+    appState.breakoutMinVolumeExpansion = breakoutMinVolumeExpansion;
+    appState.breakoutMinRelativeStrengthPct = breakoutMinRelativeStrengthPct;
+    appState.breakoutTrendTimeframeMinutes = breakoutTrendTimeframeMinutes;
+    appState.breakoutTrendLookbackBars = breakoutTrendLookbackBars;
 
     const child = spawn(entry.command, args, {
         cwd: process.cwd(),
@@ -426,6 +500,12 @@ function startOrbiliciousProcess(params: {
             MAX_TOTAL_RISK: maxTotalRisk ? maxTotalRisk.toString() : '',
             STOP_LOSS_PROFIT_RATIO: stopProfitRewardPart ? `1:${stopProfitRewardPart}` : '',
             CANDIDATE_TRADE_TYPE: candidateTradeType,
+            BREAKOUT_CONFIRMATION_CANDLE_MINUTES: String(breakoutConfirmationCandleMinutes),
+            BREAKOUT_QUALITY_FILTERS_ENABLED: String(breakoutQualityFiltersEnabled),
+            BREAKOUT_MIN_VOLUME_EXPANSION: String(breakoutMinVolumeExpansion),
+            BREAKOUT_MIN_RELATIVE_STRENGTH_PCT: String(breakoutMinRelativeStrengthPct),
+            BREAKOUT_TREND_TIMEFRAME_MINUTES: String(breakoutTrendTimeframeMinutes),
+            BREAKOUT_TREND_LOOKBACK_BARS: String(breakoutTrendLookbackBars),
             ...(realTimeData ? { ALPACA_DATA_FEED: 'sip' } : {}),
         },
         stdio: 'pipe',
@@ -436,7 +516,7 @@ function startOrbiliciousProcess(params: {
 
     addActivityLine(
         'system',
-        `Starting ORBilicious in ${sessionMode} mode${continuous ? ' (continuous)' : ''}${emulationSessionDate ? ` for ${emulationSessionDate}` : ''}${hardBasketCap ? ` | Basket Cap: $${hardBasketCap.toLocaleString()}` : ''}${maxTotalRisk ? ` | Max Risk: $${maxTotalRisk.toLocaleString()}` : ''}${stopProfitRewardPart ? ` | Stop/Profit: 1/${stopProfitRewardPart}` : ''} | Candidate Trades: ${candidateTradeType}`
+        `Starting ORBilicious in ${sessionMode} mode${continuous ? ' (continuous)' : ''}${emulationSessionDate ? ` for ${emulationSessionDate}` : ''}${hardBasketCap ? ` | Basket Cap: $${hardBasketCap.toLocaleString()}` : ''}${maxTotalRisk ? ` | Max Risk: $${maxTotalRisk.toLocaleString()}` : ''}${stopProfitRewardPart ? ` | Stop/Profit: 1/${stopProfitRewardPart}` : ''} | Candidate Trades: ${candidateTradeType} | Confirm Candle: ${breakoutConfirmationCandleMinutes}m | Quality Filters: ${breakoutQualityFiltersEnabled ? 'on' : 'off'}`
     );
 
     wireProcessOutput('stdout', child.stdout);
@@ -632,6 +712,231 @@ function candidateTradeTypeLabel(value: CandidateTradeType): string {
     }
 
     return 'Long and Short';
+}
+
+function nySessionOpenTimestampMs(sessionDate: string): number {
+    const [year, month, day] = sessionDate.split('-').map(Number);
+    // New York 09:30 ET is UTC+4 during DST for current project assumptions.
+    return Date.UTC(year, month - 1, day, 13, 30, 0, 0);
+}
+
+function barsForSessionDate(bars: Bar[], sessionDate: string): Bar[] {
+    return bars
+        .filter((bar) => toNyParts(bar.timestamp, strategyConfig.sessionTimezone).date === sessionDate)
+        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+}
+
+function renderCandidateChartSvg(params: {
+    bars: Bar[];
+    sessionDate: string;
+    determinationTimestamp: string;
+    entryPrice: number;
+    stopPrice: number;
+    targetPrice: number;
+    closePrice: number | null;
+    openingRangeMinutes: number;
+    maxBarsAfterDetermination: number;
+}): string {
+    const {
+        bars,
+        sessionDate,
+        determinationTimestamp,
+        entryPrice,
+        stopPrice,
+        targetPrice,
+        closePrice,
+        openingRangeMinutes,
+        maxBarsAfterDetermination,
+    } = params;
+
+    if (!bars.length) {
+        return '<div class="small text-muted">No bar data available for this candidate.</div>';
+    }
+
+    const determinationMs = new Date(determinationTimestamp).getTime();
+    const sortedBars = [...bars].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    const determinationIndex = sortedBars.findIndex((bar) => new Date(bar.timestamp).getTime() >= determinationMs);
+    const determinationCutoff = determinationIndex >= 0 ? determinationIndex : sortedBars.length - 1;
+    const chartBars = sortedBars.slice(0, Math.min(sortedBars.length, determinationCutoff + 1 + maxBarsAfterDetermination));
+
+    if (!chartBars.length) {
+        return '<div class="small text-muted">No bars found in chart window.</div>';
+    }
+
+    const plotWidth = 820;
+    const plotHeight = 250;
+    const margin = { top: 14, right: 18, bottom: 24, left: 52 };
+    const width = plotWidth + margin.left + margin.right;
+    const height = plotHeight + margin.top + margin.bottom;
+
+    const highs = chartBars.map((bar) => bar.high);
+    const lows = chartBars.map((bar) => bar.low);
+    const overlayValues = [entryPrice, stopPrice, targetPrice, closePrice ?? undefined].filter(
+        (value): value is number => typeof value === 'number' && Number.isFinite(value)
+    );
+    const maxValue = Math.max(...highs, ...overlayValues);
+    const minValue = Math.min(...lows, ...overlayValues);
+    const pad = Math.max((maxValue - minValue) * 0.08, 0.25);
+    const yMax = maxValue + pad;
+    const yMin = Math.max(0, minValue - pad);
+    const range = Math.max(0.0001, yMax - yMin);
+
+    const xForIndex = (index: number) => {
+        if (chartBars.length <= 1) return margin.left + plotWidth / 2;
+        return margin.left + (index / (chartBars.length - 1)) * plotWidth;
+    };
+
+    const yForPrice = (price: number) => margin.top + ((yMax - price) / range) * plotHeight;
+    const candleWidth = Math.max(3, Math.min(12, plotWidth / Math.max(chartBars.length * 1.9, 6)));
+
+    const sessionOpenMs = nySessionOpenTimestampMs(sessionDate);
+    const openingRangeEndMs = sessionOpenMs + openingRangeMinutes * 60 * 1000;
+    const openingRangeEndIndex = chartBars.findIndex((bar) => new Date(bar.timestamp).getTime() >= openingRangeEndMs);
+    const openingRangeStopIndex = openingRangeEndIndex >= 0 ? openingRangeEndIndex : Math.min(chartBars.length - 1, openingRangeMinutes - 1);
+    const openingRangeShadeWidth = Math.max(0, xForIndex(openingRangeStopIndex) - xForIndex(0));
+
+    const yTicks = Array.from({ length: 5 }, (_, i) => {
+        const value = yMin + (range * i) / 4;
+        return { y: yForPrice(value), label: value.toFixed(2) };
+    });
+
+    const xTickStride = Math.max(1, Math.floor(chartBars.length / 7));
+    const xTicks = chartBars
+        .map((bar, index) => ({ bar, index }))
+        .filter(({ index }) => index % xTickStride === 0 || index === chartBars.length - 1)
+        .map(({ bar, index }) => ({
+            x: xForIndex(index),
+            label: escapeHtml(toNyParts(bar.timestamp, strategyConfig.sessionTimezone).hhmm),
+        }));
+
+    const overlayLine = (price: number | null | undefined, color: string, dash = 'none') => {
+        if (typeof price !== 'number' || !Number.isFinite(price)) return '';
+        const y = yForPrice(price);
+        const dashAttr = dash === 'none' ? '' : ` stroke-dasharray="${dash}"`;
+        return `<line x1="${margin.left}" y1="${y}" x2="${margin.left + plotWidth}" y2="${y}" stroke="${color}" stroke-width="1.2"${dashAttr} />`;
+    };
+
+    const candlesSvg = chartBars
+        .map((bar, index) => {
+            const x = xForIndex(index);
+            const openY = yForPrice(bar.open);
+            const closeY = yForPrice(bar.close);
+            const highY = yForPrice(bar.high);
+            const lowY = yForPrice(bar.low);
+            const bodyTop = Math.min(openY, closeY);
+            const bodyHeight = Math.max(1, Math.abs(closeY - openY));
+            const color = bar.close >= bar.open ? '#22c55e' : '#ef4444';
+            return `<g>
+                <line x1="${x}" y1="${highY}" x2="${x}" y2="${lowY}" stroke="#cbd5e1" stroke-width="1" />
+                <rect x="${x - candleWidth / 2}" y="${bodyTop}" width="${candleWidth}" height="${bodyHeight}" fill="${color}" opacity="0.95" />
+            </g>`;
+        })
+        .join('');
+
+    const postClosePolylinePoints = chartBars
+        .map((bar, index) => ({ index, close: bar.close, time: new Date(bar.timestamp).getTime() }))
+        .filter((point) => point.time > determinationMs)
+        .map((point) => `${xForIndex(point.index)},${yForPrice(point.close)}`)
+        .join(' ');
+
+    const xDetermination = xForIndex(Math.min(Math.max(determinationCutoff, 0), chartBars.length - 1));
+
+    return `<svg class="candidate-live-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Live candidate candlestick chart">
+        <rect x="0" y="0" width="${width}" height="${height}" fill="rgba(15,23,42,0.72)" rx="8" />
+        <rect x="${margin.left}" y="${margin.top}" width="${plotWidth}" height="${plotHeight}" fill="rgba(15,23,42,0.48)" />
+        <rect x="${xForIndex(0)}" y="${margin.top}" width="${openingRangeShadeWidth}" height="${plotHeight}" fill="rgba(14,165,233,0.09)" />
+        <line x1="${margin.left}" y1="${margin.top + plotHeight}" x2="${margin.left + plotWidth}" y2="${margin.top + plotHeight}" stroke="#475569" stroke-width="1" />
+        <line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${margin.top + plotHeight}" stroke="#475569" stroke-width="1" />
+        ${yTicks.map((tick) => `<g><line x1="${margin.left}" y1="${tick.y}" x2="${margin.left + plotWidth}" y2="${tick.y}" stroke="rgba(148,163,184,0.18)" /><text x="${margin.left - 8}" y="${tick.y + 4}" fill="#cbd5e1" font-size="11" text-anchor="end">${tick.label}</text></g>`).join('')}
+        ${xTicks.map((tick) => `<text x="${tick.x}" y="${height - 8}" fill="#cbd5e1" font-size="11" text-anchor="middle">${tick.label}</text>`).join('')}
+        ${overlayLine(entryPrice, '#38bdf8', '3 3')}
+        ${overlayLine(stopPrice, '#f97316', '6 3')}
+        ${overlayLine(targetPrice, '#22c55e', '6 3')}
+        ${overlayLine(closePrice, '#a78bfa', '2 3')}
+        ${candlesSvg}
+        <line x1="${xDetermination}" y1="${margin.top}" x2="${xDetermination}" y2="${margin.top + plotHeight}" stroke="#60a5fa" stroke-width="1" stroke-dasharray="5 4" />
+        ${postClosePolylinePoints ? `<polyline points="${postClosePolylinePoints}" fill="none" stroke="#60a5fa" stroke-width="1.7" />` : ''}
+        <text x="${margin.left + 6}" y="${margin.top + 14}" fill="#94a3b8" font-size="11">OR window</text>
+        <text x="${xDetermination + 6}" y="${margin.top + 14}" fill="#93c5fd" font-size="11">Determination end</text>
+    </svg>`;
+}
+
+async function buildLiveCandidateCharts(limit = 8): Promise<CandidateChartCard[]> {
+    const latestOpenBySymbol = new Map<string, TradeEvent>();
+    const latestCloseBySymbol = new Map<string, TradeEvent>();
+
+    for (const event of tradeEvents) {
+        if (event.eventType === 'open') {
+            latestOpenBySymbol.set(event.symbol, event);
+            continue;
+        }
+        if (event.eventType === 'close') {
+            latestCloseBySymbol.set(event.symbol, event);
+        }
+    }
+
+    const candidateOpens = [...latestOpenBySymbol.values()]
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+        .slice(0, Math.max(1, limit));
+
+    if (!candidateOpens.length) {
+        return [];
+    }
+
+    const client = new AlpacaClient();
+    const cards = await Promise.all(candidateOpens.map(async (openEvent) => {
+        if (
+            typeof openEvent.entryPrice !== 'number'
+            || typeof openEvent.stopPrice !== 'number'
+            || typeof openEvent.targetPrice !== 'number'
+            || typeof openEvent.qty !== 'number'
+        ) {
+            return null;
+        }
+
+        const sessionDate = openEvent.sessionDate || toNyParts(openEvent.timestamp, strategyConfig.sessionTimezone).date;
+        const closeEvent = latestCloseBySymbol.get(openEvent.symbol);
+
+        try {
+            const bars = await client.getIntradayBars(openEvent.symbol, sessionDate);
+            const sessionBars = barsForSessionDate(bars, sessionDate);
+            const svg = renderCandidateChartSvg({
+                bars: sessionBars,
+                sessionDate,
+                determinationTimestamp: openEvent.timestamp,
+                entryPrice: openEvent.entryPrice,
+                stopPrice: openEvent.stopPrice,
+                targetPrice: openEvent.targetPrice,
+                closePrice: typeof closeEvent?.closePrice === 'number' ? closeEvent.closePrice : null,
+                openingRangeMinutes: strategyConfig.openingRangeMinutes,
+                maxBarsAfterDetermination: 30,
+            });
+
+            return {
+                symbol: openEvent.symbol,
+                sessionDate,
+                side: openEvent.side,
+                position: openEvent.position,
+                qty: openEvent.qty,
+                entryPrice: openEvent.entryPrice,
+                stopPrice: openEvent.stopPrice,
+                targetPrice: openEvent.targetPrice,
+                closePrice: typeof closeEvent?.closePrice === 'number' ? closeEvent.closePrice : null,
+                closeTimestamp: closeEvent?.timestamp ?? null,
+                svg,
+                determinationTimestamp: openEvent.timestamp,
+            } as CandidateChartCard;
+        } catch (error) {
+            logger.warn('Failed building live candidate chart', {
+                symbol: openEvent.symbol,
+                sessionDate,
+                error: error instanceof Error ? error.message : String(error),
+            });
+            return null;
+        }
+    }));
+
+    return cards.filter((card): card is CandidateChartCard => card !== null);
 }
 
 function writeHtmlReport(filePath: string, html: string) {
@@ -1030,6 +1335,94 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
         return;
     }
 
+    if (req.method === 'GET' && pathname === '/api/orbilicious/candidate-chart') {
+        const symbolRaw = url.searchParams.get('symbol') || '';
+        const sessionDateRaw = url.searchParams.get('sessionDate') || '';
+        const determinationTimestampRaw = url.searchParams.get('determinationTimestamp') || '';
+        const entryPrice = Number(url.searchParams.get('entryPrice'));
+        const stopPrice = Number(url.searchParams.get('stopPrice'));
+        const targetPrice = Number(url.searchParams.get('targetPrice'));
+        const closePriceParam = url.searchParams.get('closePrice');
+        const closePrice = closePriceParam == null || closePriceParam === '' ? null : Number(closePriceParam);
+
+        const symbol = symbolRaw.trim().toUpperCase();
+        const sessionDate = sessionDateRaw.trim();
+        const determinationTimestamp = determinationTimestampRaw.trim();
+        const hasValidSessionDate = /^\d{4}-\d{2}-\d{2}$/.test(sessionDate);
+        const determinationMs = new Date(determinationTimestamp).getTime();
+        const hasValidCoreParams = symbol.length > 0
+            && hasValidSessionDate
+            && Number.isFinite(determinationMs)
+            && Number.isFinite(entryPrice)
+            && Number.isFinite(stopPrice)
+            && Number.isFinite(targetPrice)
+            && (closePrice === null || Number.isFinite(closePrice));
+
+        if (!hasValidCoreParams) {
+            sendJson(res, 400, {
+                ok: false,
+                message: 'Missing or invalid chart parameters.',
+            });
+            return;
+        }
+
+        try {
+            const client = new AlpacaClient();
+            const bars = await client.getIntradayBars(symbol, sessionDate);
+            const sessionBars = barsForSessionDate(bars, sessionDate);
+            const svg = renderCandidateChartSvg({
+                bars: sessionBars,
+                sessionDate,
+                determinationTimestamp,
+                entryPrice,
+                stopPrice,
+                targetPrice,
+                closePrice,
+                openingRangeMinutes: strategyConfig.openingRangeMinutes,
+                maxBarsAfterDetermination: 30,
+            });
+
+            sendJson(res, 200, {
+                ok: true,
+                symbol,
+                sessionDate,
+                svg,
+            });
+        } catch (error) {
+            logger.error('Failed generating candidate chart', {
+                symbol,
+                sessionDate,
+                error,
+            });
+            sendJson(res, 500, {
+                ok: false,
+                message: error instanceof Error ? error.message : 'Failed generating candidate chart',
+            });
+        }
+        return;
+    }
+
+    if (req.method === 'GET' && pathname === '/api/orbilicious/candidate-charts') {
+        const limitParam = Number(url.searchParams.get('limit') || 8);
+        const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(Math.floor(limitParam), 12) : 8;
+
+        try {
+            const charts = await buildLiveCandidateCharts(limit);
+            sendJson(res, 200, {
+                charts,
+                count: charts.length,
+                generatedAt: new Date().toISOString(),
+            });
+        } catch (error) {
+            logger.error('Failed generating live candidate charts', { error });
+            sendJson(res, 500, {
+                ok: false,
+                message: error instanceof Error ? error.message : 'Failed generating candidate charts',
+            });
+        }
+        return;
+    }
+
     if (req.method === 'GET' && pathname === '/api/liquidity-zones') {
         const sessionDateParam = url.searchParams.get('sessionDate') || '';
         const sessionDate = sessionDateParam.trim() || toNyParts(new Date(), strategyConfig.sessionTimezone).date;
@@ -1136,6 +1529,39 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
             ? payload.stopProfitRewardPart
             : undefined;
         const candidateTradeType = normalizedCandidateTradeType(payload.candidateTradeType, env.candidateTradeType);
+        const breakoutConfirmationCandleMinutes = normalizedPositiveInteger(
+            payload.breakoutConfirmationCandleMinutes,
+            appState.breakoutConfirmationCandleMinutes,
+            1,
+            30,
+        );
+        const breakoutQualityFiltersEnabled = payload.breakoutQualityFiltersEnabled == null
+            ? appState.breakoutQualityFiltersEnabled
+            : payload.breakoutQualityFiltersEnabled === true;
+        const breakoutMinVolumeExpansion = normalizedPositiveNumber(
+            payload.breakoutMinVolumeExpansion,
+            appState.breakoutMinVolumeExpansion,
+            0.5,
+            10,
+        );
+        const breakoutMinRelativeStrengthPct = normalizedPositiveNumber(
+            payload.breakoutMinRelativeStrengthPct,
+            appState.breakoutMinRelativeStrengthPct,
+            0,
+            5,
+        );
+        const breakoutTrendTimeframeMinutes = normalizedPositiveInteger(
+            payload.breakoutTrendTimeframeMinutes,
+            appState.breakoutTrendTimeframeMinutes,
+            1,
+            60,
+        );
+        const breakoutTrendLookbackBars = normalizedPositiveInteger(
+            payload.breakoutTrendLookbackBars,
+            appState.breakoutTrendLookbackBars,
+            2,
+            20,
+        );
 
         if (sessionMode === 'EMULATION' && emulationSessionDate && !isValidSessionDate(emulationSessionDate)) {
             sendJson(res, 400, {
@@ -1145,7 +1571,22 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
             return;
         }
 
-        startOrbiliciousProcess({ continuous, sessionMode, emulationSessionDate, hardBasketCap, maxTotalRisk, stopProfitRewardPart, realTimeData, candidateTradeType });
+        startOrbiliciousProcess({
+            continuous,
+            sessionMode,
+            emulationSessionDate,
+            hardBasketCap,
+            maxTotalRisk,
+            stopProfitRewardPart,
+            realTimeData,
+            candidateTradeType,
+            breakoutConfirmationCandleMinutes,
+            breakoutQualityFiltersEnabled,
+            breakoutMinVolumeExpansion,
+            breakoutMinRelativeStrengthPct,
+            breakoutTrendTimeframeMinutes,
+            breakoutTrendLookbackBars,
+        });
 
         sendJson(res, 202, {
             ok: true,

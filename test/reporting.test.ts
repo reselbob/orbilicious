@@ -128,6 +128,130 @@ function makeDeterministicShortSessionBars(symbol: string, sessionDate: string):
     return bars;
 }
 
+function makeOneMinuteSpikeOnlyBars(symbol: string, sessionDate: string): Bar[] {
+    return [
+        ...Array.from({ length: 15 }, (_, index) => {
+            const minute = 30 + index;
+            return {
+                symbol,
+                timestamp: makeTimestamp(sessionDate, 9, minute),
+                open: 100,
+                high: 101,
+                low: 99,
+                close: 100,
+                volume: 1000,
+            };
+        }),
+        {
+            symbol,
+            timestamp: makeTimestamp(sessionDate, 9, 45),
+            open: 100.9,
+            high: 103,
+            low: 100.4,
+            close: 102,
+            volume: 4500,
+        },
+        {
+            symbol,
+            timestamp: makeTimestamp(sessionDate, 9, 46),
+            open: 101.2,
+            high: 101.6,
+            low: 100.8,
+            close: 101.2,
+            volume: 3300,
+        },
+        {
+            symbol,
+            timestamp: makeTimestamp(sessionDate, 9, 47),
+            open: 101.1,
+            high: 101.2,
+            low: 100.3,
+            close: 100.8,
+            volume: 2900,
+        },
+        {
+            symbol,
+            timestamp: makeTimestamp(sessionDate, 9, 48),
+            open: 100.9,
+            high: 101,
+            low: 100.2,
+            close: 100.7,
+            volume: 2800,
+        },
+        {
+            symbol,
+            timestamp: makeTimestamp(sessionDate, 9, 49),
+            open: 100.8,
+            high: 100.95,
+            low: 100.1,
+            close: 100.6,
+            volume: 2700,
+        },
+    ];
+}
+
+function makeWeakRelativeStrengthBars(symbol: string, sessionDate: string): Bar[] {
+    return [
+        ...Array.from({ length: 15 }, (_, index) => {
+            const minute = 30 + index;
+            return {
+                symbol,
+                timestamp: makeTimestamp(sessionDate, 9, minute),
+                open: 100,
+                high: 101,
+                low: 99,
+                close: 100,
+                volume: 1000,
+            };
+        }),
+        {
+            symbol,
+            timestamp: makeTimestamp(sessionDate, 9, 45),
+            open: 100.9,
+            high: 101.2,
+            low: 100.6,
+            close: 101.03,
+            volume: 4200,
+        },
+        {
+            symbol,
+            timestamp: makeTimestamp(sessionDate, 9, 46),
+            open: 101.01,
+            high: 101.12,
+            low: 100.95,
+            close: 101.02,
+            volume: 3800,
+        },
+        {
+            symbol,
+            timestamp: makeTimestamp(sessionDate, 9, 47),
+            open: 101,
+            high: 101.1,
+            low: 100.9,
+            close: 101.01,
+            volume: 3600,
+        },
+        {
+            symbol,
+            timestamp: makeTimestamp(sessionDate, 9, 48),
+            open: 101.01,
+            high: 101.08,
+            low: 100.92,
+            close: 101.0,
+            volume: 3400,
+        },
+        {
+            symbol,
+            timestamp: makeTimestamp(sessionDate, 9, 49),
+            open: 101.0,
+            high: 101.07,
+            low: 100.9,
+            close: 101.01,
+            volume: 3300,
+        },
+    ];
+}
+
 function weekDatesMondayToFriday(sessionDate: string): string[] {
     const [year, month, day] = sessionDate.split('-').map((part) => Number(part));
     if (!year || !month || !day) {
@@ -169,6 +293,22 @@ class MixedDirectionDeterministicClient extends AlpacaClient {
     override async getIntradayBars(symbol: string, sessionDate: string): Promise<Bar[]> {
         if (symbol === 'SHORT_A') {
             return makeDeterministicShortSessionBars(symbol, sessionDate);
+        }
+        return makeDeterministicSessionBars(symbol, sessionDate);
+    }
+}
+
+class QualityFilterDeterministicClient extends AlpacaClient {
+    override async getMostActiveSymbols(): Promise<string[]> {
+        return ['SPIKE_ONLY', 'WEAK_RS', 'CONFIRMED'];
+    }
+
+    override async getIntradayBars(symbol: string, sessionDate: string): Promise<Bar[]> {
+        if (symbol === 'SPIKE_ONLY') {
+            return makeOneMinuteSpikeOnlyBars(symbol, sessionDate);
+        }
+        if (symbol === 'WEAK_RS') {
+            return makeWeakRelativeStrengthBars(symbol, sessionDate);
         }
         return makeDeterministicSessionBars(symbol, sessionDate);
     }
@@ -218,6 +358,8 @@ describe('reporting tests', () => {
         expect(htmlReport).to.include('<details class="candidate-card"');
         expect(htmlReport).to.include('Num of Shares Bought');
         expect(htmlReport).to.include('Previous Candle Hi/Lo');
+        expect(htmlReport).to.include('candidate-chart-svg');
+        expect(htmlReport).to.include('Blue line plots close prices after determination.');
 
         removeIfExists(result.pdfReportPath);
         removeIfExists(result.htmlReportPath);
@@ -244,6 +386,41 @@ describe('reporting tests', () => {
             removeIfExists(shortOnly.htmlReportPath);
         } finally {
             env.candidateTradeType = previousTradeType;
+        }
+    });
+
+    it('applies 5-minute close confirmation and quality filters in historical reports', async function () {
+        this.timeout(120_000);
+        const client = new QualityFilterDeterministicClient();
+        const previousSettings = {
+            breakoutConfirmationCandleMinutes: env.breakoutConfirmationCandleMinutes,
+            breakoutQualityFiltersEnabled: env.breakoutQualityFiltersEnabled,
+            breakoutMinVolumeExpansion: env.breakoutMinVolumeExpansion,
+            breakoutMinRelativeStrengthPct: env.breakoutMinRelativeStrengthPct,
+            breakoutTrendTimeframeMinutes: env.breakoutTrendTimeframeMinutes,
+            breakoutTrendLookbackBars: env.breakoutTrendLookbackBars,
+        };
+
+        try {
+            env.breakoutConfirmationCandleMinutes = 5;
+            env.breakoutQualityFiltersEnabled = true;
+            env.breakoutMinVolumeExpansion = 1.1;
+            env.breakoutMinRelativeStrengthPct = 0.25;
+            env.breakoutTrendTimeframeMinutes = 5;
+            env.breakoutTrendLookbackBars = 3;
+
+            const report = await client.generateOrbReport('2026-05-14', { usesHistoricData: true });
+            expect(report.breakoutCandidates.map((candidate) => candidate.symbol)).to.deep.equal(['CONFIRMED']);
+            expect(report.emulatedTrades.map((trade) => trade.symbol)).to.deep.equal(['CONFIRMED']);
+            removeIfExists(report.pdfReportPath);
+            removeIfExists(report.htmlReportPath);
+        } finally {
+            env.breakoutConfirmationCandleMinutes = previousSettings.breakoutConfirmationCandleMinutes;
+            env.breakoutQualityFiltersEnabled = previousSettings.breakoutQualityFiltersEnabled;
+            env.breakoutMinVolumeExpansion = previousSettings.breakoutMinVolumeExpansion;
+            env.breakoutMinRelativeStrengthPct = previousSettings.breakoutMinRelativeStrengthPct;
+            env.breakoutTrendTimeframeMinutes = previousSettings.breakoutTrendTimeframeMinutes;
+            env.breakoutTrendLookbackBars = previousSettings.breakoutTrendLookbackBars;
         }
     });
 

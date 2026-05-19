@@ -329,6 +329,117 @@ function makeNoRetestBars(symbol: string, sessionDate: string): Bar[] {
 }
 
 /**
+ * Produces bars where a 1-minute breakout and retest exist, but the 5-minute
+ * confirmation candle closes back inside the opening range. This should be
+ * rejected when breakout confirmation is based on 5-minute closes.
+ */
+function makeOneMinuteSpikeOnlyBars(symbol: string, sessionDate: string): Bar[] {
+    return [
+        ...makeOpeningRangeBars(symbol, sessionDate),
+        {
+            symbol,
+            timestamp: makeTimestamp(sessionDate, 9, 45),
+            open: 100.8,
+            high: 103,
+            low: 100.4,
+            close: 102,
+            volume: 4500,
+        },
+        {
+            symbol,
+            timestamp: makeTimestamp(sessionDate, 9, 46),
+            open: 101.2,
+            high: 101.6,
+            low: 100.8,
+            close: 101.2,
+            volume: 3300,
+        },
+        {
+            symbol,
+            timestamp: makeTimestamp(sessionDate, 9, 47),
+            open: 101.1,
+            high: 101.2,
+            low: 100.3,
+            close: 100.8,
+            volume: 2900,
+        },
+        {
+            symbol,
+            timestamp: makeTimestamp(sessionDate, 9, 48),
+            open: 100.9,
+            high: 101,
+            low: 100.2,
+            close: 100.7,
+            volume: 2800,
+        },
+        {
+            symbol,
+            timestamp: makeTimestamp(sessionDate, 9, 49),
+            open: 100.8,
+            high: 100.95,
+            low: 100.1,
+            close: 100.6,
+            volume: 2700,
+        },
+    ];
+}
+
+/**
+ * Produces a weak breakout that closes only marginally outside the OR bound,
+ * useful for testing relative-strength quality filtering.
+ */
+function makeWeakRelativeStrengthBars(symbol: string, sessionDate: string): Bar[] {
+    return [
+        ...makeOpeningRangeBars(symbol, sessionDate),
+        {
+            symbol,
+            timestamp: makeTimestamp(sessionDate, 9, 45),
+            open: 100.9,
+            high: 101.2,
+            low: 100.6,
+            close: 101.03,
+            volume: 4200,
+        },
+        {
+            symbol,
+            timestamp: makeTimestamp(sessionDate, 9, 46),
+            open: 101.01,
+            high: 101.12,
+            low: 100.95,
+            close: 101.02,
+            volume: 3800,
+        },
+        {
+            symbol,
+            timestamp: makeTimestamp(sessionDate, 9, 47),
+            open: 101,
+            high: 101.1,
+            low: 100.9,
+            close: 101.01,
+            volume: 3600,
+        },
+        {
+            symbol,
+            timestamp: makeTimestamp(sessionDate, 9, 48),
+            open: 101.01,
+            high: 101.08,
+            low: 100.92,
+            close: 101.0,
+            volume: 3400,
+        },
+        {
+            symbol,
+            timestamp: makeTimestamp(sessionDate, 9, 49),
+            open: 101.0,
+            high: 101.07,
+            low: 100.9,
+            close: 101.01,
+            volume: 3300,
+        },
+    ];
+}
+
+/**
  * Builds a minimal but structurally complete `OrbReportResult` fixture for
  * `sessionDate`.  Contains one evaluated symbol (SPY), one emulated long
  * trade, and one profitable final outcome with a P/L of $8.  Used to satisfy
@@ -741,6 +852,38 @@ describe('Operational Rules support', () => {
         env.candidateTradeType = 'LONG_AND_SHORT';
         const both = await findBreakoutCandidates(client, '2026-05-20');
         expect(both.map((candidate) => candidate.side).sort()).to.deep.equal(['buy', 'sell']);
+    });
+
+    it('rules 17-22c: requires 5-minute close confirmation and breakout quality filters by default', async () => {
+        class QualityClient extends AlpacaClient {
+            async getMostActiveSymbols() {
+                return ['SPIKE_ONLY', 'WEAK_RS', 'CONFIRMED'];
+            }
+
+            async getOpenPosition(): Promise<Position | null> {
+                return null;
+            }
+
+            async getIntradayBars(symbol: string, sessionDate: string) {
+                if (symbol === 'SPIKE_ONLY') {
+                    return makeOneMinuteSpikeOnlyBars(symbol, sessionDate);
+                }
+                if (symbol === 'WEAK_RS') {
+                    return makeWeakRelativeStrengthBars(symbol, sessionDate);
+                }
+                return makeConfirmedLongCandidateBars(symbol, sessionDate);
+            }
+        }
+
+        env.breakoutConfirmationCandleMinutes = 5;
+        env.breakoutQualityFiltersEnabled = true;
+        env.breakoutMinVolumeExpansion = 1.1;
+        env.breakoutMinRelativeStrengthPct = 0.25;
+        env.breakoutTrendTimeframeMinutes = 5;
+        env.breakoutTrendLookbackBars = 3;
+
+        const candidates = await findBreakoutCandidates(new QualityClient(), '2026-05-20');
+        expect(candidates.map((candidate) => candidate.symbol)).to.deep.equal(['CONFIRMED']);
     });
 
     // Rules 23-28: Verifies the full sizing pipeline using synthetic candidates.

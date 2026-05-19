@@ -258,6 +258,118 @@ function calculateAtr1m(bars: Bar[], period = 14): number | null {
     return atr > 0 ? atr : null;
 }
 
+function aggregateBarsByMinutes(bars: Bar[], sessionDate: string, intervalMinutes: number): Bar[] {
+    if (intervalMinutes <= 1) {
+        return bars
+            .filter((bar) => toNyParts(bar.timestamp, strategyConfig.sessionTimezone).date === sessionDate)
+            .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    }
+
+    const grouped = new Map<number, Bar>();
+    const sessionBars = bars
+        .filter((bar) => toNyParts(bar.timestamp, strategyConfig.sessionTimezone).date === sessionDate)
+        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+    for (const bar of sessionBars) {
+        const p = toNyParts(bar.timestamp, strategyConfig.sessionTimezone);
+        const totalMinutes = p.hour * 60 + p.minute;
+        const bucketStartMinutes = Math.floor(totalMinutes / intervalMinutes) * intervalMinutes;
+
+        const existing = grouped.get(bucketStartMinutes);
+        if (!existing) {
+            grouped.set(bucketStartMinutes, {
+                ...bar,
+                volume: bar.volume,
+            });
+            continue;
+        }
+
+        grouped.set(bucketStartMinutes, {
+            ...existing,
+            high: Math.max(existing.high, bar.high),
+            low: Math.min(existing.low, bar.low),
+            close: bar.close,
+            volume: existing.volume + bar.volume,
+        });
+    }
+
+    return [...grouped.values()].sort(
+        (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+}
+
+function minutesFromSessionOpen(bar: Bar): number {
+    const p = toNyParts(bar.timestamp, strategyConfig.sessionTimezone);
+    const sessionOpenMinutes = strategyConfig.sessionOpenHour * 60 + strategyConfig.sessionOpenMinute;
+    return p.hour * 60 + p.minute - sessionOpenMinutes;
+}
+
+function passesBreakoutQualityFilters(params: {
+    sessionBars: Bar[];
+    sessionDate: string;
+    side: 'buy' | 'sell';
+    breakoutBar: Bar;
+    openingRangeHigh: number;
+    openingRangeLow: number;
+    confirmationBars: Bar[];
+}): boolean {
+    const {
+        sessionBars,
+        sessionDate,
+        side,
+        breakoutBar,
+        openingRangeHigh,
+        openingRangeLow,
+        confirmationBars,
+    } = params;
+
+    if (!env.breakoutQualityFiltersEnabled) {
+        return true;
+    }
+
+    const priorConfirmationBars = confirmationBars.filter(
+        (bar) => new Date(bar.timestamp).getTime() < new Date(breakoutBar.timestamp).getTime()
+    );
+    if (!priorConfirmationBars.length) {
+        return false;
+    }
+
+    const averagePriorVolume =
+        priorConfirmationBars.reduce((sum, bar) => sum + bar.volume, 0) / priorConfirmationBars.length;
+    const volumeExpansion = averagePriorVolume > 0 ? breakoutBar.volume / averagePriorVolume : 0;
+
+    const relativeStrengthPct =
+        side === 'buy'
+            ? ((breakoutBar.close - openingRangeHigh) / openingRangeHigh) * 100
+            : ((openingRangeLow - breakoutBar.close) / openingRangeLow) * 100;
+
+    const trendBars = aggregateBarsByMinutes(
+        sessionBars,
+        sessionDate,
+        Math.max(1, Math.floor(env.breakoutTrendTimeframeMinutes))
+    ).filter((bar) => new Date(bar.timestamp).getTime() <= new Date(breakoutBar.timestamp).getTime());
+
+    const trendWindowSize = Math.max(2, Math.floor(env.breakoutTrendLookbackBars) + 1);
+    const trendWindow = trendBars.slice(-trendWindowSize);
+    if (trendWindow.length < trendWindowSize) {
+        return false;
+    }
+
+    const priorTrendBars = trendWindow.slice(0, -1);
+    const trendSma = priorTrendBars.reduce((sum, bar) => sum + bar.close, 0) / priorTrendBars.length;
+    const trendSlope = trendWindow[trendWindow.length - 1].close - trendWindow[0].close;
+    const trendAligned =
+        side === 'buy'
+            ? breakoutBar.close > trendSma && trendSlope > 0
+            : breakoutBar.close < trendSma && trendSlope < 0;
+
+    return (
+        volumeExpansion >= env.breakoutMinVolumeExpansion
+        && relativeStrengthPct >= env.breakoutMinRelativeStrengthPct
+        && trendAligned
+    );
+}
+
 function shouldClosePositionForProfitCapture(params: {
     side: 'long' | 'short';
     entryPrice: number;
@@ -288,29 +400,52 @@ function buildConfirmedBreakoutCandidate(
 
     const cfg = { ...strategyConfig, symbol };
     const openingRange = computeOpeningRange(sessionBars, sessionDate, cfg);
-    const openingRangeBars = strategyConfig.openingRangeMinutes / strategyConfig.candleMinutes;
-    const evaluationWindowBars = openingRangeBars;
-    const evaluationBars = sessionBars.slice(openingRangeBars, openingRangeBars + evaluationWindowBars);
+    const evaluationWindowMinutes = strategyConfig.openingRangeMinutes;
+    const confirmationBars = aggregateBarsByMinutes(
+        sessionBars,
+        sessionDate,
+        Math.max(1, Math.floor(env.breakoutConfirmationCandleMinutes))
+    );
 
     let breakoutBar: Bar | null = null;
     let confirmationRetestBar: Bar | null = null;
     let side: 'buy' | 'sell' | 'none' = 'none';
 
-    for (const evaluationBar of evaluationBars) {
-        if (evaluationBar.close > openingRange.high) {
-            breakoutBar = evaluationBar;
+    for (const confirmationBar of confirmationBars) {
+        const minutesSinceOpen = minutesFromSessionOpen(confirmationBar);
+        if (
+            minutesSinceOpen < strategyConfig.openingRangeMinutes
+            || minutesSinceOpen >= strategyConfig.openingRangeMinutes + evaluationWindowMinutes
+        ) {
+            continue;
+        }
+
+        if (confirmationBar.close > openingRange.high) {
+            breakoutBar = confirmationBar;
             side = 'buy';
             break;
         }
 
-        if (evaluationBar.close < openingRange.low) {
-            breakoutBar = evaluationBar;
+        if (confirmationBar.close < openingRange.low) {
+            breakoutBar = confirmationBar;
             side = 'sell';
             break;
         }
     }
 
     if (!breakoutBar || side === 'none') {
+        return null;
+    }
+
+    if (!passesBreakoutQualityFilters({
+        sessionBars,
+        sessionDate,
+        side,
+        breakoutBar,
+        openingRangeHigh: openingRange.high,
+        openingRangeLow: openingRange.low,
+        confirmationBars,
+    })) {
         return null;
     }
 

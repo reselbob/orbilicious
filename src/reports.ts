@@ -122,6 +122,7 @@ type OrbReportComputation = {
     totalProfitLossToDate: number;
     closedOutcomeBySymbol: Map<string, TradeOutcome>;
     finalOutcomeBySymbol: Map<string, TradeOutcome>;
+    sessionBarsBySymbol: Map<string, Bar[]>;
 };
 
 function candidateAllowedByTradeType(side: 'buy' | 'sell'): boolean {
@@ -255,7 +256,7 @@ export class Reports {
     ): Promise<OrbReportComputation> {
         const symbols = await client.getMostActiveSymbols(env.quantityToRetrieve);
         const openingRangeBars = 15;
-        const evaluationWindowBars = 15;
+        const evaluationWindowMinutes = 15;
         const evaluationRows: OrbEvaluationRow[] = [];
         const breakoutCandidates: AtrBreakoutCandidate[] = [];
         const insufficientSymbols: string[] = [];
@@ -294,7 +295,7 @@ export class Reports {
                     sessionDate,
             );
 
-            if (sessionBars.length < openingRangeBars + evaluationWindowBars) {
+            if (sessionBars.length < openingRangeBars + evaluationWindowMinutes) {
                 insufficientSymbols.push(symbol);
                 continue;
             }
@@ -303,9 +304,10 @@ export class Reports {
             const openingPrice = openingBars[0].open;
             const openingRangeHigh = Math.max(...openingBars.map((bar) => bar.high));
             const openingRangeLow = Math.min(...openingBars.map((bar) => bar.low));
-            const evaluationBars = sessionBars.slice(
-                openingRangeBars,
-                openingRangeBars + evaluationWindowBars,
+            const confirmationBars = Reports.aggregateBarsByMinutes(
+                sessionBars,
+                sessionDate,
+                Math.max(1, Math.floor(env.breakoutConfirmationCandleMinutes)),
             );
 
             let breakoutBar: Bar | null = null;
@@ -313,15 +315,23 @@ export class Reports {
             let side: "buy" | "sell" | "none" = "none";
             let preBreakoutWickPrice: number | null = null;
 
-            for (const evaluationBar of evaluationBars) {
-                if (evaluationBar.close > openingRangeHigh) {
-                    breakoutBar = evaluationBar;
+            for (const confirmationBar of confirmationBars) {
+                const minutesSinceOpen = Reports.minutesFromSessionOpen(confirmationBar);
+                if (
+                    minutesSinceOpen < strategyConfig.openingRangeMinutes
+                    || minutesSinceOpen >= strategyConfig.openingRangeMinutes + evaluationWindowMinutes
+                ) {
+                    continue;
+                }
+
+                if (confirmationBar.close > openingRangeHigh) {
+                    breakoutBar = confirmationBar;
                     side = "buy";
                     break;
                 }
 
-                if (evaluationBar.close < openingRangeLow) {
-                    breakoutBar = evaluationBar;
+                if (confirmationBar.close < openingRangeLow) {
+                    breakoutBar = confirmationBar;
                     side = "sell";
                     break;
                 }
@@ -393,7 +403,19 @@ export class Reports {
                 side,
             });
 
-            if (side === "none" || !confirmationRetestBar || !atr1m) {
+            if (side === "none" || !confirmationRetestBar || !atr1m || !breakoutBar) {
+                continue;
+            }
+
+            if (!Reports.passesBreakoutQualityFilters({
+                sessionBars,
+                sessionDate,
+                side,
+                breakoutBar,
+                openingRangeHigh,
+                openingRangeLow,
+                confirmationBars,
+            })) {
                 continue;
             }
 
@@ -529,6 +551,7 @@ export class Reports {
             totalProfitLossToDate,
             closedOutcomeBySymbol,
             finalOutcomeBySymbol,
+            sessionBarsBySymbol,
         };
     }
 
@@ -963,12 +986,315 @@ export class Reports {
         );
     }
 
+    private static aggregateBarsByMinutes(
+        bars: Bar[],
+        sessionDate: string,
+        intervalMinutes: number,
+    ): Bar[] {
+        if (intervalMinutes <= 1) {
+            return bars
+                .filter(
+                    (bar) =>
+                        toNyParts(bar.timestamp, strategyConfig.sessionTimezone).date ===
+                        sessionDate,
+                )
+                .sort(
+                    (a, b) =>
+                        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+                );
+        }
+
+        const grouped = new Map<number, Bar>();
+        const sessionBars = bars
+            .filter(
+                (bar) =>
+                    toNyParts(bar.timestamp, strategyConfig.sessionTimezone).date ===
+                    sessionDate,
+            )
+            .sort(
+                (a, b) =>
+                    new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+            );
+
+        for (const bar of sessionBars) {
+            const p = toNyParts(bar.timestamp, strategyConfig.sessionTimezone);
+            const totalMinutes = p.hour * 60 + p.minute;
+            const bucketStartMinutes = Math.floor(totalMinutes / intervalMinutes) * intervalMinutes;
+
+            const existing = grouped.get(bucketStartMinutes);
+            if (!existing) {
+                grouped.set(bucketStartMinutes, {
+                    ...bar,
+                    volume: bar.volume,
+                });
+                continue;
+            }
+
+            grouped.set(bucketStartMinutes, {
+                ...existing,
+                high: Math.max(existing.high, bar.high),
+                low: Math.min(existing.low, bar.low),
+                close: bar.close,
+                volume: existing.volume + bar.volume,
+            });
+        }
+
+        return [...grouped.values()].sort(
+            (a, b) =>
+                new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+        );
+    }
+
+    private static minutesFromSessionOpen(bar: Bar): number {
+        const p = toNyParts(bar.timestamp, strategyConfig.sessionTimezone);
+        const sessionOpenMinutes =
+            strategyConfig.sessionOpenHour * 60 + strategyConfig.sessionOpenMinute;
+        return p.hour * 60 + p.minute - sessionOpenMinutes;
+    }
+
+    private static passesBreakoutQualityFilters(params: {
+        sessionBars: Bar[];
+        sessionDate: string;
+        side: "buy" | "sell";
+        breakoutBar: Bar;
+        openingRangeHigh: number;
+        openingRangeLow: number;
+        confirmationBars: Bar[];
+    }): boolean {
+        const {
+            sessionBars,
+            sessionDate,
+            side,
+            breakoutBar,
+            openingRangeHigh,
+            openingRangeLow,
+            confirmationBars,
+        } = params;
+
+        if (!env.breakoutQualityFiltersEnabled) {
+            return true;
+        }
+
+        const priorConfirmationBars = confirmationBars.filter(
+            (bar) =>
+                new Date(bar.timestamp).getTime() <
+                new Date(breakoutBar.timestamp).getTime(),
+        );
+        if (!priorConfirmationBars.length) {
+            return false;
+        }
+
+        const averagePriorVolume =
+            priorConfirmationBars.reduce((sum, bar) => sum + bar.volume, 0) /
+            priorConfirmationBars.length;
+        const volumeExpansion = averagePriorVolume > 0
+            ? breakoutBar.volume / averagePriorVolume
+            : 0;
+
+        const relativeStrengthPct =
+            side === "buy"
+                ? ((breakoutBar.close - openingRangeHigh) / openingRangeHigh) * 100
+                : ((openingRangeLow - breakoutBar.close) / openingRangeLow) * 100;
+
+        const trendBars = Reports.aggregateBarsByMinutes(
+            sessionBars,
+            sessionDate,
+            Math.max(1, Math.floor(env.breakoutTrendTimeframeMinutes)),
+        ).filter(
+            (bar) =>
+                new Date(bar.timestamp).getTime() <=
+                new Date(breakoutBar.timestamp).getTime(),
+        );
+
+        const trendWindowSize = Math.max(2, Math.floor(env.breakoutTrendLookbackBars) + 1);
+        const trendWindow = trendBars.slice(-trendWindowSize);
+        if (trendWindow.length < trendWindowSize) {
+            return false;
+        }
+
+        const priorTrendBars = trendWindow.slice(0, -1);
+        const trendSma =
+            priorTrendBars.reduce((sum, bar) => sum + bar.close, 0) /
+            priorTrendBars.length;
+        const trendSlope =
+            trendWindow[trendWindow.length - 1].close - trendWindow[0].close;
+        const trendAligned =
+            side === "buy"
+                ? breakoutBar.close > trendSma && trendSlope > 0
+                : breakoutBar.close < trendSma && trendSlope < 0;
+
+        return (
+            volumeExpansion >= env.breakoutMinVolumeExpansion
+            && relativeStrengthPct >= env.breakoutMinRelativeStrengthPct
+            && trendAligned
+        );
+    }
+
     private static formatNyTime(timestamp: string | null): string {
         if (!timestamp) {
             return "";
         }
 
         return toNyParts(timestamp, strategyConfig.sessionTimezone).hhmm;
+    }
+
+    private static renderCandidateCandlestickSvg(params: {
+        bars: Bar[];
+        row: OrbEvaluationRow | undefined;
+        trade: SizedTrade | undefined;
+        finalOutcome: TradeOutcome | undefined;
+        openingRangeMinutes: number;
+        maxBarsAfterDetermination: number;
+    }): string {
+        const { bars, row, trade, finalOutcome, openingRangeMinutes, maxBarsAfterDetermination } = params;
+        if (!bars.length || !row?.confirmationRetestTimestamp) {
+            return '<div class="candidate-chart-note">No chart data available for this candidate.</div>';
+        }
+
+        const determinationEndMs = new Date(row.confirmationRetestTimestamp).getTime();
+        const sessionBars = [...bars].sort(
+            (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+        );
+
+        const determinationEndIndex = sessionBars.findIndex(
+            (bar) => new Date(bar.timestamp).getTime() === determinationEndMs,
+        );
+        const effectiveDeterminationIndex = determinationEndIndex >= 0
+            ? determinationEndIndex
+            : sessionBars.findIndex((bar) => new Date(bar.timestamp).getTime() > determinationEndMs);
+        const postStart = effectiveDeterminationIndex >= 0 ? effectiveDeterminationIndex + 1 : sessionBars.length;
+        const chartBars = sessionBars.slice(0, Math.min(sessionBars.length, postStart + maxBarsAfterDetermination));
+
+        if (!chartBars.length) {
+            return '<div class="candidate-chart-note">No chart bars found in chart window.</div>';
+        }
+
+        const plotWidth = 940;
+        const plotHeight = 320;
+        const margin = { top: 16, right: 18, bottom: 26, left: 56 };
+        const width = plotWidth + margin.left + margin.right;
+        const height = plotHeight + margin.top + margin.bottom;
+
+        const highs = chartBars.map((bar) => bar.high);
+        const lows = chartBars.map((bar) => bar.low);
+        const overlayValues = [
+            row.openingRangeHigh,
+            row.openingRangeLow,
+            trade?.price,
+            trade?.stopPrice,
+            trade?.takeProfitPrice,
+            finalOutcome?.exitPrice ?? undefined,
+        ].filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+
+        const maxValue = Math.max(...highs, ...overlayValues);
+        const minValue = Math.min(...lows, ...overlayValues);
+        const pad = Math.max((maxValue - minValue) * 0.08, 0.25);
+        const yMax = maxValue + pad;
+        const yMin = Math.max(0, minValue - pad);
+        const range = Math.max(yMax - yMin, 0.0001);
+
+        const xForIndex = (index: number) => {
+            if (chartBars.length <= 1) {
+                return margin.left + plotWidth / 2;
+            }
+            return margin.left + (index / (chartBars.length - 1)) * plotWidth;
+        };
+
+        const yForPrice = (price: number) => margin.top + ((yMax - price) / range) * plotHeight;
+        const candleWidth = Math.max(3, Math.min(14, plotWidth / Math.max(chartBars.length * 1.9, 6)));
+
+        const determinationIndexInChart = chartBars.findIndex(
+            (bar) => new Date(bar.timestamp).getTime() >= determinationEndMs,
+        );
+        const determinationCutoffIndex = determinationIndexInChart >= 0 ? determinationIndexInChart : chartBars.length;
+
+        const openRangeStart = 0;
+        const openRangeEnd = Math.max(0, openingRangeMinutes - 1);
+        const openingRangeShadeWidth = Math.max(
+            0,
+            xForIndex(Math.min(openRangeEnd, chartBars.length - 1)) - xForIndex(openRangeStart),
+        );
+
+        const line = (price: number | undefined, color: string, dash = "none") => {
+            if (typeof price !== "number" || !Number.isFinite(price)) {
+                return "";
+            }
+            const y = yForPrice(price);
+            const dashAttr = dash === "none" ? "" : ` stroke-dasharray="${dash}"`;
+            return `<line x1="${margin.left}" y1="${y}" x2="${margin.left + plotWidth}" y2="${y}" stroke="${color}" stroke-width="1.2"${dashAttr} />`;
+        };
+
+        const postClosePathPoints = chartBars
+            .map((bar, index) => ({
+                index,
+                close: bar.close,
+                time: new Date(bar.timestamp).getTime(),
+            }))
+            .filter((point) => point.time > determinationEndMs)
+            .map((point) => `${xForIndex(point.index)},${yForPrice(point.close)}`)
+            .join(" ");
+
+        const yTicks = Array.from({ length: 5 }, (_, i) => {
+            const value = yMin + (range * i) / 4;
+            const y = yForPrice(value);
+            return {
+                y,
+                label: value.toFixed(2),
+            };
+        });
+
+        const xTickStride = Math.max(1, Math.floor(chartBars.length / 8));
+        const xTicks = chartBars
+            .map((bar, index) => ({ bar, index }))
+            .filter(({ index }) => index % xTickStride === 0 || index === chartBars.length - 1)
+            .map(({ bar, index }) => ({
+                x: xForIndex(index),
+                label: Reports.escapeHtml(Reports.formatNyTime(bar.timestamp)),
+            }));
+
+        const candlesSvg = chartBars
+            .map((bar, index) => {
+                const x = xForIndex(index);
+                const openY = yForPrice(bar.open);
+                const closeY = yForPrice(bar.close);
+                const highY = yForPrice(bar.high);
+                const lowY = yForPrice(bar.low);
+                const bodyTop = Math.min(openY, closeY);
+                const bodyHeight = Math.max(1, Math.abs(closeY - openY));
+                const bullish = bar.close >= bar.open;
+                const bodyColor = bullish ? "#22c55e" : "#ef4444";
+                const wickColor = "#d1d5db";
+                return `<g>
+                    <line x1="${x}" y1="${highY}" x2="${x}" y2="${lowY}" stroke="${wickColor}" stroke-width="1" />
+                    <rect x="${x - candleWidth / 2}" y="${bodyTop}" width="${candleWidth}" height="${bodyHeight}" fill="${bodyColor}" opacity="0.95" />
+                </g>`;
+            })
+            .join("");
+
+        const xDetermination = determinationCutoffIndex > 0 && determinationCutoffIndex < chartBars.length
+            ? xForIndex(determinationCutoffIndex)
+            : null;
+
+        return `<svg class="candidate-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Candlestick chart with breakout candidate levels">
+            <rect x="0" y="0" width="${width}" height="${height}" fill="rgba(15,23,42,0.72)" rx="8" />
+            <rect x="${margin.left}" y="${margin.top}" width="${plotWidth}" height="${plotHeight}" fill="rgba(15,23,42,0.48)" />
+            <rect x="${xForIndex(openRangeStart)}" y="${margin.top}" width="${openingRangeShadeWidth}" height="${plotHeight}" fill="rgba(14,165,233,0.09)" />
+            <line x1="${margin.left}" y1="${margin.top + plotHeight}" x2="${margin.left + plotWidth}" y2="${margin.top + plotHeight}" stroke="#475569" stroke-width="1" />
+            <line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${margin.top + plotHeight}" stroke="#475569" stroke-width="1" />
+            ${yTicks.map((tick) => `<g><line x1="${margin.left}" y1="${tick.y}" x2="${margin.left + plotWidth}" y2="${tick.y}" stroke="rgba(148,163,184,0.18)" /><text x="${margin.left - 8}" y="${tick.y + 4}" fill="#cbd5e1" font-size="11" text-anchor="end">${tick.label}</text></g>`).join("")}
+            ${xTicks.map((tick) => `<text x="${tick.x}" y="${height - 8}" fill="#cbd5e1" font-size="11" text-anchor="middle">${tick.label}</text>`).join("")}
+            ${line(row.openingRangeHigh, "#facc15", "4 4")}
+            ${line(row.openingRangeLow, "#facc15", "4 4")}
+            ${line(trade?.price, "#38bdf8", "3 3")}
+            ${line(trade?.stopPrice, "#f97316", "6 3")}
+            ${line(trade?.takeProfitPrice, "#22c55e", "6 3")}
+            ${line(finalOutcome?.exitPrice ?? undefined, "#a78bfa", "2 3")}
+            ${candlesSvg}
+            ${xDetermination != null ? `<line x1="${xDetermination}" y1="${margin.top}" x2="${xDetermination}" y2="${margin.top + plotHeight}" stroke="#60a5fa" stroke-width="1" stroke-dasharray="5 4" />` : ""}
+            ${postClosePathPoints ? `<polyline points="${postClosePathPoints}" fill="none" stroke="#60a5fa" stroke-width="1.8" />` : ""}
+            <text x="${margin.left + 6}" y="${margin.top + 14}" fill="#94a3b8" font-size="11">OR window</text>
+            ${xDetermination != null ? `<text x="${xDetermination + 6}" y="${margin.top + 14}" fill="#93c5fd" font-size="11">Determination end</text>` : ""}
+        </svg>`;
     }
 
     private static calculateAtr1m(bars: Bar[], period = 14): number | null {
@@ -1112,6 +1438,7 @@ export class Reports {
             totalProfitLossToDate,
             closedOutcomeBySymbol,
             finalOutcomeBySymbol,
+            sessionBarsBySymbol,
         } = reportData;
         const reportDir = path.resolve(process.cwd(), "reports");
         const htmlReportDir = path.resolve(reportDir, "html", sessionDate);
@@ -1140,13 +1467,14 @@ export class Reports {
         const emulatedTradeBySymbol = new Map(
             emulatedTrades.map((trade) => [trade.symbol, trade]),
         );
+        const evaluationRowBySymbol = new Map(
+            evaluationRows.map((row) => [row.symbol, row]),
+        );
 
         const confirmedTradeRowsHtml = breakoutCandidates
             .map((candidate, index) => {
                 const trade = emulatedTradeBySymbol.get(candidate.symbol);
-                const row = evaluationRows.find(
-                    (evaluationRow) => evaluationRow.symbol === candidate.symbol,
-                );
+                const row = evaluationRowBySymbol.get(candidate.symbol);
                 const closedOutcome = closedOutcomeBySymbol.get(candidate.symbol);
                 const finalOutcome = finalOutcomeBySymbol.get(candidate.symbol);
                 const closedProfitLoss = finalOutcome
@@ -1199,11 +1527,10 @@ export class Reports {
         const interactiveCandidateCardsHtml = breakoutCandidates
             .map((candidate) => {
                 const trade = emulatedTradeBySymbol.get(candidate.symbol);
-                const row = evaluationRows.find(
-                    (evaluationRow) => evaluationRow.symbol === candidate.symbol,
-                );
+                const row = evaluationRowBySymbol.get(candidate.symbol);
                 const closedOutcome = closedOutcomeBySymbol.get(candidate.symbol);
                 const finalOutcome = finalOutcomeBySymbol.get(candidate.symbol);
+                const symbolSessionBars = sessionBarsBySymbol.get(candidate.symbol) ?? [];
                 const exitPrice =
                     finalOutcome?.exitPrice != null
                         ? finalOutcome.exitPrice.toFixed(2)
@@ -1213,6 +1540,14 @@ export class Reports {
                     : finalOutcome
                         ? "Market Close"
                         : "Open";
+                const chartSvg = Reports.renderCandidateCandlestickSvg({
+                    bars: symbolSessionBars,
+                    row,
+                    trade,
+                    finalOutcome,
+                    openingRangeMinutes: strategyConfig.openingRangeMinutes,
+                    maxBarsAfterDetermination: 30,
+                });
 
                 return `
                 <details class="candidate-card" id="candidate-${Reports.escapeHtml(candidate.symbol)}">
@@ -1225,6 +1560,10 @@ export class Reports {
                         <span>${finalOutcome ? finalOutcome.pnl.toFixed(2) : "Open"}</span>
                     </summary>
                     <div class="candidate-drilldown">
+                        <div class="candidate-chart-wrap">
+                            ${chartSvg}
+                            <p class="candidate-chart-note">Candles show breakout-candidate determination window and follow-through. Blue line plots close prices after determination.</p>
+                        </div>
                         <table class="candidate-drilldown-table">
                             <tbody>
                                 <tr><th>Breakout Price</th><td>${row?.breakoutPrice != null ? row.breakoutPrice.toFixed(2) : "n/a"}</td></tr>
@@ -1331,6 +1670,23 @@ export class Reports {
         .candidate-summary::-webkit-details-marker { display: none; }
         .candidate-symbol { color: var(--accent); font-weight: 700; letter-spacing: 0.02em; }
         .candidate-drilldown { border-top: 1px solid var(--border); padding: 12px; background: rgba(15,23,42,0.35); }
+        .candidate-chart-wrap {
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 8px;
+            background: rgba(2, 6, 23, 0.45);
+            margin-bottom: 12px;
+        }
+        .candidate-chart-svg {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        .candidate-chart-note {
+            margin: 8px 4px 0;
+            color: var(--muted);
+            font-size: 12px;
+        }
         .candidate-drilldown-table { width: 100%; border-collapse: collapse; }
         .candidate-drilldown-table th,
         .candidate-drilldown-table td {

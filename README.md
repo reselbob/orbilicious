@@ -36,6 +36,8 @@ A complete Node + TypeScript starter project for a 15-minute Opening Range Break
 - Universe: top 40 most active stocks.
 - Opening range: 9:30 to 9:44 ET.
 - Entry confirmation: first 1-minute candle close above OR high for long, or below OR low for short.
+- Breakout close confirmation: by default the breakout close must occur on a 5-minute confirmation candle outside the opening range (not just a 1-minute spike).
+- Breakout quality filters: by default candidates must pass volume expansion, relative strength/weakness, and higher-timeframe trend alignment checks.
 - Candidate trade type: Candidates can be filtered by direction. Long-only mode accepts only bullish breakouts. Short-only mode accepts only bearish breakouts. Both mode (default) accepts either direction.
 - Selection: Breakout candidates for long and short trades determined by breakout score.
 - Stop loss:
@@ -69,21 +71,22 @@ The list below follows the order the app actually applies rules at runtime.
 16. If no open position exists, duplicate-entry protection is applied next. Any symbol already present in the in-memory `executedToday` set for that session date is skipped.
 17. If the symbol has no intraday bars for the session, it is skipped.
 18. Candidate construction begins by deduplicating bars, filtering them to the current session date in New York time, and computing the opening range from the configured market open through the first `OPENING_RANGE_MINUTES` minutes. With default settings, that means 1-minute bars from 9:30 through 9:44 ET, and all required bars must exist or the candidate fails.
-19. Breakout detection then examines only the next opening-range-sized evaluation window after the opening range. With defaults, that means the next 15 one-minute bars. The first close above opening-range high creates a long breakout attempt, and the first close below opening-range low creates a short breakout attempt.
-20. A breakout is not tradeable by itself. The app requires a confirmation retest after the breakout bar. For longs, a later bar must trade back to or below opening-range high and still close above opening-range high. For shorts, a later bar must trade back to or above opening-range low and still close below opening-range low.
-21. The bar immediately before the breakout becomes the wick anchor for stop placement. Its high is used for long stop anchoring and its low is used for short stop anchoring.
-22. ATR is then computed from session bars up through the confirmation retest using a 14-bar average true range. If ATR cannot be computed or is not positive, the candidate is rejected.
-23. Candidate score is computed as `relative breakout percent * log10(total session volume)`. Only candidates with score greater than `MIN_SCORE` survive sizing.
-24. Surviving candidates are ranked separately by side. The app keeps the top `MAX_POSITIONS_PER_SIDE` longs and top `MAX_POSITIONS_PER_SIDE` shorts by score. The current default is 3 per side.
-25. Risk dollars are assigned proportionally by score across the selected basket, using `MAX_TOTAL_RISK` as the total planned stop-loss budget.
-26. Stop price is determined next. If a breakout wick anchor exists, it is used first. Otherwise the stop falls back to the most conservative price produced by the opening-range bound, the ATR-based stop, and the minimum stop-percent rule.
-27. Any trade is rejected if stop distance is zero or negative, if entry price and stop price are equal at two-decimal execution precision, or if computed quantity falls below the minimum quantity threshold.
-28. Profit target is then set to `takeProfitMultiple * stopDistance`, which is 4R by default because `STOP_LOSS_PROFIT_RATIO` defaults to `1:4`.
-29. After initial sizing, the basket is normalized in two passes. First each trade is individually scaled down to obey `MAX_POSITION_NOTIONAL`. Then the whole basket is scaled by the smaller of the risk cap scale and the available buying power scale. Quantities are floored to four decimal places, and anything below the minimum quantity is dropped.
-30. Before execution, duplicate-entry protection is applied again at the trade basket stage. Any already-executed symbol for the session date is skipped.
-31. In `EMULATION`, entries are never submitted to Alpaca. The app only logs dry-run entries and emits trade-monitor events. In `PAPER` and `LIVE`, the app submits Alpaca bracket orders with the computed entry side, quantity, stop, and take-profit prices.
-32. When historical reports contain closed trades, the UI reports `Closing {SYMBOL} for a {PROFIT_LOSS_STATUS} of {PROFIT_LOSS_AMOUNT}.` before emitting the close event into the trade monitor.
-33. After `FORCE_EXIT_TIME`, if the end-of-day report for the session has not yet been generated, the app generates it once. In one-shot current-day mode the process then exits. In continuous mode it stays alive and waits for the next session.
+19. Breakout detection then examines only the next opening-range-sized evaluation window after the opening range. With defaults, that means the next 15 minutes, evaluated using `BREAKOUT_CONFIRMATION_CANDLE_MINUTES` (default 5-minute candles). A breakout attempt is only created when that candle closes outside the opening range.
+20. Breakout quality filters are then applied (enabled by default). The breakout must pass minimum volume expansion, minimum relative strength/weakness beyond the opening-range boundary, and higher-timeframe trend alignment.
+21. A breakout is not tradeable by itself. The app requires a confirmation retest after the breakout bar. For longs, a later bar must trade back to or below opening-range high and still close above opening-range high. For shorts, a later bar must trade back to or above opening-range low and still close below opening-range low.
+22. The bar immediately before the breakout becomes the wick anchor for stop placement. Its high is used for long stop anchoring and its low is used for short stop anchoring.
+23. ATR is then computed from session bars up through the confirmation retest using a 14-bar average true range. If ATR cannot be computed or is not positive, the candidate is rejected.
+24. Candidate score is computed as `relative breakout percent * log10(total session volume)`. Only candidates with score greater than `MIN_SCORE` survive sizing.
+25. Surviving candidates are ranked separately by side. The app keeps the top `MAX_POSITIONS_PER_SIDE` longs and top `MAX_POSITIONS_PER_SIDE` shorts by score. The current default is 3 per side.
+26. Risk dollars are assigned proportionally by score across the selected basket, using `MAX_TOTAL_RISK` as the total planned stop-loss budget.
+27. Stop price is determined next. If a breakout wick anchor exists, it is used first. Otherwise the stop falls back to the most conservative price produced by the opening-range bound, the ATR-based stop, and the minimum stop-percent rule.
+28. Any trade is rejected if stop distance is zero or negative, if entry price and stop price are equal at two-decimal execution precision, or if computed quantity falls below the minimum quantity threshold.
+29. Profit target is then set to `takeProfitMultiple * stopDistance`, which is 4R by default because `STOP_LOSS_PROFIT_RATIO` defaults to `1:4`.
+30. After initial sizing, the basket is normalized in two passes. First each trade is individually scaled down to obey `MAX_POSITION_NOTIONAL`. Then the whole basket is scaled by the smaller of the risk cap scale and the available buying power scale. Quantities are floored to four decimal places, and anything below the minimum quantity is dropped.
+31. Before execution, duplicate-entry protection is applied again at the trade basket stage. Any already-executed symbol for the session date is skipped.
+32. In `EMULATION`, entries are never submitted to Alpaca. The app only logs dry-run entries and emits trade-monitor events. In `PAPER` and `LIVE`, the app submits Alpaca bracket orders with the computed entry side, quantity, stop, and take-profit prices.
+33. When historical reports contain closed trades, the UI reports `Closing {SYMBOL} for a {PROFIT_LOSS_STATUS} of {PROFIT_LOSS_AMOUNT}.` before emitting the close event into the trade monitor.
+34. After `FORCE_EXIT_TIME`, if the end-of-day report for the session has not yet been generated, the app generates it once. In one-shot current-day mode the process then exits. In continuous mode it stays alive and waits for the next session.
 
 ## Logging
 
@@ -209,6 +212,12 @@ The app reads configuration from `.env` (via `dotenv`) and supports the followin
 | `APCA_API_KEY_ID` | Yes | None | Alpaca API key ID. Required for all Alpaca data/account/order API calls. |
 | `APCA_API_SECRET_KEY` | Yes | None | Alpaca API secret key paired with `APCA_API_KEY_ID`. |
 | `ATR_STOP_MULTIPLE` | No | `1` | ATR multiplier used as one candidate stop-distance component in sizing fallback. |
+| `BREAKOUT_CONFIRMATION_CANDLE_MINUTES` | No | `5` | Candle size (in minutes) used to confirm breakout closes outside the opening range. |
+| `BREAKOUT_QUALITY_FILTERS_ENABLED` | No | `true` | Enables breakout quality filters (volume expansion, relative strength/weakness, higher-timeframe trend alignment). |
+| `BREAKOUT_MIN_VOLUME_EXPANSION` | No | `1.2` | Minimum breakout-candle volume expansion ratio versus earlier confirmation candles. |
+| `BREAKOUT_MIN_RELATIVE_STRENGTH_PCT` | No | `0.25` | Minimum percent close beyond opening-range high/low required for breakout strength. |
+| `BREAKOUT_TREND_TIMEFRAME_MINUTES` | No | `5` | Higher-timeframe candle size used for trend alignment checks. |
+| `BREAKOUT_TREND_LOOKBACK_BARS` | No | `3` | Number of higher-timeframe bars used to evaluate trend direction before breakout. |
 | `CANDLE_MINUTES` | No | `1` | Bar interval used by strategy logic. |
 | `FORCE_EXIT_TIME` | No | `15:55` | NY cutoff used for end-of-day position management and cycle close/report timing. |
 | `HARD_BASKET_CAP` | No | `25000` | Hard maximum total notional for the entire basket after normalization. |
