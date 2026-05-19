@@ -12,6 +12,11 @@ class StubAlpacaClient extends AlpacaClient {
     generateOrbReportCalls: Array<{ sessionDate?: string; options?: { usesHistoricData?: boolean } }> = [];
     generateWeeklySummaryCalls: Date[] = [];
     generateRunningSummaryCalls: Date[] = [];
+    sipFeedSupported = true;
+
+    override async checkSipFeedSupported(): Promise<boolean> {
+        return this.sipFeedSupported;
+    }
 
     override async generateOrbReport(
         sessionDate?: Date | string,
@@ -136,5 +141,25 @@ describe('service layer', () => {
         expect(client.generateRunningSummaryCalls).to.have.length(1);
         expect(client.generateRunningSummaryCalls[0].toISOString()).to.equal(anchorDate.toISOString());
         expect(result.startDate).to.equal('2099-01-01');
+    });
+
+    it('reports real-time data feed as supported when AlpacaClient probe succeeds', async () => {
+        const client = new StubAlpacaClient();
+        client.sipFeedSupported = true;
+        const service = new OrbService(client, async () => { });
+
+        const result = await service.checkRealtimeDataFeedSupported();
+
+        expect(result).to.equal(true);
+    });
+
+    it('reports real-time data feed as unsupported when AlpacaClient probe fails', async () => {
+        const client = new StubAlpacaClient();
+        client.sipFeedSupported = false;
+        const service = new OrbService(client, async () => { });
+
+        const result = await service.checkRealtimeDataFeedSupported();
+
+        expect(result).to.equal(false);
     });
 });

@@ -11,6 +11,7 @@ import { toNyParts } from '../time';
 import { AlpacaClient } from '../alpaca';
 
 type SessionMode = 'EMULATION' | 'PAPER' | 'LIVE';
+type CandidateTradeType = 'LONG' | 'SHORT' | 'LONG_AND_SHORT';
 
 type AppState = {
     isRunning: boolean;
@@ -35,6 +36,9 @@ type AppState = {
     pid: number | null;
     lastOutcome: 'never-started' | 'running' | 'completed' | 'failed';
     lastError: string | null;
+    realtimeDataFeed: boolean;
+    realtimeDataFeedError: boolean;
+    candidateTradeType: CandidateTradeType;
 };
 
 type StartRequest = {
@@ -44,6 +48,8 @@ type StartRequest = {
     moneyInAccount?: number;
     maxRiskPerSession?: number;
     stopProfitRewardPart?: number;
+    realTimeData?: boolean;
+    candidateTradeType?: CandidateTradeType;
 };
 
 type ReportKind = 'today' | 'week' | 'month';
@@ -103,6 +109,9 @@ const appState: AppState = {
     pid: null,
     lastOutcome: 'never-started',
     lastError: null,
+    realtimeDataFeed: false,
+    realtimeDataFeedError: false,
+    candidateTradeType: env.candidateTradeType,
 };
 
 let appProcess: ChildProcessWithoutNullStreams | null = null;
@@ -197,6 +206,26 @@ function normalizedSessionMode(value: unknown): SessionMode {
     return 'EMULATION';
 }
 
+function isCandidateTradeType(value: string): value is CandidateTradeType {
+    return value === 'LONG' || value === 'SHORT' || value === 'LONG_AND_SHORT';
+}
+
+function normalizedCandidateTradeType(
+    value: unknown,
+    fallback: CandidateTradeType = env.candidateTradeType,
+): CandidateTradeType {
+    if (typeof value !== 'string') {
+        return fallback;
+    }
+
+    const normalized = value.toUpperCase();
+    if (isCandidateTradeType(normalized)) {
+        return normalized;
+    }
+
+    return fallback;
+}
+
 function isValidSessionDate(value: string): boolean {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
         return false;
@@ -278,6 +307,17 @@ function wireProcessOutput(stream: 'stdout' | 'stderr', source: NodeJS.ReadableS
             }
 
             addActivityLine(stream, line);
+
+            // Detect Alpaca subscription errors for real-time (SIP) data feed
+            if (appState.realtimeDataFeed && !appState.realtimeDataFeedError) {
+                const lower = line.toLowerCase();
+                if (
+                    (lower.includes('forbidden') || lower.includes('403') || lower.includes('subscription') || lower.includes('not permitted') || lower.includes('not authorized') || lower.includes('plan')) &&
+                    (lower.includes('sip') || lower.includes('feed') || lower.includes('data') || lower.includes('real') || lower.includes('realtime'))
+                ) {
+                    appState.realtimeDataFeedError = true;
+                }
+            }
         }
     });
 
@@ -296,8 +336,10 @@ function startOrbiliciousProcess(params: {
     hardBasketCap?: number;
     maxTotalRisk?: number;
     stopProfitRewardPart?: number;
+    realTimeData?: boolean;
+    candidateTradeType: CandidateTradeType;
 }) {
-    const { continuous, sessionMode, emulationSessionDate, hardBasketCap, maxTotalRisk, stopProfitRewardPart } = params;
+    const { continuous, sessionMode, emulationSessionDate, hardBasketCap, maxTotalRisk, stopProfitRewardPart, realTimeData, candidateTradeType } = params;
     const entry = resolveAppEntryPoint();
     const args = [...entry.args];
     if (continuous) {
@@ -370,6 +412,9 @@ function startOrbiliciousProcess(params: {
     appState.stopProfitRewardPart = stopProfitRewardPart ?? null;
     appState.lastOutcome = 'running';
     appState.lastError = null;
+    appState.realtimeDataFeed = realTimeData === true;
+    appState.realtimeDataFeedError = false;
+    appState.candidateTradeType = candidateTradeType;
 
     const child = spawn(entry.command, args, {
         cwd: process.cwd(),
@@ -380,6 +425,8 @@ function startOrbiliciousProcess(params: {
             HARD_BASKET_CAP: hardBasketCap ? hardBasketCap.toString() : '',
             MAX_TOTAL_RISK: maxTotalRisk ? maxTotalRisk.toString() : '',
             STOP_LOSS_PROFIT_RATIO: stopProfitRewardPart ? `1:${stopProfitRewardPart}` : '',
+            CANDIDATE_TRADE_TYPE: candidateTradeType,
+            ...(realTimeData ? { ALPACA_DATA_FEED: 'sip' } : {}),
         },
         stdio: 'pipe',
     });
@@ -389,7 +436,7 @@ function startOrbiliciousProcess(params: {
 
     addActivityLine(
         'system',
-        `Starting ORBilicious in ${sessionMode} mode${continuous ? ' (continuous)' : ''}${emulationSessionDate ? ` for ${emulationSessionDate}` : ''}${hardBasketCap ? ` | Basket Cap: $${hardBasketCap.toLocaleString()}` : ''}${maxTotalRisk ? ` | Max Risk: $${maxTotalRisk.toLocaleString()}` : ''}${stopProfitRewardPart ? ` | Stop/Profit: 1/${stopProfitRewardPart}` : ''}`
+        `Starting ORBilicious in ${sessionMode} mode${continuous ? ' (continuous)' : ''}${emulationSessionDate ? ` for ${emulationSessionDate}` : ''}${hardBasketCap ? ` | Basket Cap: $${hardBasketCap.toLocaleString()}` : ''}${maxTotalRisk ? ` | Max Risk: $${maxTotalRisk.toLocaleString()}` : ''}${stopProfitRewardPart ? ` | Stop/Profit: 1/${stopProfitRewardPart}` : ''} | Candidate Trades: ${candidateTradeType}`
     );
 
     wireProcessOutput('stdout', child.stdout);
@@ -575,6 +622,18 @@ function escapeHtml(text: string): string {
         .replace(/'/g, '&#39;');
 }
 
+function candidateTradeTypeLabel(value: CandidateTradeType): string {
+    if (value === 'LONG') {
+        return 'Long';
+    }
+
+    if (value === 'SHORT') {
+        return 'Short';
+    }
+
+    return 'Long and Short';
+}
+
 function writeHtmlReport(filePath: string, html: string) {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, html, 'utf8');
@@ -719,6 +778,7 @@ async function generateWeeklyTradingActivityReport(anchorDate: Date): Promise<{
 <body>
     <section class="panel">
         <h1>Weekly ORB Drilldown Report for the Week of ${escapeHtml(weekStartDate)} through ${escapeHtml(weekEndDate)}</h1>
+        <p>Breakout Candidate Trade Type: ${escapeHtml(candidateTradeTypeLabel(env.candidateTradeType))}</p>
         <p>Totals | Longs: ${totalLongs} | Shorts: ${totalShorts} | P/L: <span class="${pnlClass(totalPnl)}">${totalPnl.toFixed(2)}</span></p>
     </section>
     <section class="panel">
@@ -863,6 +923,7 @@ async function generateMonthlyTradingActivityReport(anchorDate: Date): Promise<{
     <section class="panel">
         <h1>Month's Trading Activity</h1>
         <p>Month: ${escapeHtml(monthLabel)}</p>
+        <p>Breakout Candidate Trade Type: ${escapeHtml(candidateTradeTypeLabel(env.candidateTradeType))}</p>
         <p>Totals | Longs: ${totalLongs} | Shorts: ${totalShorts} | P/L: <span class="${pnlClass(totalPnl)}">${totalPnl.toFixed(2)}</span></p>
     </section>
     <section class="panel">
@@ -936,6 +997,16 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
 
     if (req.method === 'GET' && pathname === '/api/orbilicious/status') {
         sendJson(res, 200, appState);
+        return;
+    }
+
+    if (req.method === 'GET' && pathname === '/api/alpaca/check-sip') {
+        try {
+            const supported = await orbService.checkRealtimeDataFeedSupported();
+            sendJson(res, 200, { supported });
+        } catch (error) {
+            sendJson(res, 200, { supported: false, detail: error instanceof Error ? error.message : String(error) });
+        }
         return;
     }
 
@@ -1048,6 +1119,7 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
         }
 
         const continuous = payload.continuous === true;
+        const realTimeData = payload.realTimeData === true;
         const sessionMode = normalizedSessionMode(payload.sessionMode);
         const emulationSessionDate = sessionMode === 'EMULATION'
             ? (typeof payload.emulationSessionDate === 'string' && payload.emulationSessionDate.trim() !== ''
@@ -1063,6 +1135,7 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
         const stopProfitRewardPart = typeof payload.stopProfitRewardPart === 'number' && payload.stopProfitRewardPart >= 1 && payload.stopProfitRewardPart <= 20
             ? payload.stopProfitRewardPart
             : undefined;
+        const candidateTradeType = normalizedCandidateTradeType(payload.candidateTradeType, env.candidateTradeType);
 
         if (sessionMode === 'EMULATION' && emulationSessionDate && !isValidSessionDate(emulationSessionDate)) {
             sendJson(res, 400, {
@@ -1072,7 +1145,7 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
             return;
         }
 
-        startOrbiliciousProcess({ continuous, sessionMode, emulationSessionDate, hardBasketCap, maxTotalRisk, stopProfitRewardPart });
+        startOrbiliciousProcess({ continuous, sessionMode, emulationSessionDate, hardBasketCap, maxTotalRisk, stopProfitRewardPart, realTimeData, candidateTradeType });
 
         sendJson(res, 202, {
             ok: true,

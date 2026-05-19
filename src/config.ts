@@ -3,6 +3,7 @@ import { StrategyConfig } from './types';
 import { logger } from './logger';
 
 type SessionMode = 'EMULATION' | 'PAPER' | 'LIVE';
+export type CandidateTradeType = 'LONG' | 'SHORT' | 'LONG_AND_SHORT';
 
 function required(name: string): string {
     const value = process.env[name];
@@ -81,8 +82,26 @@ function sessionMode(name: string, fallback: SessionMode): SessionMode {
     throw new Error(`Invalid session mode for ${name}: ${value}`);
 }
 
+function candidateTradeType(name: string, fallback: CandidateTradeType): CandidateTradeType {
+    const value = process.env[name];
+    if (value == null || value.trim() === '') return fallback;
+
+    const normalized = value.trim().toUpperCase();
+    if (normalized === 'LONG' || normalized === 'SHORT' || normalized === 'LONG_AND_SHORT') {
+        return normalized;
+    }
+
+    logger.error('Invalid candidate trade type environment variable', {
+        name,
+        value,
+        expected: 'LONG|SHORT|LONG_AND_SHORT',
+    });
+    throw new Error(`Invalid candidate trade type for ${name}: ${value}`);
+}
+
 const stopLossProfitRatio = ratio('STOP_LOSS_PROFIT_RATIO', '1:4');
 const configuredSessionMode = sessionMode('SESSION_MODE', 'EMULATION');
+const configuredCandidateTradeType = candidateTradeType('CANDIDATE_TRADE_TYPE', 'LONG_AND_SHORT');
 const defaultTradingBaseUrlByMode = configuredSessionMode === 'LIVE'
     ? 'https://api.alpaca.markets'
     : 'https://paper-api.alpaca.markets';
@@ -96,6 +115,7 @@ export const env = {
     dataBaseUrl: process.env.ALPACA_DATA_BASE_URL || 'https://data.alpaca.markets',
     dataFeed: process.env.ALPACA_DATA_FEED || 'iex',
     sessionDate: dateStr('SESSION_DATE', ''),
+    candidateTradeType: configuredCandidateTradeType,
     pollIntervalSeconds: num('POLL_INTERVAL_SECONDS', 20),
     maxTotalRisk: num('MAX_TOTAL_RISK', 1000),
     hardBasketCap: num('HARD_BASKET_CAP', 25000),
@@ -132,6 +152,7 @@ logger.info('Configuration loaded', {
     dataBaseUrl: env.dataBaseUrl,
     dataFeed: env.dataFeed,
     sessionDate: env.sessionDate,
+    candidateTradeType: env.candidateTradeType,
     pollIntervalSeconds: env.pollIntervalSeconds,
     maxTotalRisk: env.maxTotalRisk,
     hardBasketCap: env.hardBasketCap,

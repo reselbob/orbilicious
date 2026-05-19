@@ -273,11 +273,42 @@
                                             be executed against your account.</span>
                                     </div>
 
-                                    <div class="form-check mb-3">
-                                        <input class="form-check-input" type="checkbox" value="" id="continuousMode" />
-                                        <label class="form-check-label" for="continuousMode">
-                                            Continuous mode
-                                        </label>
+                                    <div class="d-flex align-items-center gap-4 mb-3 flex-wrap">
+                                        <div class="form-check mb-0">
+                                            <input class="form-check-input" type="checkbox" value=""
+                                                id="continuousMode" />
+                                            <label class="form-check-label" for="continuousMode">
+                                                Continuous mode
+                                            </label>
+                                        </div>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <label class="form-label mb-0" for="candidateTradeType">
+                                                Breakout Candidate Type
+                                            </label>
+                                            <select id="candidateTradeType" class="form-select form-select-sm"
+                                                style="width: auto;">
+                                                <option value="LONG">Long</option>
+                                                <option value="SHORT">Short</option>
+                                                <option value="LONG_AND_SHORT" selected>Both</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-check mb-0 d-flex align-items-center gap-2">
+                                            <input class="form-check-input" type="checkbox" value=""
+                                                id="realTimeDataFeed" />
+                                            <label class="form-check-label" for="realTimeDataFeed">
+                                                Run in real time
+                                            </label>
+                                            <span id="realTimeDataFeedError" class="d-none text-danger"
+                                                title="Your Alpaca subscription plan does not support real-time (SIP) data."
+                                                aria-label="Subscription error">
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"
+                                                    fill="currentColor" class="bi bi-exclamation-circle-fill"
+                                                    viewBox="0 0 16 16">
+                                                    <path
+                                                        d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zM8 4a.905.905 0 0 0-.9.995l.35 3.507a.552.552 0 0 0 1.1 0l.35-3.507A.905.905 0 0 0 8 4zm.002 6a1 1 0 1 0 0 2 1 1 0 0 0 0-2z" />
+                                                </svg>
+                                            </span>
+                                        </div>
                                     </div>
 
                                     <div class="mb-3 d-flex gap-2 align-items-center">
@@ -341,7 +372,7 @@
                                                     <th scope="col">Date/Time</th>
                                                     <th scope="col">Status</th>
                                                     <th scope="col">Symbol</th>
-                                                    <th scope="col">Side</th>
+                                                    <th scope="col">Position</th>
                                                     <th scope="col">Qty</th>
                                                     <th scope="col">Entry</th>
                                                     <th scope="col">Stop</th>
@@ -356,6 +387,9 @@
                                                 </tr>
                                             </tbody>
                                         </table>
+                                    </div>
+                                    <div class="small text-muted mt-2">
+                                        Legend: OPEN = entry order, CLOSED = exit order.
                                     </div>
                                 </div>
                             </div>
@@ -545,6 +579,8 @@
                     <dd id="confirmEmulationDate">-</dd>
                     <dt>Continuous mode</dt>
                     <dd id="confirmContinuousMode">-</dd>
+                    <dt>Breakout candidate type</dt>
+                    <dd id="confirmCandidateTradeType">-</dd>
                     <dt>Money in account</dt>
                     <dd id="confirmMoneyInAccount">-</dd>
                     <dt>Max risk per trading day</dt>

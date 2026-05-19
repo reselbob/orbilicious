@@ -3,6 +3,9 @@ const startBtn = document.getElementById('startBtn');
 const stopBtn = document.getElementById('stopBtn');
 const refreshStatusBtn = document.getElementById('refreshStatusBtn');
 const continuousMode = document.getElementById('continuousMode');
+const candidateTradeType = document.getElementById('candidateTradeType');
+const realTimeDataFeed = document.getElementById('realTimeDataFeed');
+const realTimeDataFeedError = document.getElementById('realTimeDataFeedError');
 const sessionMode = document.getElementById('sessionMode');
 const emulationDateGroup = document.getElementById('emulationDateGroup');
 const emulationDateInput = document.getElementById('emulationDate');
@@ -40,6 +43,7 @@ const cancelStartBtn = document.getElementById('cancelStartBtn');
 const confirmSessionMode = document.getElementById('confirmSessionMode');
 const confirmEmulationDate = document.getElementById('confirmEmulationDate');
 const confirmContinuousMode = document.getElementById('confirmContinuousMode');
+const confirmCandidateTradeType = document.getElementById('confirmCandidateTradeType');
 const confirmMoneyInAccount = document.getElementById('confirmMoneyInAccount');
 const confirmMaxRiskPerSession = document.getElementById('confirmMaxRiskPerSession');
 const confirmStopProfitRatio = document.getElementById('confirmStopProfitRatio');
@@ -50,7 +54,9 @@ let latestBacktestProgress = null;
 let activeTopLevelReportSrc = '';
 let latestOrbUiMessage = '';
 let latestRuntimeStatus = '';
+let latestIsRunning = false;
 let latestLiquidityPayload = null;
+let sipProbeUnsupported = false;
 
 function todayIsoDate() {
     const now = new Date();
@@ -97,16 +103,20 @@ function syncEmulationControls() {
     emulationDateGroup.classList.toggle('d-none', !isEmulation);
 
     const isLiveEmu = isLiveEmulation();
+    const isHistoricalEmu = isEmulation && !isLiveEmu;
+    const isRunningHistorical = isHistoricalEmu && latestIsRunning;
     const isContinuous = continuousMode.checked;
     const hasOrbUiMessage = typeof latestOrbUiMessage === 'string' && latestOrbUiMessage.trim() !== '';
     const isWaitingForMarketOpen = latestRuntimeStatus === 'Waiting for market open';
-    const shouldShowWarning = isLiveEmu || (isEmulation && hasOrbUiMessage) || isWaitingForMarketOpen;
+    const shouldShowWarning = isLiveEmu || isRunningHistorical || (isEmulation && hasOrbUiMessage) || isWaitingForMarketOpen;
     liveEmulationWarning.classList.toggle('d-none', !shouldShowWarning);
 
     if (isWaitingForMarketOpen) {
         liveEmulationWarningText.textContent = 'Waiting for markets to open.';
     } else if (isEmulation && hasOrbUiMessage) {
         liveEmulationWarningText.textContent = latestOrbUiMessage;
+    } else if (isRunningHistorical) {
+        liveEmulationWarningText.textContent = 'Running against historic data.';
     }
 
     // Update message based on continuous mode
@@ -248,9 +258,12 @@ function renderTrades() {
             const statusBadge = event.eventType === 'open'
                 ? '<span class="badge text-bg-success">OPEN</span>'
                 : '<span class="badge text-bg-secondary">CLOSED</span>';
-            const sideBadge = event.side === 'buy'
-                ? '<span class="badge text-bg-primary">BUY</span>'
-                : '<span class="badge text-bg-warning">SELL</span>';
+            const positionValue = event.position === 'short'
+                ? 'SHORT'
+                : 'LONG';
+            const sideBadge = positionValue === 'SHORT'
+                ? '<span class="badge text-bg-warning">SHORT</span>'
+                : '<span class="badge text-bg-primary">LONG</span>';
             const entry = event.eventType === 'open' ? formatPrice(event.entryPrice) : '-';
             const stop = event.eventType === 'open' ? formatPrice(event.stopPrice) : '-';
             const target = event.eventType === 'open' ? formatPrice(event.targetPrice) : '-';
@@ -356,6 +369,11 @@ function showStartConfirmationPane() {
     const isEmulation = session === 'EMULATION';
     const emulationDate = isEmulation && emulationDateInput.value ? emulationDateInput.value : 'N/A';
     const continuous = continuousMode.checked ? 'Enabled' : 'Disabled';
+    const candidateTradeTypeLabel = candidateTradeType.value === 'LONG'
+        ? 'Long'
+        : candidateTradeType.value === 'SHORT'
+            ? 'Short'
+            : 'Both';
     const moneyInAccount = getMoneyInAccount();
     const maxRiskPerSession = getMaxRiskPerSession();
     const stopProfitRatio = getStopProfitRatio();
@@ -363,6 +381,7 @@ function showStartConfirmationPane() {
     confirmSessionMode.textContent = session;
     confirmEmulationDate.textContent = emulationDate;
     confirmContinuousMode.textContent = continuous;
+    confirmCandidateTradeType.textContent = candidateTradeTypeLabel;
     confirmMoneyInAccount.textContent = formatCurrency(moneyInAccount);
     confirmMaxRiskPerSession.textContent = formatCurrency(maxRiskPerSession);
     confirmStopProfitRatio.textContent = `1:${stopProfitRatio}`;
@@ -390,6 +409,12 @@ async function refreshStatus() {
         renderBacktestProgress(payload.backtestProgress || null);
         latestOrbUiMessage = typeof payload.orbUiMessage === 'string' ? payload.orbUiMessage : '';
         latestRuntimeStatus = typeof payload.runtimeStatus === 'string' ? payload.runtimeStatus : '';
+        latestIsRunning = payload.isRunning === true;
+        if (payload.realtimeDataFeedError === true || sipProbeUnsupported) {
+            realTimeDataFeedError.classList.remove('d-none');
+        } else {
+            realTimeDataFeedError.classList.add('d-none');
+        }
         syncEmulationControls();
 
         return payload;
@@ -406,6 +431,9 @@ function syncDropdownsFromServer(payload) {
     }
     if (typeof payload.emulationSessionDate === 'string' && payload.emulationSessionDate) {
         emulationDateInput.value = payload.emulationSessionDate;
+    }
+    if (payload.isRunning === true && typeof payload.candidateTradeType === 'string' && candidateTradeType) {
+        candidateTradeType.value = payload.candidateTradeType;
     }
     syncEmulationControls();
 }
@@ -449,8 +477,10 @@ async function submitStartOrbilicious() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 continuous: continuousMode.checked,
+                realTimeData: realTimeDataFeed.checked,
                 sessionMode: sessionMode.value,
                 emulationSessionDate: isEmulationMode() ? emulationDateInput.value : undefined,
+                candidateTradeType: candidateTradeType.value,
                 moneyInAccount: getMoneyInAccount(),
                 maxRiskPerSession: getMaxRiskPerSession(),
                 stopProfitRewardPart: getStopProfitRatio(),
@@ -780,6 +810,30 @@ sessionMode.addEventListener('change', syncEmulationControls);
 emulationDateInput.addEventListener('change', syncEmulationControls);
 continuousMode.addEventListener('change', syncEmulationControls);
 
+realTimeDataFeed.addEventListener('change', async () => {
+    if (!realTimeDataFeed.checked) {
+        sipProbeUnsupported = false;
+        realTimeDataFeedError.classList.add('d-none');
+        return;
+    }
+
+    sipProbeUnsupported = true;
+    realTimeDataFeedError.classList.remove('d-none');
+
+    try {
+        const res = await fetch('/api/alpaca/check-sip');
+        const payload = await res.json();
+        sipProbeUnsupported = payload.supported !== true;
+    } catch {
+        sipProbeUnsupported = true;
+    }
+    if (sipProbeUnsupported) {
+        realTimeDataFeedError.classList.remove('d-none');
+    } else {
+        realTimeDataFeedError.classList.add('d-none');
+    }
+});
+
 for (const button of paneExpandButtons) {
     button.addEventListener('click', () => togglePaneExpansion(button));
 }
@@ -794,6 +848,7 @@ for (const button of topTabButtons) {
 }
 
 const today = todayIsoDate();
+candidateTradeType.value = 'LONG_AND_SHORT';
 emulationDateInput.value = today;
 emulationDateInput.max = today;
 reportAnchorDateInput.value = today;

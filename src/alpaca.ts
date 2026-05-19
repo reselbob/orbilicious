@@ -91,6 +91,21 @@ export class AlpacaClient {
         return result;
     }
 
+    async checkSipFeedSupported(): Promise<boolean> {
+        // Probe a single known bar with feed=sip to detect whether the account
+        // has a subscription plan that permits SIP (real-time) data.
+        const url = `${env.dataBaseUrl}/v2/stocks/SPY/bars?timeframe=1Min&start=2024-01-02T14%3A30%3A00Z&end=2024-01-02T14%3A31%3A00Z&limit=1&adjustment=raw&feed=sip`;
+        logger.debug('Probing SIP feed support');
+        const res = await fetch(url, { headers: headers() });
+        if (res.ok) {
+            logger.debug('SIP feed supported');
+            return true;
+        }
+        const body = await res.text();
+        logger.debug('SIP feed not supported', { status: res.status, body });
+        return false;
+    }
+
     async getMostActiveSymbols(limit = 40): Promise<string[]> {
         const url =
             `${env.dataBaseUrl}/v1beta1/screener/stocks/most-actives` +

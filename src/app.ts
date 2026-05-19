@@ -171,6 +171,18 @@ function executionKey(sessionDate: string, symbol: string) {
     return `${sessionDate}:${symbol}`;
 }
 
+function candidateAllowedByTradeType(side: 'buy' | 'sell'): boolean {
+    if (env.candidateTradeType === 'LONG_AND_SHORT') {
+        return true;
+    }
+
+    if (env.candidateTradeType === 'LONG') {
+        return side === 'buy';
+    }
+
+    return side === 'sell';
+}
+
 function minutesFromHHMM(hhmm: string): number {
     const [hour, minute] = hhmm.split(':').map(Number);
     return hour * 60 + minute;
@@ -562,9 +574,16 @@ export async function findBreakoutCandidates(
     );
 
     const candidates = results.filter((x): x is BreakoutCandidate => x !== null);
-    logger.info('Finished candidate scan', { sessionDate, candidateCount: candidates.length });
+    const filteredCandidates = candidates.filter((candidate) => candidateAllowedByTradeType(candidate.side));
 
-    return candidates;
+    logger.info('Finished candidate scan', {
+        sessionDate,
+        candidateCount: filteredCandidates.length,
+        preFilterCandidateCount: candidates.length,
+        candidateTradeType: env.candidateTradeType,
+    });
+
+    return filteredCandidates;
 }
 
 export async function executeSizedTrades(
@@ -718,12 +737,22 @@ export type StartAppOptions = {
 };
 
 export async function startApp(options?: StartAppOptions) {
+    // Reset per-run state so a re-start (e.g. after clearing trades) gets a
+    // fresh run rather than being silently skipped by stale Set entries.
+    executedToday.clear();
+    reportedDates.clear();
+    simulatedPositions.clear();
+
     const client = new AlpacaClient();
     const continuousMode = options?.continuous === true;
     const shouldRunHistorical = env.sessionMode === 'EMULATION' && Boolean(env.sessionDate);
 
-    const nyToday = toNyParts(new Date(), strategyConfig.sessionTimezone).date;
-    const isLiveEmulation = env.sessionMode === 'EMULATION' && env.sessionDate === nyToday;
+    const nowNy = toNyParts(new Date(), strategyConfig.sessionTimezone);
+    const nyToday = nowNy.date;
+    const marketCloseMinutes = minutesFromHHMM(strategyConfig.forceExitTimeHHMM);
+    const currentMinutes = nowNy.hour * 60 + nowNy.minute;
+    const isBeforeMarketClose = currentMinutes < marketCloseMinutes;
+    const isLiveEmulation = env.sessionMode === 'EMULATION' && env.sessionDate === nyToday && isBeforeMarketClose;
     const isHistoricalEmulation = shouldRunHistorical && !isLiveEmulation;
 
     if (continuousMode) {
@@ -837,7 +866,6 @@ export async function startApp(options?: StartAppOptions) {
     }
 
     const marketOpenMinutes = strategyConfig.sessionOpenHour * 60 + strategyConfig.sessionOpenMinute;
-    const marketCloseMinutes = minutesFromHHMM(strategyConfig.forceExitTimeHHMM);
     const openingRangeEndMinutes = marketOpenMinutes + strategyConfig.openingRangeMinutes;
     const isCurrentDayMode = !continuousMode;
     const reportedOpeningRangeByDate = new Set<string>();

@@ -3,7 +3,7 @@ import { describe, it } from 'mocha';
 import fs from 'node:fs';
 import { AlpacaClient } from '../src/alpaca';
 import { Reports } from '../src/reports';
-import { strategyConfig } from '../src/config';
+import { env, strategyConfig } from '../src/config';
 import { toNyParts } from '../src/time';
 import type { Bar } from '../src/types';
 
@@ -75,6 +75,59 @@ function makeDeterministicSessionBars(symbol: string, sessionDate: string): Bar[
     return bars;
 }
 
+function makeDeterministicShortSessionBars(symbol: string, sessionDate: string): Bar[] {
+    const bars: Bar[] = [];
+
+    for (let minute = 30; minute <= 44; minute++) {
+        bars.push({
+            symbol,
+            timestamp: makeTimestamp(sessionDate, 9, minute),
+            open: 100,
+            high: 101,
+            low: 99,
+            close: 100,
+            volume: 1000,
+        });
+    }
+
+    for (let minute = 45; minute <= 59; minute++) {
+        if (minute === 45) {
+            bars.push({
+                symbol,
+                timestamp: makeTimestamp(sessionDate, 9, minute),
+                open: 99.2,
+                high: 99.6,
+                low: 97.8,
+                close: 98.4,
+                volume: 5000,
+            });
+            continue;
+        }
+
+        bars.push({
+            symbol,
+            timestamp: makeTimestamp(sessionDate, 9, minute),
+            open: 98.8,
+            high: 99.2,
+            low: 98.1,
+            close: 98.5,
+            volume: 2400,
+        });
+    }
+
+    bars.push({
+        symbol,
+        timestamp: makeTimestamp(sessionDate, 10, 0),
+        open: 98.7,
+        high: 99.1,
+        low: 98.2,
+        close: 98.4,
+        volume: 2600,
+    });
+
+    return bars;
+}
+
 function weekDatesMondayToFriday(sessionDate: string): string[] {
     const [year, month, day] = sessionDate.split('-').map((part) => Number(part));
     if (!year || !month || !day) {
@@ -104,6 +157,19 @@ class DeterministicAlpacaClient extends AlpacaClient {
     }
 
     override async getIntradayBars(symbol: string, sessionDate: string): Promise<Bar[]> {
+        return makeDeterministicSessionBars(symbol, sessionDate);
+    }
+}
+
+class MixedDirectionDeterministicClient extends AlpacaClient {
+    override async getMostActiveSymbols(): Promise<string[]> {
+        return ['LONG_A', 'SHORT_A'];
+    }
+
+    override async getIntradayBars(symbol: string, sessionDate: string): Promise<Bar[]> {
+        if (symbol === 'SHORT_A') {
+            return makeDeterministicShortSessionBars(symbol, sessionDate);
+        }
         return makeDeterministicSessionBars(symbol, sessionDate);
     }
 }
@@ -155,6 +221,30 @@ describe('reporting tests', () => {
 
         removeIfExists(result.pdfReportPath);
         removeIfExists(result.htmlReportPath);
+    });
+
+    it('filters historical report trades by CANDIDATE_TRADE_TYPE', async function () {
+        this.timeout(120_000);
+        const client = new MixedDirectionDeterministicClient();
+        const previousTradeType = env.candidateTradeType;
+
+        try {
+            env.candidateTradeType = 'LONG';
+            const longOnly = await client.generateOrbReport('2026-05-14', { usesHistoricData: true });
+            expect(longOnly.emulatedTrades.length).to.be.greaterThan(0);
+            expect(longOnly.emulatedTrades.every((trade) => trade.side === 'buy')).to.equal(true);
+            removeIfExists(longOnly.pdfReportPath);
+            removeIfExists(longOnly.htmlReportPath);
+
+            env.candidateTradeType = 'SHORT';
+            const shortOnly = await client.generateOrbReport('2026-05-14', { usesHistoricData: true });
+            expect(shortOnly.emulatedTrades.length).to.be.greaterThan(0);
+            expect(shortOnly.emulatedTrades.every((trade) => trade.side === 'sell')).to.equal(true);
+            removeIfExists(shortOnly.pdfReportPath);
+            removeIfExists(shortOnly.htmlReportPath);
+        } finally {
+            env.candidateTradeType = previousTradeType;
+        }
     });
 
     it('verify continuous reporting over a deterministic historical week', async function () {

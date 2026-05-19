@@ -46,4 +46,8 @@ export class OrbService {
     ): Promise<RunningSummaryOrbReportResult> {
         return this.client.generateRunningSummaryOrbReports(anchorDate);
     }
+
+    async checkRealtimeDataFeedSupported(): Promise<boolean> {
+        return this.client.checkSipFeedSupported();
+    }
 }

@@ -67,4 +67,24 @@ describe('config integration', () => {
         expect(mod.env.dryRun).to.equal(false);
         expect(mod.env.tradingBaseUrl).to.equal('https://api.alpaca.markets');
     });
+
+    it('defaults CANDIDATE_TRADE_TYPE to LONG_AND_SHORT', () => {
+        withBaseConfigEnv();
+        delete process.env.CANDIDATE_TRADE_TYPE;
+
+        clearConfigModuleCache();
+        const mod = require('../src/config');
+
+        expect(mod.env.candidateTradeType).to.equal('LONG_AND_SHORT');
+    });
+
+    it('loads CANDIDATE_TRADE_TYPE override from environment', () => {
+        withBaseConfigEnv();
+        process.env.CANDIDATE_TRADE_TYPE = 'SHORT';
+
+        clearConfigModuleCache();
+        const mod = require('../src/config');
+
+        expect(mod.env.candidateTradeType).to.equal('SHORT');
+    });
 });

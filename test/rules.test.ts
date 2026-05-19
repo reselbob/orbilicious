@@ -523,6 +523,35 @@ describe('Operational Rules support', () => {
         expect(reportedSessions).to.deep.equal(['2026-05-18']);
     });
 
+    // Rules 3-6: When a same-day EMULATION session starts after market close, the app
+    // should treat it as historical emulation and run the one-shot historical branch.
+    it('rules 3-6: same-day emulation after market close runs the historical branch', async () => {
+        env.sessionMode = 'EMULATION';
+        env.sessionDate = '2026-05-18';
+        env.dryRun = true;
+        env.pollIntervalSeconds = 0;
+
+        withMockDateSequence([
+            '2026-05-18T20:56:00Z',
+            '2026-05-18T20:56:00Z',
+            '2026-05-18T20:56:00Z',
+        ]);
+
+        const { infoMessages } = captureLogMessages();
+        const reportedSessions: string[] = [];
+
+        stubProperty(AlpacaClient.prototype, 'generateOrbReport', (async function (sessionDate?: string | Date) {
+            reportedSessions.push(String(sessionDate));
+            return makeHistoricalReport(String(sessionDate));
+        }) as typeof AlpacaClient.prototype.generateOrbReport);
+
+        await startApp();
+
+        expect(infoMessages).to.include('Starting historical ORB report runner');
+        expect(infoMessages).to.not.include('Current-day mode complete after market close; exiting app');
+        expect(reportedSessions).to.deep.equal(['2026-05-18']);
+    });
+
     // Rules 8-9: Verifies that after the 15-minute opening-range window closes the app
     // emits the opening-range completion status (__UI_STATUS__Determing open ranage.,
     // __UI_STATUS__High range prices / Low range prices) and then appends the most-active
@@ -677,6 +706,41 @@ describe('Operational Rules support', () => {
         expect((bySymbol.get('LONG_OK')?.atr1m ?? 0)).to.be.greaterThan(0);
         expect((bySymbol.get('SHORT_OK')?.atr1m ?? 0)).to.be.greaterThan(0);
         expect((bySymbol.get('LONG_OK')?.score ?? 0)).to.be.greaterThan(MIN_SCORE);
+    });
+
+    it('rules 17-22b: filters breakout candidates by configured candidate trade type', async () => {
+        class CandidateTypeClient extends AlpacaClient {
+            async getMostActiveSymbols() {
+                return ['LONG_OK', 'SHORT_OK'];
+            }
+
+            async getOpenPosition(): Promise<Position | null> {
+                return null;
+            }
+
+            async getIntradayBars(symbol: string, sessionDate: string) {
+                if (symbol === 'SHORT_OK') {
+                    return makeConfirmedShortCandidateBars(symbol, sessionDate);
+                }
+                return makeConfirmedLongCandidateBars(symbol, sessionDate);
+            }
+        }
+
+        const client = new CandidateTypeClient();
+
+        env.candidateTradeType = 'LONG';
+        const longOnly = await findBreakoutCandidates(client, '2026-05-20');
+        expect(longOnly).to.have.length(1);
+        expect(longOnly[0].side).to.equal('buy');
+
+        env.candidateTradeType = 'SHORT';
+        const shortOnly = await findBreakoutCandidates(client, '2026-05-20');
+        expect(shortOnly).to.have.length(1);
+        expect(shortOnly[0].side).to.equal('sell');
+
+        env.candidateTradeType = 'LONG_AND_SHORT';
+        const both = await findBreakoutCandidates(client, '2026-05-20');
+        expect(both.map((candidate) => candidate.side).sort()).to.deep.equal(['buy', 'sell']);
     });
 
     // Rules 23-28: Verifies the full sizing pipeline using synthetic candidates.

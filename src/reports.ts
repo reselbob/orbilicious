@@ -124,6 +124,30 @@ type OrbReportComputation = {
     finalOutcomeBySymbol: Map<string, TradeOutcome>;
 };
 
+function candidateAllowedByTradeType(side: 'buy' | 'sell'): boolean {
+    if (env.candidateTradeType === 'LONG_AND_SHORT') {
+        return true;
+    }
+
+    if (env.candidateTradeType === 'LONG') {
+        return side === 'buy';
+    }
+
+    return side === 'sell';
+}
+
+function candidateTradeTypeLabel(): string {
+    if (env.candidateTradeType === 'LONG') {
+        return 'Long';
+    }
+
+    if (env.candidateTradeType === 'SHORT') {
+        return 'Short';
+    }
+
+    return 'Long and Short';
+}
+
 export class Reports {
     private static weekDatesMondayToFriday(anchorDate: Date): string[] {
         const nyAnchor = toNyParts(anchorDate, strategyConfig.sessionTimezone);
@@ -396,8 +420,12 @@ export class Reports {
             });
         }
 
+        const filteredBreakoutCandidates = breakoutCandidates.filter((candidate) =>
+            candidateAllowedByTradeType(candidate.side),
+        );
+
         const atrSizedTrades = buildWeightedRiskTrades(
-            breakoutCandidates,
+            filteredBreakoutCandidates,
             env.maxTotalRisk,
             env.takeProfitMultiple,
         );
@@ -422,11 +450,11 @@ export class Reports {
             sessionBarsBySymbol.set(symbol, sessionBars);
         }
 
-        const totalCandidatesBoughtAtStart = breakoutCandidates.length;
-        const numberOfCandidatesSoldLong = breakoutCandidates.filter(
+        const totalCandidatesBoughtAtStart = filteredBreakoutCandidates.length;
+        const numberOfCandidatesSoldLong = filteredBreakoutCandidates.filter(
             (trade) => trade.side === "buy",
         ).length;
-        const numberOfCandidatesBoughtShort = breakoutCandidates.filter(
+        const numberOfCandidatesBoughtShort = filteredBreakoutCandidates.filter(
             (trade) => trade.side === "sell",
         ).length;
         const totalCostOfBreakoutCandidatePurchases = emulatedTrades.reduce(
@@ -489,7 +517,7 @@ export class Reports {
             sessionDate,
             symbols,
             evaluationRows,
-            breakoutCandidates,
+            breakoutCandidates: filteredBreakoutCandidates,
             emulatedTrades,
             maxSessionBars,
             insufficientSymbols,
@@ -646,6 +674,7 @@ export class Reports {
     <section class="panel">
         <h1>Running ORB Summary</h1>
         <p>Date range: ${Reports.escapeHtml(startDate)} through ${Reports.escapeHtml(endDate)}</p>
+        <p>Breakout Candidate Trade Type: ${Reports.escapeHtml(candidateTradeTypeLabel())}</p>
     </section>
     <section class="panel">
         <h2>Daily Summary Metrics</h2>
@@ -812,6 +841,7 @@ export class Reports {
     <section class="panel">
         <h1>Weekly ORB Summary</h1>
         <p>Week range: ${Reports.escapeHtml(weekStartDate)} to ${Reports.escapeHtml(weekEndDate)}</p>
+        <p>Breakout Candidate Trade Type: ${Reports.escapeHtml(candidateTradeTypeLabel())}</p>
     </section>
     <section class="panel">
         <h2>Daily Summary Metrics</h2>
@@ -1327,6 +1357,7 @@ export class Reports {
             <table class="summary-table">
                 <tbody>
                     <tr><th>Total Breakout Candidates Detected</th><td>${breakoutCandidates.length}</td></tr>
+                    <tr><th>Breakout Candidate Trade Type</th><td>${Reports.escapeHtml(candidateTradeTypeLabel())}</td></tr>
                     <tr><th>Total Number of Candidates Bought at Start</th><td>${totalCandidatesBoughtAtStart}</td></tr>
                     <tr><th>Number of Candidates Sold Long</th><td>${numberOfCandidatesSoldLong}</td></tr>
                     <tr><th>Number of Candidates Bought Short</th><td>${numberOfCandidatesBoughtShort}</td></tr>
@@ -1526,6 +1557,7 @@ export class Reports {
                     </tr>
                 </thead>
                 <tbody>
+                    <tr><td>Breakout Candidate Trade Type</td><td>${Reports.escapeHtml(candidateTradeTypeLabel())}</td></tr>
                     <tr><td>Total Number of Candidates Bought at Start</td><td>${totalCandidatesBoughtAtStart}</td></tr>
                     <tr><td>Number of Candidates Sold Long</td><td>${numberOfCandidatesSoldLong}</td></tr>
                     <tr><td>Number of Candidates Bought Short</td><td>${numberOfCandidatesBoughtShort}</td></tr>
