@@ -202,6 +202,106 @@
         .top-tab-panel.active {
             display: block;
         }
+
+        .field-help-btn {
+            width: 1.5rem;
+            height: 1.5rem;
+            padding: 0;
+            border-radius: 999px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.85rem;
+            line-height: 1;
+            flex: 0 0 auto;
+        }
+
+        .field-help-popover {
+            position: fixed;
+            z-index: 1060;
+            width: min(320px, calc(100vw - 1rem));
+            background: #fff;
+            border: 1px solid #cbd5e1;
+            border-radius: 0.75rem;
+            box-shadow: 0 1rem 2.5rem rgba(15, 23, 42, 0.18);
+        }
+
+        .field-help-popover.d-none {
+            display: none !important;
+        }
+
+        .field-help-popover-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            gap: 0.75rem;
+            padding: 0.75rem 0.9rem 0.5rem;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .field-help-popover-body {
+            padding: 0.75rem 0.9rem 0.9rem;
+            color: #475569;
+            font-size: 0.92rem;
+        }
+
+        .field-help-popover-title {
+            margin: 0;
+            font-size: 0.98rem;
+            font-weight: 700;
+            color: #0f172a;
+        }
+
+        .field-help-popover-subtitle {
+            margin: 0.15rem 0 0;
+            color: #64748b;
+            font-size: 0.82rem;
+        }
+
+        .field-help-popover-close {
+            flex: 0 0 auto;
+            padding: 0.1rem 0.45rem;
+            line-height: 1.1;
+        }
+
+        .field-help-popover::before {
+            content: '';
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            background: #fff;
+            border-left: 1px solid #cbd5e1;
+            border-top: 1px solid #cbd5e1;
+            transform: rotate(45deg);
+        }
+
+        .field-help-popover[data-placement='bottom']::before {
+            top: -6px;
+            left: 18px;
+        }
+
+        .field-help-popover[data-placement='top']::before {
+            bottom: -6px;
+            left: 18px;
+            transform: rotate(225deg);
+        }
+
+        .help-label-row {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            flex-wrap: wrap;
+        }
+
+        .help-field-title {
+            font-weight: 600;
+            color: #0f172a;
+        }
+
+        .help-field-copy {
+            color: #475569;
+            margin-bottom: 0;
+        }
     </style>
 </head>
 
@@ -251,7 +351,12 @@
                                     </div>
 
                                     <div class="mb-3">
-                                        <label class="form-label" for="sessionMode">Session mode</label>
+                                        <div class="help-label-row mb-1">
+                                            <label class="form-label mb-0" for="sessionMode">Session mode</label>
+                                            <button class="btn btn-outline-secondary field-help-btn" type="button"
+                                                data-help-key="sessionMode" aria-label="Help for Session mode"
+                                                title="Help for Session mode">?</button>
+                                        </div>
                                         <select id="sessionMode" class="form-select">
                                             <option value="EMULATION" selected>EMULATION</option>
                                             <option value="PAPER">PAPER</option>
@@ -260,7 +365,12 @@
                                     </div>
 
                                     <div id="emulationDateGroup" class="mb-3">
-                                        <label class="form-label" for="emulationDate">Emulation session date</label>
+                                        <div class="help-label-row mb-1">
+                                            <label class="form-label mb-0" for="emulationDate">Emulation session date</label>
+                                            <button class="btn btn-outline-secondary field-help-btn" type="button"
+                                                data-help-key="emulationDate" aria-label="Help for Emulation session date"
+                                                title="Help for Emulation session date">?</button>
+                                        </div>
                                         <input id="emulationDate" type="date" class="form-control" />
                                         <div class="form-text">Choose a current or past trading day for historical
                                             EMULATION runs.
@@ -277,14 +387,24 @@
                                         <div class="form-check mb-0">
                                             <input class="form-check-input" type="checkbox" value=""
                                                 id="continuousMode" />
-                                            <label class="form-check-label" for="continuousMode">
-                                                Continuous mode
-                                            </label>
+                                            <span class="help-label-row">
+                                                <label class="form-check-label" for="continuousMode">
+                                                    Continuous mode
+                                                </label>
+                                                <button class="btn btn-outline-secondary field-help-btn" type="button"
+                                                    data-help-key="continuousMode" aria-label="Help for Continuous mode"
+                                                    title="Help for Continuous mode">?</button>
+                                            </span>
                                         </div>
                                         <div class="d-flex align-items-center gap-2">
-                                            <label class="form-label mb-0" for="candidateTradeType">
-                                                Breakout Candidate Type
-                                            </label>
+                                            <span class="help-label-row">
+                                                <label class="form-label mb-0" for="candidateTradeType">
+                                                    Breakout Candidate Trade Type
+                                                </label>
+                                                <button class="btn btn-outline-secondary field-help-btn" type="button"
+                                                    data-help-key="candidateTradeType" aria-label="Help for Breakout Candidate Trade Type"
+                                                    title="Help for Breakout Candidate Trade Type">?</button>
+                                            </span>
                                             <select id="candidateTradeType" class="form-select form-select-sm"
                                                 style="width: auto;">
                                                 <option value="LONG">Long</option>
@@ -295,9 +415,14 @@
                                         <div class="form-check mb-0 d-flex align-items-center gap-2">
                                             <input class="form-check-input" type="checkbox" value=""
                                                 id="realTimeDataFeed" />
-                                            <label class="form-check-label" for="realTimeDataFeed">
-                                                Run in real time
-                                            </label>
+                                            <span class="help-label-row">
+                                                <label class="form-check-label" for="realTimeDataFeed">
+                                                    Run in real time
+                                                </label>
+                                                <button class="btn btn-outline-secondary field-help-btn" type="button"
+                                                    data-help-key="realTimeDataFeed" aria-label="Help for Run in real time"
+                                                    title="Help for Run in real time">?</button>
+                                            </span>
                                             <span id="realTimeDataFeedError" class="d-none text-danger"
                                                 title="Your Alpaca subscription plan does not support real-time (SIP) data."
                                                 aria-label="Subscription error">
@@ -312,21 +437,35 @@
                                     </div>
 
                                     <div class="mb-3 d-flex gap-2 align-items-center">
-                                        <label class="form-label mb-0" for="moneyInAccount">Money in Account</label>
+                                        <span class="help-label-row">
+                                            <label class="form-label mb-0" for="moneyInAccount">Money in Account</label>
+                                            <button class="btn btn-outline-secondary field-help-btn" type="button"
+                                                data-help-key="moneyInAccount" aria-label="Help for Money in Account"
+                                                title="Help for Money in Account">?</button>
+                                        </span>
                                         <select id="moneyInAccount" class="form-select" style="width: auto;"></select>
                                     </div>
 
                                     <div class="mb-3 d-flex gap-2 align-items-center">
-                                        <label class="form-label mb-0" for="maxRiskPerSession">Max Amount to Risk Per
-                                            Trading
-                                            Day</label>
+                                        <span class="help-label-row">
+                                            <label class="form-label mb-0" for="maxRiskPerSession">Max Amount to Risk
+                                                Per Trading Day</label>
+                                            <button class="btn btn-outline-secondary field-help-btn" type="button"
+                                                data-help-key="maxRiskPerSession" aria-label="Help for Max Amount to Risk Per Trading Day"
+                                                title="Help for Max Amount to Risk Per Trading Day">?</button>
+                                        </span>
                                         <select id="maxRiskPerSession" class="form-select"
                                             style="width: auto;"></select>
                                     </div>
 
                                     <div class="mb-3 d-flex gap-2 align-items-center">
-                                        <label class="form-label mb-0" for="stopProfitRatio">Stop/Profit Limit Ratio
-                                            1:</label>
+                                        <span class="help-label-row">
+                                            <label class="form-label mb-0" for="stopProfitRatio">Stop/Profit Limit
+                                                Ratio 1:</label>
+                                            <button class="btn btn-outline-secondary field-help-btn" type="button"
+                                                data-help-key="stopProfitRatio" aria-label="Help for Stop/Profit Limit Ratio"
+                                                title="Help for Stop/Profit Limit Ratio">?</button>
+                                        </span>
                                         <input type="number" id="stopProfitRatio" class="form-control" min="1" max="20"
                                             value="4" style="width: 70px;" />
                                     </div>
@@ -579,7 +718,7 @@
                     <dd id="confirmEmulationDate">-</dd>
                     <dt>Continuous mode</dt>
                     <dd id="confirmContinuousMode">-</dd>
-                    <dt>Breakout candidate type</dt>
+                    <dt>Breakout candidate trade type</dt>
                     <dd id="confirmCandidateTradeType">-</dd>
                     <dt>Money in account</dt>
                     <dd id="confirmMoneyInAccount">-</dd>
@@ -593,6 +732,21 @@
                 <button id="cancelStartBtn" type="button" class="btn btn-outline-secondary">Cancel</button>
                 <button id="confirmStartBtn" type="button" class="btn btn-primary">Continue</button>
             </div>
+        </div>
+    </div>
+
+    <div id="fieldHelpPopover" class="field-help-popover d-none" role="dialog" aria-modal="false"
+        aria-labelledby="fieldHelpTitle" aria-describedby="fieldHelpText">
+        <div class="field-help-popover-header">
+            <div>
+                <h2 id="fieldHelpTitle" class="field-help-popover-title">Help</h2>
+                <p id="fieldHelpSubtitle" class="field-help-popover-subtitle">Field guidance</p>
+            </div>
+            <button id="closeFieldHelpBtn" type="button" class="btn btn-outline-secondary btn-sm field-help-popover-close"
+                aria-label="Close help">×</button>
+        </div>
+        <div class="field-help-popover-body">
+            <p id="fieldHelpText" class="mb-0"></p>
         </div>
     </div>
 

@@ -47,6 +47,11 @@ const confirmCandidateTradeType = document.getElementById('confirmCandidateTrade
 const confirmMoneyInAccount = document.getElementById('confirmMoneyInAccount');
 const confirmMaxRiskPerSession = document.getElementById('confirmMaxRiskPerSession');
 const confirmStopProfitRatio = document.getElementById('confirmStopProfitRatio');
+const fieldHelpPopover = document.getElementById('fieldHelpPopover');
+const fieldHelpTitle = document.getElementById('fieldHelpTitle');
+const fieldHelpSubtitle = document.getElementById('fieldHelpSubtitle');
+const fieldHelpText = document.getElementById('fieldHelpText');
+const closeFieldHelpBtn = document.getElementById('closeFieldHelpBtn');
 
 let tradeCursor = 0;
 let tradeEvents = [];
@@ -57,6 +62,98 @@ let latestRuntimeStatus = '';
 let latestIsRunning = false;
 let latestLiquidityPayload = null;
 let sipProbeUnsupported = false;
+let activeFieldHelpAnchor = null;
+
+const fieldHelpContent = {
+    sessionMode: {
+        title: 'Session mode',
+        subtitle: 'Choose how ORBilicious should run.',
+        text: 'EMULATION replays historical market data without placing live orders. PAPER submits orders to your Alpaca paper account. LIVE uses your live Alpaca account and real orders.',
+    },
+    emulationDate: {
+        title: 'Emulation session date',
+        subtitle: 'Select the trading day to replay.',
+        text: 'Use a current or past New York trading session when running historical emulation. The app will replay that session’s breakout logic and trade management against historical data.',
+    },
+    continuousMode: {
+        title: 'Continuous mode',
+        subtitle: 'Keep ORBilicious running between sessions.',
+        text: 'When enabled, ORBilicious stays active and waits for the next market conditions instead of ending immediately after one pass. In emulation it is useful for live-style replay behavior.',
+    },
+    candidateTradeType: {
+        title: 'Breakout Candidate Trade Type',
+        subtitle: 'Control which breakout directions are allowed.',
+        text: 'Long selects only bullish breakout candidates. Short selects only bearish breakout candidates. Both allows either direction and is the default.',
+    },
+    realTimeDataFeed: {
+        title: 'Run in real time',
+        subtitle: 'Use Alpaca real-time data when available.',
+        text: 'Enable this only if your Alpaca subscription supports SIP or real-time market data. If the account does not support it, ORBilicious will show a warning and continue using the configured fallback behavior.',
+    },
+    moneyInAccount: {
+        title: 'Money in Account',
+        subtitle: 'Set the account value used for sizing.',
+        text: 'This value is used by the trade sizing logic to determine how much notional capital is available for the run. It does not change your real Alpaca account balance.',
+    },
+    maxRiskPerSession: {
+        title: 'Max Amount to Risk Per Trading Day',
+        subtitle: 'Cap the total risk for the session.',
+        text: 'ORBilicious uses this as the maximum total dollars it can place at risk across all breakout candidates for the selected trading day.',
+    },
+    stopProfitRatio: {
+        title: 'Stop/Profit Limit Ratio',
+        subtitle: 'Set the reward multiple after the stop loss.',
+        text: 'A ratio of 1:4 means the profit target is four times the stop distance. Larger ratios seek more reward for the same risk and smaller ratios exit sooner.',
+    },
+};
+
+function positionFieldHelpPopover(anchor) {
+    if (!fieldHelpPopover || !anchor) return;
+
+    const rect = anchor.getBoundingClientRect();
+    const popoverWidth = Math.min(320, window.innerWidth - 16);
+    const popoverHeight = fieldHelpPopover.offsetHeight || 180;
+    const gap = 10;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    const showBelow = spaceBelow >= popoverHeight + gap || spaceBelow >= spaceAbove;
+
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - popoverWidth - 8));
+    const top = showBelow
+        ? Math.min(rect.bottom + gap, window.innerHeight - popoverHeight - 8)
+        : Math.max(8, rect.top - popoverHeight - gap);
+
+    fieldHelpPopover.style.left = `${left}px`;
+    fieldHelpPopover.style.top = `${top}px`;
+    fieldHelpPopover.dataset.placement = showBelow ? 'bottom' : 'top';
+}
+
+function openFieldHelp(key, anchor) {
+    const help = fieldHelpContent[key];
+    if (!help || !fieldHelpPopover || !fieldHelpTitle || !fieldHelpSubtitle || !fieldHelpText) {
+        return;
+    }
+
+    fieldHelpTitle.textContent = help.title;
+    fieldHelpSubtitle.textContent = help.subtitle;
+    fieldHelpText.textContent = help.text;
+    activeFieldHelpAnchor = anchor || null;
+    fieldHelpPopover.classList.remove('d-none');
+    fieldHelpPopover.style.visibility = 'hidden';
+
+    requestAnimationFrame(() => {
+        if (fieldHelpPopover.classList.contains('d-none')) return;
+        positionFieldHelpPopover(activeFieldHelpAnchor);
+        fieldHelpPopover.style.visibility = 'visible';
+    });
+}
+
+function closeFieldHelp() {
+    if (!fieldHelpPopover) return;
+    fieldHelpPopover.classList.add('d-none');
+    fieldHelpPopover.style.visibility = '';
+    activeFieldHelpAnchor = null;
+}
 
 function todayIsoDate() {
     const now = new Date();
@@ -788,6 +885,50 @@ function updateBrowserLocalTime() {
 
     browserLocalTime.textContent = `Local time: ${formatted}`;
 }
+
+document.addEventListener('click', (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+
+    const helpButton = target.closest('[data-help-key]');
+    if (helpButton) {
+        const key = helpButton.getAttribute('data-help-key');
+        if (key) {
+            openFieldHelp(key, helpButton);
+        }
+        return;
+    }
+
+    if (fieldHelpPopover && !fieldHelpPopover.classList.contains('d-none') && !target.closest('#fieldHelpPopover')) {
+        closeFieldHelp();
+    }
+});
+
+if (closeFieldHelpBtn) {
+    closeFieldHelpBtn.addEventListener('click', closeFieldHelp);
+}
+
+document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+        closeFieldHelp();
+    }
+});
+
+window.addEventListener('resize', () => {
+    if (!fieldHelpPopover || fieldHelpPopover.classList.contains('d-none') || !activeFieldHelpAnchor) {
+        return;
+    }
+
+    positionFieldHelpPopover(activeFieldHelpAnchor);
+});
+
+window.addEventListener('scroll', () => {
+    if (!fieldHelpPopover || fieldHelpPopover.classList.contains('d-none') || !activeFieldHelpAnchor) {
+        return;
+    }
+
+    positionFieldHelpPopover(activeFieldHelpAnchor);
+}, true);
 
 startBtn.addEventListener('click', showStartConfirmationPane);
 confirmStartBtn.addEventListener('click', async () => {
