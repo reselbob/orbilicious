@@ -1169,9 +1169,9 @@ export class Reports {
             return '<div class="candidate-chart-note">No chart bars found in chart window.</div>';
         }
 
-        const plotWidth = 940;
-        const plotHeight = 320;
-        const margin = { top: 16, right: 18, bottom: 26, left: 56 };
+        const plotWidth = 820;
+        const plotHeight = 250;
+        const margin = { top: 14, right: 18, bottom: 90, left: 52 };
         const width = plotWidth + margin.left + margin.right;
         const height = plotHeight + margin.top + margin.bottom;
 
@@ -1201,7 +1201,7 @@ export class Reports {
         };
 
         const yForPrice = (price: number) => margin.top + ((yMax - price) / range) * plotHeight;
-        const candleWidth = Math.max(3, Math.min(14, plotWidth / Math.max(chartBars.length * 1.9, 6)));
+        const candleWidth = Math.max(3, Math.min(12, plotWidth / Math.max(chartBars.length * 1.9, 6)));
 
         const determinationIndexInChart = chartBars.findIndex(
             (bar) => new Date(bar.timestamp).getTime() >= determinationEndMs,
@@ -1243,7 +1243,7 @@ export class Reports {
             };
         });
 
-        const xTickStride = Math.max(1, Math.floor(chartBars.length / 8));
+        const xTickStride = Math.max(1, Math.floor(chartBars.length / 7));
         const xTicks = chartBars
             .map((bar, index) => ({ bar, index }))
             .filter(({ index }) => index % xTickStride === 0 || index === chartBars.length - 1)
@@ -1263,9 +1263,8 @@ export class Reports {
                 const bodyHeight = Math.max(1, Math.abs(closeY - openY));
                 const bullish = bar.close >= bar.open;
                 const bodyColor = bullish ? "#22c55e" : "#ef4444";
-                const wickColor = "#d1d5db";
                 return `<g>
-                    <line x1="${x}" y1="${highY}" x2="${x}" y2="${lowY}" stroke="${wickColor}" stroke-width="1" />
+                    <line x1="${x}" y1="${highY}" x2="${x}" y2="${lowY}" stroke="#cbd5e1" stroke-width="1" />
                     <rect x="${x - candleWidth / 2}" y="${bodyTop}" width="${candleWidth}" height="${bodyHeight}" fill="${bodyColor}" opacity="0.95" />
                 </g>`;
             })
@@ -1275,25 +1274,75 @@ export class Reports {
             ? xForIndex(determinationCutoffIndex)
             : null;
 
-        return `<svg class="candidate-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Candlestick chart with breakout candidate levels">
+        const exitTimestampMs = finalOutcome?.exitTimestamp != null
+            ? new Date(finalOutcome.exitTimestamp).getTime()
+            : Number.NaN;
+        const hasExitTimestamp = Number.isFinite(exitTimestampMs);
+        const closeIndexInChart = hasExitTimestamp
+            ? chartBars.findIndex((bar) => new Date(bar.timestamp).getTime() >= exitTimestampMs)
+            : -1;
+        const xClose = hasExitTimestamp
+            ? xForIndex(Math.min(Math.max(closeIndexInChart >= 0 ? closeIndexInChart : chartBars.length - 1, 0), chartBars.length - 1))
+            : null;
+
+        const labelBaseY = margin.top + plotHeight + 8;
+        const timeLabelY = margin.top + plotHeight + 20;
+        const legendY = margin.top + plotHeight + 34;
+        const legendStartX = margin.left + 4;
+
+        const yEntry = trade != null && Number.isFinite(trade.price) ? yForPrice(trade.price) : null;
+        const xEntryForMarker = xDetermination ?? (chartBars.length > 0 ? xForIndex(0) : null);
+        const entryMarkerSvg = xEntryForMarker == null || yEntry == null
+            ? ""
+            : `<polygon points="${xEntryForMarker},${yEntry - 8} ${xEntryForMarker - 6},${yEntry + 4} ${xEntryForMarker + 6},${yEntry + 4}" fill="#38bdf8" stroke="#0ea5e9" stroke-width="1" />`;
+
+        const lineLegendItems: ReadonlyArray<{ label: string; color: string; dash: string }> = [
+            { label: "OR High/Low", color: "#facc15", dash: "4 4" },
+            { label: "Stop", color: "#f97316", dash: "6 3" },
+            { label: "Target", color: "#22c55e", dash: "6 3" },
+            ...(finalOutcome?.exitPrice != null
+                ? [{ label: "Close", color: "#a78bfa", dash: "2 3" }]
+                : []),
+        ];
+        const entryLegendX = legendStartX;
+        const lineLegendStartX = legendStartX + 132;
+        const legendSvg = [
+            `<g>
+                <polygon points="${entryLegendX + 10},${legendY - 7} ${entryLegendX + 4},${legendY + 5} ${entryLegendX + 16},${legendY + 5}" fill="#38bdf8" stroke="#0ea5e9" stroke-width="1" />
+                <text x="${entryLegendX + 24}" y="${legendY + 4}" fill="#cbd5e1" font-size="11">Entry triangle</text>
+            </g>`,
+            ...lineLegendItems.map((item, index) => {
+                const itemWidth = 126;
+                const x = lineLegendStartX + index * itemWidth;
+                return `<g>
+                <line x1="${x}" y1="${legendY}" x2="${x + 22}" y2="${legendY}" stroke="${item.color}" stroke-width="1.8" stroke-dasharray="${item.dash}" />
+                <text x="${x + 28}" y="${legendY + 4}" fill="#cbd5e1" font-size="11">${item.label}</text>
+            </g>`;
+            }),
+        ].join("");
+
+        return `<svg class="candidate-live-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Candlestick chart with breakout candidate levels">
             <rect x="0" y="0" width="${width}" height="${height}" fill="rgba(15,23,42,0.72)" rx="8" />
             <rect x="${margin.left}" y="${margin.top}" width="${plotWidth}" height="${plotHeight}" fill="rgba(15,23,42,0.48)" />
             <rect x="${xForIndex(openRangeStart)}" y="${margin.top}" width="${openingRangeShadeWidth}" height="${plotHeight}" fill="rgba(14,165,233,0.09)" />
             <line x1="${margin.left}" y1="${margin.top + plotHeight}" x2="${margin.left + plotWidth}" y2="${margin.top + plotHeight}" stroke="#475569" stroke-width="1" />
             <line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${margin.top + plotHeight}" stroke="#475569" stroke-width="1" />
             ${yTicks.map((tick) => `<g><line x1="${margin.left}" y1="${tick.y}" x2="${margin.left + plotWidth}" y2="${tick.y}" stroke="rgba(148,163,184,0.18)" /><text x="${margin.left - 8}" y="${tick.y + 4}" fill="#cbd5e1" font-size="11" text-anchor="end">${tick.label}</text></g>`).join("")}
-            ${xTicks.map((tick) => `<text x="${tick.x}" y="${height - 8}" fill="#cbd5e1" font-size="11" text-anchor="middle">${tick.label}</text>`).join("")}
+            ${xTicks.map((tick) => `<text x="${tick.x}" y="${timeLabelY}" fill="#cbd5e1" font-size="11" text-anchor="middle">${tick.label}</text>`).join("")}
             ${line(row.openingRangeHigh, "#facc15", "4 4")}
             ${line(row.openingRangeLow, "#facc15", "4 4")}
-            ${line(trade?.price, "#38bdf8", "3 3")}
             ${line(trade?.stopPrice, "#f97316", "6 3")}
             ${line(trade?.takeProfitPrice, "#22c55e", "6 3")}
             ${line(finalOutcome?.exitPrice ?? undefined, "#a78bfa", "2 3")}
             ${candlesSvg}
+            ${entryMarkerSvg}
             ${xDetermination != null ? `<line x1="${xDetermination}" y1="${margin.top}" x2="${xDetermination}" y2="${margin.top + plotHeight}" stroke="#60a5fa" stroke-width="1" stroke-dasharray="5 4" />` : ""}
-            ${postClosePathPoints ? `<polyline points="${postClosePathPoints}" fill="none" stroke="#60a5fa" stroke-width="1.8" />` : ""}
+            ${xClose != null ? `<line x1="${xClose}" y1="${margin.top}" x2="${xClose}" y2="${margin.top + plotHeight}" stroke="#a78bfa" stroke-width="1" stroke-dasharray="3 3" />` : ""}
+            ${postClosePathPoints ? `<polyline points="${postClosePathPoints}" fill="none" stroke="#60a5fa" stroke-width="1.7" />` : ""}
             <text x="${margin.left + 6}" y="${margin.top + 14}" fill="#94a3b8" font-size="11">OR window</text>
-            ${xDetermination != null ? `<text x="${xDetermination + 6}" y="${margin.top + 14}" fill="#93c5fd" font-size="11">Determination end</text>` : ""}
+            ${xDetermination != null ? `<text x="${xDetermination}" y="${labelBaseY}" fill="#93c5fd" font-size="11" text-anchor="start" transform="rotate(90 ${xDetermination} ${labelBaseY})">Determination end</text>` : ""}
+            ${xClose != null ? `<text x="${xClose}" y="${labelBaseY}" fill="#c4b5fd" font-size="11" text-anchor="start" transform="rotate(90 ${xClose} ${labelBaseY})">Trade close</text>` : ""}
+            ${legendSvg}
         </svg>`;
     }
 
