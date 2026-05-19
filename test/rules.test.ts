@@ -482,7 +482,7 @@ describe('Operational Rules support', () => {
 
         const output = writes.join('');
         expect(generatedDates).to.deep.equal(['2026-05-14', '2026-05-15']);
-        expect(output).to.include('__UI_STATUS__Determing open ranage.');
+        expect(output).to.include('__UI_STATUS__Determing open range.');
         expect(output).to.include('__UI_STATUS__High range prices: 101.00, Low range prices: 99.00.');
         expect(output).to.include('__UI_STATUS__Waiting for breakouts. Breakout candidate symbols: SPY, AAPL');
         expect(output).to.include('__UI_STATUS__Closing SPY for a profit of $8.00.');
@@ -553,7 +553,7 @@ describe('Operational Rules support', () => {
     });
 
     // Rules 8-9: Verifies that after the 15-minute opening-range window closes the app
-    // emits the opening-range completion status (__UI_STATUS__Determing open ranage.,
+    // emits the opening-range completion status (__UI_STATUS__Determing open range.,
     // __UI_STATUS__High range prices / Low range prices) and then appends the most-active
     // symbol list to the Waiting for breakouts message.
     it('rules 8-9: current-day mode emits opening-range and waiting-for-breakouts UI messages after the OR window completes', async () => {
@@ -585,7 +585,7 @@ describe('Operational Rules support', () => {
         await startApp();
 
         const output = writes.join('');
-        expect(output).to.include('__UI_STATUS__Determing open ranage.');
+        expect(output).to.include('__UI_STATUS__Determing open range.');
         expect(output).to.include('__UI_STATUS__High range prices: 101.00, Low range prices: 99.00.');
         expect(output).to.include('__UI_STATUS__Waiting for breakouts. Breakout candidate symbols: SPY, QQQ');
     });

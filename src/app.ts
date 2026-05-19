@@ -105,7 +105,7 @@ async function emitWaitingForBreakoutsUiStatus(client: AlpacaClient) {
 }
 
 async function emitOpeningRangeUiStatusForSession(client: AlpacaClient, sessionDate: string) {
-    emitUiStatusEvent({ message: 'Determing open ranage.' });
+    emitUiStatusEvent({ message: 'Determing open range.' });
 
     try {
         const bars = await client.getIntradayBars(strategyConfig.symbol, sessionDate);
@@ -905,7 +905,7 @@ export async function startApp(options?: StartAppOptions) {
                 logger.info('Waiting for market open', { sessionDate, currentTime: nyNow.hhmm });
             } else if (currentMinutes < marketCloseMinutes) {
                 if (currentMinutes < openingRangeEndMinutes) {
-                    emitUiStatusEvent({ message: 'Determing open ranage.' });
+                    emitUiStatusEvent({ message: 'Determing open range.' });
                 } else if (!reportedOpeningRangeByDate.has(sessionDate)) {
                     try {
                         await emitOpeningRangeUiStatusForSession(client, sessionDate);
