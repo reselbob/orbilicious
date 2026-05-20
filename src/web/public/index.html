@@ -459,35 +459,58 @@
                                                     Status</button>
                                             </div>
 
-                                            <div class="mb-3">
-                                                <div class="help-label-row mb-1">
-                                                    <label class="form-label mb-0" for="sessionMode">Session
-                                                        mode</label>
-                                                    <button class="btn btn-outline-secondary field-help-btn"
-                                                        type="button" data-help-key="sessionMode"
-                                                        aria-label="Help for Session mode"
-                                                        title="Help for Session mode">?</button>
-                                                </div>
-                                                <select id="sessionMode" class="form-select">
-                                                    <option value="EMULATION" selected>EMULATION</option>
-                                                    <option value="PAPER">PAPER</option>
-                                                    <option value="LIVE">LIVE</option>
-                                                </select>
-                                            </div>
+                                            <div class="row g-3 mb-3">
+                                                <div class="col-12 col-lg-6">
+                                                    <div class="mb-3">
+                                                        <div class="help-label-row mb-1">
+                                                            <label class="form-label mb-0" for="sessionMode">Session
+                                                                mode</label>
+                                                            <button class="btn btn-outline-secondary field-help-btn"
+                                                                type="button" data-help-key="sessionMode"
+                                                                aria-label="Help for Session mode"
+                                                                title="Help for Session mode">?</button>
+                                                        </div>
+                                                        <select id="sessionMode" class="form-select">
+                                                            <option value="EMULATION" selected>EMULATION</option>
+                                                            <option value="PAPER">PAPER</option>
+                                                            <option value="LIVE">LIVE</option>
+                                                        </select>
+                                                    </div>
 
-                                            <div id="emulationDateGroup" class="mb-3">
-                                                <div class="help-label-row mb-1">
-                                                    <label class="form-label mb-0" for="emulationDate">Emulation session
-                                                        date</label>
-                                                    <button class="btn btn-outline-secondary field-help-btn"
-                                                        type="button" data-help-key="emulationDate"
-                                                        aria-label="Help for Emulation session date"
-                                                        title="Help for Emulation session date">?</button>
+                                                    <div id="emulationDateGroup" class="mb-0">
+                                                        <div class="help-label-row mb-1">
+                                                            <label class="form-label mb-0" for="emulationDate">Emulation
+                                                                session date</label>
+                                                            <button class="btn btn-outline-secondary field-help-btn"
+                                                                type="button" data-help-key="emulationDate"
+                                                                aria-label="Help for Emulation session date"
+                                                                title="Help for Emulation session date">?</button>
+                                                        </div>
+                                                        <input id="emulationDate" type="date" class="form-control" />
+                                                        <div class="form-text">Choose a current or past trading day for
+                                                            historical EMULATION runs.</div>
+                                                    </div>
                                                 </div>
-                                                <input id="emulationDate" type="date" class="form-control" />
-                                                <div class="form-text">Choose a current or past trading day for
-                                                    historical
-                                                    EMULATION runs.
+
+                                                <div class="col-12 col-lg-6">
+                                                    <div class="mb-0">
+                                                        <div class="d-flex align-items-center gap-2 mb-1 flex-wrap">
+                                                            <span class="help-label-row">
+                                                                <label class="form-label mb-0"
+                                                                    for="mostActiveSymbolLimit">Most active stocks to
+                                                                    scan</label>
+                                                                <button class="btn btn-outline-secondary field-help-btn"
+                                                                    type="button" data-help-key="mostActiveSymbolLimit"
+                                                                    aria-label="Help for most active stocks to scan"
+                                                                    title="Help for most active stocks to scan">?</button>
+                                                            </span>
+                                                            <input id="mostActiveSymbolLimit" type="number"
+                                                                class="form-control form-control-sm" min="1" max="200"
+                                                                step="1" value="40" style="width: 90px;" />
+                                                        </div>
+                                                        <div class="form-text">Controls how many most-active symbols are
+                                                            retrieved before breakout candidate discovery begins.</div>
+                                                    </div>
                                                 </div>
                                             </div>
 
@@ -502,9 +525,19 @@
 
                                         <div class="col-12 col-xl-5">
                                             <div class="border rounded p-3 h-100">
-                                                <div class="help-label-row mb-2">
+
+                                                <div class="help-label-row mb-2 d-flex align-items-center gap-2">
                                                     <span class="help-field-title">Breakout Confirmation and Quality
                                                         Filters</span>
+                                                    <button id="maximizeProfitBtn" type="button"
+                                                        class="btn btn-success btn-sm ms-2"
+                                                        title="Set all filters for maximum profit probability">
+                                                        Maximize Profit
+                                                    </button>
+                                                    <button class="btn btn-outline-secondary field-help-btn btn-sm"
+                                                        type="button" data-help-key="maximizeProfit"
+                                                        aria-label="Help for Maximize Profit"
+                                                        title="Help for Maximize Profit">?</button>
                                                 </div>
 
                                                 <div class="row g-2 align-items-end mb-2">
@@ -937,6 +970,8 @@
                     <dd id="confirmSessionMode">-</dd>
                     <dt>Emulation date</dt>
                     <dd id="confirmEmulationDate">-</dd>
+                    <dt>Most active stocks to scan</dt>
+                    <dd id="confirmMostActiveSymbolLimit">-</dd>
                     <dt>Continuous mode</dt>
                     <dd id="confirmContinuousMode">-</dd>
                     <dt>Breakout candidate trade type</dt>

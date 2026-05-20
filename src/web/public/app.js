@@ -1,3 +1,27 @@
+// Optimal/max-profit settings for breakout confirmation and quality filters
+const MAX_PROFIT_FILTERS = {
+    breakoutConfirmationCandleMinutes: 5,
+    breakoutQualityFiltersEnabled: true,
+    breakoutMinVolumeExpansion: 1.1,
+    breakoutMinRelativeStrengthPct: 0.15,
+    breakoutTrendTimeframeMinutes: 5,
+    breakoutTrendLookbackBars: 3,
+};
+
+function setMaximizeProfitFilters() {
+    breakoutConfirmationCandleMinutesInput.value = MAX_PROFIT_FILTERS.breakoutConfirmationCandleMinutes;
+    breakoutQualityFiltersEnabledInput.checked = MAX_PROFIT_FILTERS.breakoutQualityFiltersEnabled;
+    breakoutMinVolumeExpansionInput.value = MAX_PROFIT_FILTERS.breakoutMinVolumeExpansion;
+    breakoutMinRelativeStrengthPctInput.value = MAX_PROFIT_FILTERS.breakoutMinRelativeStrengthPct;
+    breakoutTrendTimeframeMinutesInput.value = MAX_PROFIT_FILTERS.breakoutTrendTimeframeMinutes;
+    breakoutTrendLookbackBarsInput.value = MAX_PROFIT_FILTERS.breakoutTrendLookbackBars;
+    applyBreakoutQualityInputsEnabled();
+}
+
+const maximizeProfitBtn = document.getElementById('maximizeProfitBtn');
+if (maximizeProfitBtn) {
+    maximizeProfitBtn.addEventListener('click', setMaximizeProfitFilters);
+}
 const statusBox = document.getElementById('statusBox');
 const startBtn = document.getElementById('startBtn');
 const stopBtn = document.getElementById('stopBtn');
@@ -9,6 +33,7 @@ const realTimeDataFeedError = document.getElementById('realTimeDataFeedError');
 const sessionMode = document.getElementById('sessionMode');
 const emulationDateGroup = document.getElementById('emulationDateGroup');
 const emulationDateInput = document.getElementById('emulationDate');
+const mostActiveSymbolLimitInput = document.getElementById('mostActiveSymbolLimit');
 const liveEmulationWarning = document.getElementById('liveEmulationWarning');
 const liveEmulationWarningText = document.getElementById('liveEmulationWarningText');
 const reportSelect = document.getElementById('reportSelect');
@@ -48,6 +73,7 @@ const confirmStartBtn = document.getElementById('confirmStartBtn');
 const cancelStartBtn = document.getElementById('cancelStartBtn');
 const confirmSessionMode = document.getElementById('confirmSessionMode');
 const confirmEmulationDate = document.getElementById('confirmEmulationDate');
+const confirmMostActiveSymbolLimit = document.getElementById('confirmMostActiveSymbolLimit');
 const confirmContinuousMode = document.getElementById('confirmContinuousMode');
 const confirmCandidateTradeType = document.getElementById('confirmCandidateTradeType');
 const confirmMoneyInAccount = document.getElementById('confirmMoneyInAccount');
@@ -84,6 +110,11 @@ let activeTradeChartAnchor = null;
 let activeTradeChartKey = '';
 
 const fieldHelpContent = {
+    maximizeProfit: {
+        title: 'Maximize Profit',
+        subtitle: 'Set optimal filter values for profit',
+        text: 'Clicking this button automatically adjusts all Breakout Confirmation and Quality Filters to values that maximize the probability of capturing the largest possible profits, based on historical analysis and best practices. You can further fine-tune these values if desired before starting ORBilicious.',
+    },
     sessionMode: {
         title: 'Session mode',
         subtitle: 'Choose how ORBilicious should run.',
@@ -93,6 +124,11 @@ const fieldHelpContent = {
         title: 'Emulation session date',
         subtitle: 'Select the trading day to replay.',
         text: 'Use a current or past New York trading session when running historical emulation. The app will replay that session’s breakout logic and trade management against historical data.',
+    },
+    mostActiveSymbolLimit: {
+        title: 'Most active stocks to scan',
+        subtitle: 'Set universe size before candidate discovery.',
+        text: 'This sets how many most-active symbols are retrieved before breakout candidates are evaluated. Higher values broaden the universe but increase scan time.',
     },
     continuousMode: {
         title: 'Continuous mode',
@@ -723,6 +759,7 @@ function showStartConfirmationPane() {
     const moneyInAccount = getMoneyInAccount();
     const maxRiskPerSession = getMaxRiskPerSession();
     const stopProfitRatio = getStopProfitRatio();
+    const mostActiveSymbolLimit = getMostActiveSymbolLimit();
     const breakoutConfirmationCandleMinutes = getBreakoutConfirmationCandleMinutes();
     const breakoutQualityFiltersEnabled = getBreakoutQualityFiltersEnabled();
     const breakoutMinVolumeExpansion = getBreakoutMinVolumeExpansion();
@@ -732,6 +769,7 @@ function showStartConfirmationPane() {
 
     confirmSessionMode.textContent = session;
     confirmEmulationDate.textContent = emulationDate;
+    confirmMostActiveSymbolLimit.textContent = String(mostActiveSymbolLimit);
     confirmContinuousMode.textContent = continuous;
     confirmCandidateTradeType.textContent = candidateTradeTypeLabel;
     confirmMoneyInAccount.textContent = formatCurrency(moneyInAccount);
@@ -796,6 +834,9 @@ function syncDropdownsFromServer(payload) {
     if (typeof payload.breakoutConfirmationCandleMinutes === 'number') {
         breakoutConfirmationCandleMinutesInput.value = String(payload.breakoutConfirmationCandleMinutes);
     }
+    if (typeof payload.mostActiveSymbolLimit === 'number') {
+        mostActiveSymbolLimitInput.value = String(payload.mostActiveSymbolLimit);
+    }
     if (typeof payload.breakoutQualityFiltersEnabled === 'boolean') {
         breakoutQualityFiltersEnabledInput.checked = payload.breakoutQualityFiltersEnabled;
     }
@@ -857,6 +898,7 @@ async function submitStartOrbilicious() {
                 realTimeData: realTimeDataFeed.checked,
                 sessionMode: sessionMode.value,
                 emulationSessionDate: isEmulationMode() ? emulationDateInput.value : undefined,
+                mostActiveSymbolLimit: getMostActiveSymbolLimit(),
                 candidateTradeType: candidateTradeType.value,
                 moneyInAccount: getMoneyInAccount(),
                 maxRiskPerSession: getMaxRiskPerSession(),
@@ -1155,6 +1197,10 @@ function getMaxRiskPerSession() {
 function getStopProfitRatio() {
     const value = stopProfitRatioSpinner.value ? parseFloat(stopProfitRatioSpinner.value) : 4;
     return Math.max(1, Math.min(20, value));
+}
+
+function getMostActiveSymbolLimit() {
+    return Math.floor(clampNumber(mostActiveSymbolLimitInput.value, 40, 1, 200));
 }
 
 function getBreakoutConfirmationCandleMinutes() {

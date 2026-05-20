@@ -90,17 +90,26 @@ class StubAlpacaClient extends AlpacaClient {
 describe('service layer', () => {
     it('delegates trading cycle execution to injected runner', async () => {
         const client = new StubAlpacaClient();
-        const runnerCalls: Array<{ client: AlpacaClient; sessionDate: string }> = [];
-        const runner = async (runnerClient: AlpacaClient, sessionDate: string) => {
-            runnerCalls.push({ client: runnerClient, sessionDate });
+        const runnerCalls: Array<{
+            client: AlpacaClient;
+            sessionDate: string;
+            options?: { mostActiveSymbolLimit?: number };
+        }> = [];
+        const runner = async (
+            runnerClient: AlpacaClient,
+            sessionDate: string,
+            options?: { mostActiveSymbolLimit?: number },
+        ) => {
+            runnerCalls.push({ client: runnerClient, sessionDate, options });
         };
 
         const service = new OrbService(client, runner);
-        await service.runTradingCycle('2099-01-07');
+        await service.runTradingCycle('2099-01-07', { mostActiveSymbolLimit: 55 });
 
         expect(runnerCalls).to.have.length(1);
         expect(runnerCalls[0].client).to.equal(client);
         expect(runnerCalls[0].sessionDate).to.equal('2099-01-07');
+        expect(runnerCalls[0].options).to.deep.equal({ mostActiveSymbolLimit: 55 });
     });
 
     it('delegates daily report generation to AlpacaClient', async () => {

@@ -694,12 +694,17 @@ async function evaluateSymbol(
 
 export async function findBreakoutCandidates(
     client: AlpacaClient,
-    sessionDate: string
+    sessionDate: string,
+    options?: { mostActiveSymbolLimit?: number },
 ): Promise<BreakoutCandidate[]> {
-    const symbols = await client.getMostActiveSymbols(env.quantityToRetrieve);
+    const configuredLimit = options?.mostActiveSymbolLimit;
+    const quantityToRetrieve = Number.isFinite(configuredLimit)
+        ? Math.floor(Math.max(1, configuredLimit as number))
+        : env.quantityToRetrieve;
+    const symbols = await client.getMostActiveSymbols(quantityToRetrieve);
     logger.info('Evaluating most active symbols', {
         sessionDate,
-        quantityToRetrieve: env.quantityToRetrieve,
+        quantityToRetrieve,
         retrievedCount: symbols.length,
         symbols,
     });
@@ -825,7 +830,11 @@ export async function executeSizedTrades(
     });
 }
 
-export async function runCycle(client: AlpacaClient, sessionDate: string) {
+export async function runCycle(
+    client: AlpacaClient,
+    sessionDate: string,
+    options?: { mostActiveSymbolLimit?: number },
+) {
     logger.info('Starting run cycle', { sessionDate });
 
     const account = await client.getAccount();
@@ -835,7 +844,7 @@ export async function runCycle(client: AlpacaClient, sessionDate: string) {
         return;
     }
 
-    const candidates = await findBreakoutCandidates(client, sessionDate);
+    const candidates = await findBreakoutCandidates(client, sessionDate, options);
     const { longs, shorts } = rankAndSelectCandidates(candidates, env.maxPositionsPerSide);
     const selected = [...longs, ...shorts];
     const effectiveBuyingPower = Math.min(account.buyingPower, env.hardBasketCap);

@@ -25,6 +25,7 @@ type AppState = {
     moneyInAccount: number | null;
     maxRiskPerSession: number | null;
     stopProfitRewardPart: number | null;
+    mostActiveSymbolLimit: number;
     backtestProgress: {
         startSessionDate: string;
         endSessionDate: string;
@@ -55,6 +56,7 @@ type StartRequest = {
     moneyInAccount?: number;
     maxRiskPerSession?: number;
     stopProfitRewardPart?: number;
+    mostActiveSymbolLimit?: number;
     realTimeData?: boolean;
     candidateTradeType?: CandidateTradeType;
     breakoutConfirmationCandleMinutes?: number;
@@ -133,6 +135,7 @@ const appState: AppState = {
     moneyInAccount: null,
     maxRiskPerSession: null,
     stopProfitRewardPart: null,
+    mostActiveSymbolLimit: env.quantityToRetrieve,
     backtestProgress: null,
     pid: null,
     lastOutcome: 'never-started',
@@ -383,6 +386,7 @@ function startOrbiliciousProcess(params: {
     hardBasketCap?: number;
     maxTotalRisk?: number;
     stopProfitRewardPart?: number;
+    mostActiveSymbolLimit: number;
     realTimeData?: boolean;
     candidateTradeType: CandidateTradeType;
     breakoutConfirmationCandleMinutes: number;
@@ -399,6 +403,7 @@ function startOrbiliciousProcess(params: {
         hardBasketCap,
         maxTotalRisk,
         stopProfitRewardPart,
+        mostActiveSymbolLimit,
         realTimeData,
         candidateTradeType,
         breakoutConfirmationCandleMinutes,
@@ -478,6 +483,7 @@ function startOrbiliciousProcess(params: {
     appState.moneyInAccount = hardBasketCap ?? null;
     appState.maxRiskPerSession = maxTotalRisk ?? null;
     appState.stopProfitRewardPart = stopProfitRewardPart ?? null;
+    appState.mostActiveSymbolLimit = mostActiveSymbolLimit;
     appState.lastOutcome = 'running';
     appState.lastError = null;
     appState.realtimeDataFeed = realTimeData === true;
@@ -499,6 +505,7 @@ function startOrbiliciousProcess(params: {
             HARD_BASKET_CAP: hardBasketCap ? hardBasketCap.toString() : '',
             MAX_TOTAL_RISK: maxTotalRisk ? maxTotalRisk.toString() : '',
             STOP_LOSS_PROFIT_RATIO: stopProfitRewardPart ? `1:${stopProfitRewardPart}` : '',
+            QUANTITY_TO_RETRIEVE: String(mostActiveSymbolLimit),
             CANDIDATE_TRADE_TYPE: candidateTradeType,
             BREAKOUT_CONFIRMATION_CANDLE_MINUTES: String(breakoutConfirmationCandleMinutes),
             BREAKOUT_QUALITY_FILTERS_ENABLED: String(breakoutQualityFiltersEnabled),
@@ -516,7 +523,7 @@ function startOrbiliciousProcess(params: {
 
     addActivityLine(
         'system',
-        `Starting ORBilicious in ${sessionMode} mode${continuous ? ' (continuous)' : ''}${emulationSessionDate ? ` for ${emulationSessionDate}` : ''}${hardBasketCap ? ` | Basket Cap: $${hardBasketCap.toLocaleString()}` : ''}${maxTotalRisk ? ` | Max Risk: $${maxTotalRisk.toLocaleString()}` : ''}${stopProfitRewardPart ? ` | Stop/Profit: 1/${stopProfitRewardPart}` : ''} | Candidate Trades: ${candidateTradeType} | Confirm Candle: ${breakoutConfirmationCandleMinutes}m | Quality Filters: ${breakoutQualityFiltersEnabled ? 'on' : 'off'}`
+        `Starting ORBilicious in ${sessionMode} mode${continuous ? ' (continuous)' : ''}${emulationSessionDate ? ` for ${emulationSessionDate}` : ''}${hardBasketCap ? ` | Basket Cap: $${hardBasketCap.toLocaleString()}` : ''}${maxTotalRisk ? ` | Max Risk: $${maxTotalRisk.toLocaleString()}` : ''}${stopProfitRewardPart ? ` | Stop/Profit: 1/${stopProfitRewardPart}` : ''} | Most Active: ${mostActiveSymbolLimit} | Candidate Trades: ${candidateTradeType} | Confirm Candle: ${breakoutConfirmationCandleMinutes}m | Quality Filters: ${breakoutQualityFiltersEnabled ? 'on' : 'off'}`
     );
 
     wireProcessOutput('stdout', child.stdout);
@@ -1622,6 +1629,12 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
         const stopProfitRewardPart = typeof payload.stopProfitRewardPart === 'number' && payload.stopProfitRewardPart >= 1 && payload.stopProfitRewardPart <= 20
             ? payload.stopProfitRewardPart
             : undefined;
+        const mostActiveSymbolLimit = normalizedPositiveInteger(
+            payload.mostActiveSymbolLimit,
+            appState.mostActiveSymbolLimit,
+            1,
+            200,
+        );
         const candidateTradeType = normalizedCandidateTradeType(payload.candidateTradeType, env.candidateTradeType);
         const breakoutConfirmationCandleMinutes = normalizedPositiveInteger(
             payload.breakoutConfirmationCandleMinutes,
@@ -1672,6 +1685,7 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
             hardBasketCap,
             maxTotalRisk,
             stopProfitRewardPart,
+            mostActiveSymbolLimit,
             realTimeData,
             candidateTradeType,
             breakoutConfirmationCandleMinutes,

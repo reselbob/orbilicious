@@ -460,6 +460,7 @@ function makeHistoricalReport(sessionDate: string): OrbReportResult {
             confirmationRetestTimestamp: makeTimestamp(sessionDate, 9, 46),
             atr1m: 1,
             side: 'buy',
+            qualityDetail: null,
         }],
         breakoutCandidates: [],
         emulatedTrades: [{

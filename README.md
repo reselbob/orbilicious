@@ -19,13 +19,13 @@
 - [Notes](#notes)
 - [Recommended next upgrades](#recommended-next-upgrades)
 
-![ORBilicious Web Client running with live trade monitor and daily P/L summary](docs/orb-05-17-2026-01.png)
+![ORBilicious Dashboard with Maximize Profit feature](docs/orb-dashboard-latest.png)
 
 A complete Node + TypeScript starter project for a 15-minute Opening Range Breakout strategy on 1-minute bars with:
 
 - Alpaca market-data integration
 - Alpaca bracket-order execution
-- Top-40 most active universe scan
+- Configurable most-active universe scan (default 40)
 - Top-10 long and top-10 short candidate selection
 - Weighted total stop-risk sizing
 - Basket normalization to fit both total planned stop-loss risk and available buying power
@@ -34,7 +34,7 @@ A complete Node + TypeScript starter project for a 15-minute Opening Range Break
 
 ## Strategy rules
 
-- Universe: top 40 most active stocks.
+- Universe: configurable number of most-active stocks (default 40).
 - Opening range: 9:30 to 9:44 ET.
 - Entry confirmation: first 1-minute candle close above OR high for long, or below OR low for short.
 - Breakout close confirmation: by default the breakout close must occur on a 5-minute confirmation candle outside the opening range (not just a 1-minute spike).
@@ -64,7 +64,7 @@ The list below follows the order the app actually applies rules at runtime.
 8. During market hours, the first 15 minutes are treated as opening-range discovery time. The UI reports `Determing open range.` during that window.
 9. After the opening-range window completes, the app computes and publishes the opening-range high and low, then publishes `Waiting for breakouts` with the current most-active symbol list when available.
 10. Every active cycle starts by loading the Alpaca account. If `tradingBlocked` is true, the cycle stops immediately and no candidate evaluation or order logic runs.
-11. The candidate universe is the top `QUANTITY_TO_RETRIEVE` most-active symbols from Alpaca. The default is 40 symbols.
+11. The candidate universe is the top `QUANTITY_TO_RETRIEVE` most-active symbols from Alpaca. The default is 40 symbols, and the Web UI can override this per run using the "Most active stocks to scan" spinner.
 12. Candidate trade type filtering is applied next. If `CANDIDATE_TRADE_TYPE=LONG`, only breakout candidates with side `buy` are kept. If `CANDIDATE_TRADE_TYPE=SHORT`, only candidates with side `sell` are kept. If `CANDIDATE_TRADE_TYPE=LONG_AND_SHORT` (default), all candidates are kept.
 13. Each symbol is evaluated independently. If the account already has an open position in that symbol, the app switches from entry logic to profit-capture management instead of generating a new breakout candidate.
 14. Existing-position management follows this order: if the position has no entry price, it is skipped; if there are no session bars, it is skipped; if the current bar is earlier than `FORCE_EXIT_TIME`, it is skipped; at or after `FORCE_EXIT_TIME`, the position is only closed if the latest close is favorable relative to entry price, meaning `latestClose >= entryPrice` for longs or `latestClose <= entryPrice` for shorts.
@@ -164,6 +164,7 @@ This launches both the trading app and web server on port 8787 (or use `WEB_PORT
 
 - **Session mode**: Choose `EMULATION` (Alpaca data, no orders), `PAPER` (paper trading), or `LIVE` (live trading).
 - **Emulation session date**: For `EMULATION` mode, select a past trading day to run a historical backtest from that date forward.
+- **Most active stocks to scan**: Set how many most-active symbols are retrieved before breakout candidate discovery starts (default `40`).
 - **Continuous mode**: Run the strategy continuously (only available in `PAPER` and `LIVE` modes).
 - **Breakout Candidate Trade Type**: Filter which breakout directions are considered. Choose `Long` to accept only bullish breakouts, `Short` to accept only bearish breakouts, or `Both` (default) to accept either direction.
 - **Money in Account**: Total account capital available (default $25,000). Overrides `HARD_BASKET_CAP` env var.
@@ -205,6 +206,36 @@ Expected outcome: more candidates pass during broad directional moves, with a mo
 Configuration purpose: require stronger alignment so only the cleanest breakouts survive.
 Configuration: keep confirmation at `5`, raise Min Volume Expansion to `1.5`, raise Min Relative Strength to `0.35`, set Trend Timeframe to `15`, and Trend Lookback Bars to `4`.
 Expected outcome: candidate list shrinks meaningfully, entries align better with sustained trend context, and whipsaw exposure is reduced at the cost of fewer total trades.
+
+### Filter Attribution in Reports
+
+Every generated HTML report includes a **Filter Attribution** section that records the per-candidate quality-filter outcome for each symbol that produced a valid breakout bar and a confirmation retest during the session. This section is designed to support ongoing attribution analysis so you can tune filter settings over time with real data instead of intuition alone.
+
+Each row in the table shows:
+
+| Column | Description |
+|---|---|
+| **Symbol** | The evaluated ticker. |
+| **Side** | Breakout direction (`buy` or `sell`). |
+| **Result** | `PASS` if the candidate survived all quality checks; `FAIL` otherwise. |
+| **Vol Expansion** | Measured breakout-candle volume divided by prior confirmation-candle average, alongside the configured minimum. |
+| **VE ✓/✗** | Whether the volume expansion check passed. |
+| **Rel Strength** | Measured close-to-OR-boundary move as a percentage, alongside the configured minimum. |
+| **RS ✓/✗** | Whether the relative strength check passed. |
+| **Trend** | Whether the higher-timeframe close and slope were aligned with the breakout direction. |
+| **TR ✓/✗** | Whether the trend alignment check passed. |
+| **Notes** | Any skip reason or multi-filter fail details. When quality filters are globally disabled the row shows `filters off`. |
+
+When quality filters are disabled (`BREAKOUT_QUALITY_FILTERS_ENABLED=false`), all candidates automatically pass and the individual check columns show `n/a`. The table is still populated so you can see the full breakout universe considered for each session.
+
+Rows are sorted with passing candidates first. The interactive drilldown cards in the dark-mode HTML report also include a **Quality Filters** sub-table showing the same per-filter detail inline with the chart and trade data.
+
+To use this data for attribution analysis:
+
+1. Run emulation across several historical sessions using your current filter settings.
+2. Open the HTML reports and compare the **Filter Attribution** table against the **Breakout Candidates** trade outcomes.
+3. Look for patterns: symbols that failed a specific check but would have been profitable, or symbols that passed all checks but still lost.
+4. Adjust one filter threshold at a time and re-run the same sessions to measure the change in both candidate count and P/L distribution.
 
 ### Trade Monitor
 
@@ -267,7 +298,7 @@ The app reads configuration from `.env` (via `dotenv`) and supports the followin
 | `OPENING_RANGE_MINUTES` | No | `15` | Number of minutes used to build the opening range window. |
 | `POLL_INTERVAL_SECONDS` | No | `20` | Wait interval between live loop cycles. |
 | `QTY` | No | `1` | Baseline strategy quantity field in config. Not used by weighted basket sizing path. |
-| `QUANTITY_TO_RETRIEVE` | No | `40` | Number of most-active symbols to request from Alpaca for candidate generation. |
+| `QUANTITY_TO_RETRIEVE` | No | `40` | Number of most-active symbols to request from Alpaca for candidate generation. In Web UI runs, this is overridden by the Most active stocks to scan control when provided. |
 | `SESSION_DATE` | No | Empty | Session date (`YYYY-MM-DD`). If set, app runs a one-shot historical report for that date and exits; if empty, app runs current-day live scheduling and generates end-of-day report(s). |
 | `SESSION_MODE` | No | `EMULATION` | Execution mode: `EMULATION` (Alpaca data, no order submission), `PAPER` (Alpaca paper trading), `LIVE` (Alpaca live trading). |
 | `STOP_LOSS_PROFIT_RATIO` | No | `1:4` | Risk/reward ratio in `risk:reward` format. Example `1:2` gives a 2R target. |

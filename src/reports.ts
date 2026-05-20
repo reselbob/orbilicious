@@ -33,6 +33,35 @@ export type AtrBreakoutCandidate = BreakoutCandidate & {
     atr1m: number;
 };
 
+export type BreakoutQualityDetail = {
+    /** Whether quality filters were globally enabled for this run. */
+    filtersEnabled: boolean;
+    /** Measured volume expansion ratio on the breakout candle vs prior confirmation candles. */
+    volumeExpansion: number | null;
+    /** Configured minimum volume expansion threshold. */
+    minVolumeExpansion: number;
+    /** Whether the volume expansion check passed (or was skipped). */
+    volumeExpansionPassed: boolean;
+    /** Measured relative-strength % beyond OR high (longs) or below OR low (shorts). */
+    relativeStrengthPct: number | null;
+    /** Configured minimum relative strength threshold. */
+    minRelativeStrengthPct: number;
+    /** Whether the relative strength check passed (or was skipped). */
+    relativeStrengthPassed: boolean;
+    /** Whether the higher-timeframe trend was aligned with the breakout direction. */
+    trendAligned: boolean | null;
+    /** Configured trend timeframe in minutes. */
+    trendTimeframeMinutes: number;
+    /** Configured number of lookback bars for trend. */
+    trendLookbackBars: number;
+    /** Whether the trend alignment check passed (or was skipped). */
+    trendAlignmentPassed: boolean;
+    /** Top-level result: true if all enabled checks passed. */
+    passed: boolean;
+    /** Reason the check was skipped or failed, if applicable. */
+    failReason: string | null;
+};
+
 export type OrbEvaluationRow = {
     symbol: string;
     openingPrice: number;
@@ -44,6 +73,8 @@ export type OrbEvaluationRow = {
     confirmationRetestTimestamp: string | null;
     atr1m: number | null;
     side: "buy" | "sell" | "none";
+    /** Per-candidate quality-filter attribution detail. Null when no breakout was detected. */
+    qualityDetail: BreakoutQualityDetail | null;
 };
 
 export type OrbReportResult = {
@@ -401,13 +432,14 @@ export class Reports {
                     : null,
                 atr1m: atr1m ? Number(atr1m.toFixed(4)) : null,
                 side,
+                qualityDetail: null,
             });
 
             if (side === "none" || !confirmationRetestBar || !atr1m || !breakoutBar) {
                 continue;
             }
 
-            if (!Reports.passesBreakoutQualityFilters({
+            const qualityDetail = Reports.evaluateBreakoutQuality({
                 sessionBars,
                 sessionDate,
                 side,
@@ -415,7 +447,12 @@ export class Reports {
                 openingRangeHigh,
                 openingRangeLow,
                 confirmationBars,
-            })) {
+            });
+
+            // Attach the quality detail to the evaluation row we just pushed.
+            evaluationRows[evaluationRows.length - 1].qualityDetail = qualityDetail;
+
+            if (!qualityDetail.passed) {
                 continue;
             }
 
@@ -1052,7 +1089,7 @@ export class Reports {
         return p.hour * 60 + p.minute - sessionOpenMinutes;
     }
 
-    private static passesBreakoutQualityFilters(params: {
+    private static evaluateBreakoutQuality(params: {
         sessionBars: Bar[];
         sessionDate: string;
         side: "buy" | "sell";
@@ -1060,7 +1097,7 @@ export class Reports {
         openingRangeHigh: number;
         openingRangeLow: number;
         confirmationBars: Bar[];
-    }): boolean {
+    }): BreakoutQualityDetail {
         const {
             sessionBars,
             sessionDate,
@@ -1071,8 +1108,29 @@ export class Reports {
             confirmationBars,
         } = params;
 
+        const baseDetail: Omit<BreakoutQualityDetail, "passed" | "failReason"> = {
+            filtersEnabled: env.breakoutQualityFiltersEnabled,
+            volumeExpansion: null,
+            minVolumeExpansion: env.breakoutMinVolumeExpansion,
+            volumeExpansionPassed: false,
+            relativeStrengthPct: null,
+            minRelativeStrengthPct: env.breakoutMinRelativeStrengthPct,
+            relativeStrengthPassed: false,
+            trendAligned: null,
+            trendTimeframeMinutes: env.breakoutTrendTimeframeMinutes,
+            trendLookbackBars: env.breakoutTrendLookbackBars,
+            trendAlignmentPassed: false,
+        };
+
         if (!env.breakoutQualityFiltersEnabled) {
-            return true;
+            return {
+                ...baseDetail,
+                volumeExpansionPassed: true,
+                relativeStrengthPassed: true,
+                trendAlignmentPassed: true,
+                passed: true,
+                failReason: null,
+            };
         }
 
         const priorConfirmationBars = confirmationBars.filter(
@@ -1081,7 +1139,11 @@ export class Reports {
                 new Date(breakoutBar.timestamp).getTime(),
         );
         if (!priorConfirmationBars.length) {
-            return false;
+            return {
+                ...baseDetail,
+                passed: false,
+                failReason: "no prior confirmation bars to measure volume expansion",
+            };
         }
 
         const averagePriorVolume =
@@ -1090,11 +1152,13 @@ export class Reports {
         const volumeExpansion = averagePriorVolume > 0
             ? breakoutBar.volume / averagePriorVolume
             : 0;
+        const volumeExpansionPassed = volumeExpansion >= env.breakoutMinVolumeExpansion;
 
         const relativeStrengthPct =
             side === "buy"
                 ? ((breakoutBar.close - openingRangeHigh) / openingRangeHigh) * 100
                 : ((openingRangeLow - breakoutBar.close) / openingRangeLow) * 100;
+        const relativeStrengthPassed = relativeStrengthPct >= env.breakoutMinRelativeStrengthPct;
 
         const trendBars = Reports.aggregateBarsByMinutes(
             sessionBars,
@@ -1109,7 +1173,21 @@ export class Reports {
         const trendWindowSize = Math.max(2, Math.floor(env.breakoutTrendLookbackBars) + 1);
         const trendWindow = trendBars.slice(-trendWindowSize);
         if (trendWindow.length < trendWindowSize) {
-            return false;
+            const failReasons: string[] = [];
+            if (!volumeExpansionPassed) failReasons.push(`vol exp ${volumeExpansion.toFixed(2)} < ${env.breakoutMinVolumeExpansion}`);
+            if (!relativeStrengthPassed) failReasons.push(`rel str ${relativeStrengthPct.toFixed(2)}% < ${env.breakoutMinRelativeStrengthPct}%`);
+            failReasons.push("insufficient trend bars");
+            return {
+                ...baseDetail,
+                volumeExpansion: Number(volumeExpansion.toFixed(4)),
+                volumeExpansionPassed,
+                relativeStrengthPct: Number(relativeStrengthPct.toFixed(4)),
+                relativeStrengthPassed,
+                trendAligned: null,
+                trendAlignmentPassed: false,
+                passed: false,
+                failReason: failReasons.join("; "),
+            };
         }
 
         const priorTrendBars = trendWindow.slice(0, -1);
@@ -1122,12 +1200,25 @@ export class Reports {
             side === "buy"
                 ? breakoutBar.close > trendSma && trendSlope > 0
                 : breakoutBar.close < trendSma && trendSlope < 0;
+        const trendAlignmentPassed = trendAligned;
 
-        return (
-            volumeExpansion >= env.breakoutMinVolumeExpansion
-            && relativeStrengthPct >= env.breakoutMinRelativeStrengthPct
-            && trendAligned
-        );
+        const passed = volumeExpansionPassed && relativeStrengthPassed && trendAlignmentPassed;
+        const failReasons: string[] = [];
+        if (!volumeExpansionPassed) failReasons.push(`vol exp ${volumeExpansion.toFixed(2)} < ${env.breakoutMinVolumeExpansion}`);
+        if (!relativeStrengthPassed) failReasons.push(`rel str ${relativeStrengthPct.toFixed(2)}% < ${env.breakoutMinRelativeStrengthPct}%`);
+        if (!trendAlignmentPassed) failReasons.push("trend not aligned");
+
+        return {
+            ...baseDetail,
+            volumeExpansion: Number(volumeExpansion.toFixed(4)),
+            volumeExpansionPassed,
+            relativeStrengthPct: Number(relativeStrengthPct.toFixed(4)),
+            relativeStrengthPassed,
+            trendAligned,
+            trendAlignmentPassed,
+            passed,
+            failReason: failReasons.length > 0 ? failReasons.join("; ") : null,
+        };
     }
 
     private static formatNyTime(timestamp: string | null): string {
@@ -1513,6 +1604,59 @@ export class Reports {
             )
             .join("");
 
+        // Rows for every symbol that reached breakout+retest evaluation (side !== "none"
+        // and a breakout bar was found), sorted: passed first, then failed/skipped.
+        const filterAttributionRows = evaluationRows
+            .filter((row) => row.qualityDetail !== null)
+            .sort((a, b) => {
+                const ap = a.qualityDetail!.passed ? 0 : 1;
+                const bp = b.qualityDetail!.passed ? 0 : 1;
+                return ap - bp;
+            });
+
+        const passIcon = "&#10003;"; // ✓
+        const failIcon = "&#10007;"; // ✗
+        const naLabel = "n/a";
+
+        const filterAttributionRowsHtml = filterAttributionRows
+            .map((row) => {
+                const d = row.qualityDetail!;
+                const rowClass = d.passed ? "filter-pass" : "filter-fail";
+                const filtersNote = !d.filtersEnabled ? "<em>filters off</em>" : (d.failReason ?? "");
+                const volCell = d.volumeExpansion !== null
+                    ? `${d.volumeExpansion.toFixed(2)} (min ${d.minVolumeExpansion})`
+                    : naLabel;
+                const volPass = d.filtersEnabled
+                    ? (d.volumeExpansionPassed ? passIcon : failIcon)
+                    : naLabel;
+                const rsCell = d.relativeStrengthPct !== null
+                    ? `${d.relativeStrengthPct.toFixed(2)}% (min ${d.minRelativeStrengthPct}%)`
+                    : naLabel;
+                const rsPass = d.filtersEnabled
+                    ? (d.relativeStrengthPassed ? passIcon : failIcon)
+                    : naLabel;
+                const trendCell = d.trendAligned !== null
+                    ? (d.trendAligned ? "aligned" : "diverged")
+                    : naLabel;
+                const trendPass = d.filtersEnabled
+                    ? (d.trendAlignmentPassed ? passIcon : failIcon)
+                    : naLabel;
+                return `
+                <tr class="${rowClass}">
+                    <td>${Reports.escapeHtml(row.symbol)}</td>
+                    <td>${Reports.escapeHtml(row.side)}</td>
+                    <td>${d.passed ? "PASS" : "FAIL"}</td>
+                    <td>${volCell}</td>
+                    <td>${volPass}</td>
+                    <td>${rsCell}</td>
+                    <td>${rsPass}</td>
+                    <td>${trendCell}</td>
+                    <td>${trendPass}</td>
+                    <td>${Reports.escapeHtml(filtersNote)}</td>
+                </tr>`;
+            })
+            .join("");
+
         const emulatedTradeBySymbol = new Map(
             emulatedTrades.map((trade) => [trade.symbol, trade]),
         );
@@ -1623,6 +1767,20 @@ export class Reports {
                                 <tr><th>Target</th><td>${trade ? trade.takeProfitPrice.toFixed(2) : "n/a"}</td></tr>
                                 <tr><th>Exit Price</th><td>${exitPrice}</td></tr>
                                 <tr><th>Exit Type</th><td>${Reports.escapeHtml(exitType)}</td></tr>
+                                ${(() => {
+                                    const d = row?.qualityDetail;
+                                    if (!d) return "";
+                                    const p = (v: boolean | null, skip: boolean) =>
+                                        skip ? "n/a" : (v ? "&#10003;" : "&#10007;");
+                                    const skipped = !d.filtersEnabled;
+                                    return `
+                                <tr><th colspan="2" style="padding-top:10px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.6">Quality Filters</th></tr>
+                                <tr><th>Filters Enabled</th><td>${d.filtersEnabled ? "Yes" : "No"}</td></tr>
+                                <tr><th>Vol Expansion</th><td>${d.volumeExpansion !== null ? d.volumeExpansion.toFixed(2) : "n/a"} (min ${d.minVolumeExpansion}) ${p(d.volumeExpansionPassed, skipped)}</td></tr>
+                                <tr><th>Rel Strength</th><td>${d.relativeStrengthPct !== null ? d.relativeStrengthPct.toFixed(2) + "%" : "n/a"} (min ${d.minRelativeStrengthPct}%) ${p(d.relativeStrengthPassed, skipped)}</td></tr>
+                                <tr><th>Trend Alignment</th><td>${d.trendAligned !== null ? (d.trendAligned ? "aligned" : "diverged") : "n/a"} ${p(d.trendAlignmentPassed, skipped)}</td></tr>
+                                ${d.failReason ? `<tr><th>Fail Reason</th><td>${Reports.escapeHtml(d.failReason)}</td></tr>` : ""}`;
+                                })()}
                             </tbody>
                         </table>
                     </div>
@@ -2004,6 +2162,37 @@ export class Reports {
                 Symbols with fewer than 30 session bars: <strong>${insufficientSymbols.length}</strong>
                 <br />
                 ${Reports.escapeHtml(insufficientSymbols.length > 0 ? insufficientSymbols.join(", ") : "None")}
+            </div>
+        </section>
+
+        <section class="section">
+            <h2>Filter Attribution</h2>
+            <p class="section-copy">Per-candidate quality-filter pass/fail detail for every symbol that produced a breakout bar and a confirmation retest. Use this table to tune filter thresholds over time.</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Side</th>
+                        <th>Result</th>
+                        <th>Vol Expansion</th>
+                        <th>VE &#10003;/&#10007;</th>
+                        <th>Rel Strength</th>
+                        <th>RS &#10003;/&#10007;</th>
+                        <th>Trend</th>
+                        <th>TR &#10003;/&#10007;</th>
+                        <th>Notes</th>
+                    </tr>
+                </thead>
+                <tbody>${filterAttributionRowsHtml}</tbody>
+            </table>
+            <style>
+                tr.filter-pass td { color: var(--accent); }
+                tr.filter-fail td { color: var(--warn); }
+            </style>
+            <div class="note">
+                Only symbols that reached breakout-bar + confirmation-retest evaluation are shown here.
+                Symbols that never broke out of the opening range are omitted.
+                When quality filters are disabled, all rows show "PASS" and individual checks show "n/a".
             </div>
         </section>
     </main>
