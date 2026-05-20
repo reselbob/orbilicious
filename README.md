@@ -276,6 +276,25 @@ Expand the pane to scroll through historical days.
 
 ![Reports](docs/reports-detail.png)
 
+The **candlestick chart** plots 1-minute bars for the session with the opening-range window shaded. The legend identifies:
+
+- **OR High/Low** (yellow dashes) — the opening-range boundaries calculated from the first 15 minutes of trading
+- **Stop price** (orange dashes) — the stop-loss level set at the wick of the bar immediately before the breakout
+- **Profit target** (green dashes) — the 4R take-profit level based on the entry-to-stop distance
+- **Close price** (purple dashes) — the exit price of the trade
+- **Entry triangle** (blue) — marks the entry point at the confirmation retest close
+- **Determination line** (vertical blue dashed) — the point at which the breakout retest was confirmed
+
+Below the chart, each detail row lists:
+
+- **Symbol** — the ticker being evaluated
+- **Opening price** — the first traded price of the session
+- **OR High / OR Low** — the highest and lowest prices during the 15-minute opening range
+- **Breakout price / timestamp** — the price and time of the first confirmation-candle close outside the opening range
+- **Confirmation retest price / timestamp** — the price and time of the subsequent bar that traded back to the opening-range boundary and closed beyond it
+- **ATR** — the 14-bar average true range used for evaluating stop-distance viability
+- **Side** — whether the breakout was a buy (long) or sell (short) signal
+
 ## Environment variables
 
 The app reads configuration from `.env` (via `dotenv`) and supports the following variables.
