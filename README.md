@@ -272,6 +272,10 @@ Expand the pane to scroll through historical days.
 - **Refresh List**: Fetch latest reports from the `reports/` directory.
 - **Open Report**: Display the selected report in an embedded viewer.
 
+### Reports Detail
+
+![Reports](docs/reports-detail.png)
+
 ## Environment variables
 
 The app reads configuration from `.env` (via `dotenv`) and supports the following variables.
