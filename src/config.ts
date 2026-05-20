@@ -2,6 +2,8 @@ import 'dotenv/config';
 import { StrategyConfig } from './types';
 import { logger } from './logger';
 
+export const APP_VERSION = '0.0.8';
+
 type SessionMode = 'EMULATION' | 'PAPER' | 'LIVE';
 export type CandidateTradeType = 'LONG' | 'SHORT' | 'LONG_AND_SHORT';
 

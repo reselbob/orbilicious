@@ -3,7 +3,7 @@ import path from 'node:path';
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { spawn, ChildProcessWithoutNullStreams } from 'node:child_process';
 import puppeteer from 'puppeteer';
-import { env, strategyConfig } from '../config';
+import { env, strategyConfig, APP_VERSION } from '../config';
 import { logger } from '../logger';
 import { findLiquidityZonesForSymbol } from '../liquidity';
 import { OrbService } from '../services/orb-service';
@@ -1794,7 +1794,24 @@ function handlePublic(req: IncomingMessage, res: ServerResponse, pathname: strin
     sendFile(res, fullPath);
 }
 
+function stampHtmlVersion() {
+    try {
+        const htmlPath = path.resolve(publicDir, 'index.html');
+        let html = fs.readFileSync(htmlPath, 'utf-8');
+        const updated = html
+            .replace(/(<title>ORBilicious Control Panel<\/title>)/, `<title>ORBilicious Web Client ${APP_VERSION}</title>`)
+            .replace(/(<h1 class="h3 mb-1">ORBilicious Web Client<\/h1>)/, `<h1 class="h3 mb-1">ORBilicious Web Client ${APP_VERSION}</h1>`);
+        if (updated !== html) {
+            fs.writeFileSync(htmlPath, updated, 'utf-8');
+        }
+    } catch {
+        // Non-fatal.
+    }
+}
+
 export function startWebServer(port = DEFAULT_PORT) {
+    stampHtmlVersion();
+
     const server = createServer(async (req, res) => {
         if (!req.url) {
             sendJson(res, 400, { ok: false, message: 'Bad request' });
