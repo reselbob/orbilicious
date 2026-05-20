@@ -162,6 +162,8 @@ This launches both the trading app and web server on port 8787 (or use `WEB_PORT
 
 ### Runtime Controls
 
+![Runtime Controls](docs/runtime-controls.png)
+
 - **Session mode**: Choose `EMULATION` (Alpaca data, no orders), `PAPER` (paper trading), or `LIVE` (live trading).
 - **Emulation session date**: For `EMULATION` mode, select a past trading day to run a historical backtest from that date forward.
 - **Most active stocks to scan**: Set how many most-active symbols are retrieved before breakout candidate discovery starts (default `40`).
@@ -173,6 +175,8 @@ This launches both the trading app and web server on port 8787 (or use `WEB_PORT
 - **Backtest progress**: For historical runs, shows current date, total dates, and completion.
 
 ### How to use the Breakout Confirmation and Quality Filters
+
+![Breakout Confirmation and Quality Filters](docs/breakout-quality-filter.png)
 
 Use these controls together to reduce false breakouts while keeping enough opportunities for your session goals.
 
@@ -239,6 +243,8 @@ To use this data for attribution analysis:
 
 ### Trade Monitor
 
+![Trade Monitor](docs/trade-monitor.png)
+
 Live view of all executed entries and closes with:
 
 - **Date/Time**: When the trade entry or close occurred.
@@ -259,6 +265,8 @@ Aggregated profit/loss by trading day. Shows:
 Expand the pane to scroll through historical days.
 
 ### Reports
+
+![Reports](docs/reports.png)
 
 - **Select a report**: Choose from generated HTML or PDF reports.
 - **Refresh List**: Fetch latest reports from the `reports/` directory.
