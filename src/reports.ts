@@ -589,11 +589,10 @@ export class Reports {
             ],
         };
 
-        fs.writeFileSync(
-            Reports.dailySessionJsonPath(reportData.sessionDate),
-            `${JSON.stringify(record, null, 2)}\n`,
-            'utf8',
-        );
+        const targetPath = Reports.dailySessionJsonPath(reportData.sessionDate);
+        const tmpPath = `${targetPath}.tmp-${process.pid}-${Date.now()}`;
+        fs.writeFileSync(tmpPath, `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+        fs.renameSync(tmpPath, targetPath);
     }
 
     private static nyDateRangeInclusive(anchorDate: Date, currentDate: Date): string[] {

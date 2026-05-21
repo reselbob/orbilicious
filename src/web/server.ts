@@ -122,7 +122,13 @@ type CandidateChartCard = {
 };
 
 type DailySessionRecord = {
+    schemaVersion?: number;
     sessionDate: string;
+    sessionMode?: string;
+    status?: string;
+    continuous?: boolean;
+    startedAt?: string | null;
+    updatedAt?: string;
     strategy?: {
         referenceSymbol?: string;
         symbol?: string;
@@ -242,6 +248,34 @@ type DailySessionRecord = {
     mostActiveSymbols?: string[];
     mostActiveSymbolCount?: number;
     insufficientSymbols?: string[];
+    sessionEvents?: Array<{
+        eventId: string;
+        eventType: 'open' | 'close';
+        sessionDate: string;
+        timestamp: string;
+        symbol: string;
+        side: 'buy' | 'sell';
+        position: 'long' | 'short';
+        qty: number;
+        entryPrice?: number;
+        stopPrice?: number;
+        targetPrice?: number;
+        closePrice?: number;
+        pnl?: number;
+        reason?: string;
+    }>;
+    runtimeSnapshot?: {
+        runtimeStatus?: string;
+        orbUiMessage?: string | null;
+        isRunning?: boolean;
+        candidateTradeType?: string;
+        breakoutConfirmationCandleMinutes?: number;
+        breakoutQualityFiltersEnabled?: boolean;
+        breakoutMinVolumeExpansion?: number;
+        breakoutMinRelativeStrengthPct?: number;
+        breakoutTrendTimeframeMinutes?: number;
+        breakoutTrendLookbackBars?: number;
+    };
     notes?: string[];
 };
 
@@ -365,6 +399,8 @@ function addTradeEvent(event: Omit<TradeEvent, 'id'>) {
     if (tradeEvents.length > MAX_TRADE_EVENTS) {
         tradeEvents = tradeEvents.slice(tradeEvents.length - MAX_TRADE_EVENTS);
     }
+
+    persistCanonicalDailySession(event.sessionDate);
 }
 
 function isSessionMode(value: string): value is SessionMode {
@@ -514,6 +550,7 @@ function wireProcessOutput(stream: 'stdout' | 'stderr', source: NodeJS.ReadableS
                     const parsed = JSON.parse(payload) as AppState['backtestProgress'];
                     if (parsed && typeof parsed.totalWeekdaySessions === 'number') {
                         appState.backtestProgress = parsed;
+                        persistCanonicalDailySession(parsed.currentSessionDate ?? undefined);
                     }
                 } catch {
                     addActivityLine('system', 'Failed parsing backtest progress payload');
@@ -537,6 +574,7 @@ function wireProcessOutput(stream: 'stdout' | 'stderr', source: NodeJS.ReadableS
             if (line.startsWith('__UI_STATUS__')) {
                 const payload = line.slice('__UI_STATUS__'.length).trim();
                 appState.orbUiMessage = payload || null;
+                persistCanonicalDailySession();
                 continue;
             }
 
@@ -679,6 +717,7 @@ function startOrbiliciousProcess(params: {
     appState.breakoutMinRelativeStrengthPct = breakoutMinRelativeStrengthPct;
     appState.breakoutTrendTimeframeMinutes = breakoutTrendTimeframeMinutes;
     appState.breakoutTrendLookbackBars = breakoutTrendLookbackBars;
+    persistCanonicalDailySession();
 
     const child = spawn(entry.command, args, {
         cwd: process.cwd(),
@@ -718,6 +757,7 @@ function startOrbiliciousProcess(params: {
         appState.pid = null;
         appState.runtimeStatus = 'Failed';
         appState.orbUiMessage = null;
+        persistCanonicalDailySession();
         appState.lastOutcome = 'failed';
         appState.lastError = error.message;
         addActivityLine('system', `Process error: ${error.message}`);
@@ -732,6 +772,7 @@ function startOrbiliciousProcess(params: {
         appState.pid = null;
         appState.runtimeStatus = 'Stopped';
         appState.orbUiMessage = null;
+        persistCanonicalDailySession();
 
         if (wasStopRequested || signal === 'SIGTERM') {
             appState.lastOutcome = 'completed';
@@ -863,6 +904,48 @@ function readDailySessionRecord(sessionDate: string): DailySessionRecord | null 
     }
 }
 
+function makeTradeEventId(event: Omit<TradeEvent, 'id'>): string {
+    return [
+        event.eventType,
+        event.sessionDate,
+        event.timestamp,
+        event.symbol,
+        event.side,
+        event.position,
+        Number(event.qty ?? 0).toFixed(6),
+        typeof event.entryPrice === 'number' ? event.entryPrice.toFixed(6) : '',
+        typeof event.stopPrice === 'number' ? event.stopPrice.toFixed(6) : '',
+        typeof event.targetPrice === 'number' ? event.targetPrice.toFixed(6) : '',
+        typeof event.closePrice === 'number' ? event.closePrice.toFixed(6) : '',
+        typeof event.pnl === 'number' ? event.pnl.toFixed(6) : '',
+        event.reason ?? '',
+    ].join('|');
+}
+
+function writeDailySessionRecordAtomic(sessionDate: string, record: DailySessionRecord) {
+    fs.mkdirSync(dailySessionDir, { recursive: true });
+    const targetPath = dailySessionJsonPath(sessionDate);
+    const tmpPath = `${targetPath}.tmp-${process.pid}-${Date.now()}`;
+    fs.writeFileSync(tmpPath, `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+    fs.renameSync(tmpPath, targetPath);
+}
+
+function persistenceSessionDate(preferredSessionDate?: string): string | null {
+    if (preferredSessionDate && isValidSessionDate(preferredSessionDate)) {
+        return preferredSessionDate;
+    }
+
+    if (appState.sessionMode === 'EMULATION' && appState.emulationSessionDate && isValidSessionDate(appState.emulationSessionDate)) {
+        return appState.emulationSessionDate;
+    }
+
+    if (appState.isRunning) {
+        return nyDateString();
+    }
+
+    return null;
+}
+
 function parseCandidateSymbolsFromUiMessage(message: string | null): string[] {
     if (!message) {
         return [];
@@ -880,14 +963,75 @@ function parseCandidateSymbolsFromUiMessage(message: string | null): string[] {
         .filter((symbol) => symbol.length > 0);
 }
 
-function buildLiveSessionRecordFromRuntime(sessionDate: string): DailySessionRecord {
-    const events = tradeEvents
-        .filter((event) => event.sessionDate === sessionDate)
+function buildLiveSessionRecordFromRuntime(
+    sessionDate: string,
+    existingRecord?: DailySessionRecord | null,
+): DailySessionRecord {
+    const existingEvents = Array.isArray(existingRecord?.sessionEvents)
+        ? existingRecord.sessionEvents
+        : [];
+    const mergedEvents = new Map<string, NonNullable<DailySessionRecord['sessionEvents']>[number]>();
+
+    for (const existingEvent of existingEvents) {
+        if (!existingEvent || existingEvent.sessionDate !== sessionDate) {
+            continue;
+        }
+
+        const payload: Omit<TradeEvent, 'id'> = {
+            eventType: existingEvent.eventType,
+            sessionDate: existingEvent.sessionDate,
+            timestamp: existingEvent.timestamp,
+            symbol: existingEvent.symbol,
+            side: existingEvent.side,
+            position: existingEvent.position,
+            qty: existingEvent.qty,
+            entryPrice: existingEvent.entryPrice,
+            stopPrice: existingEvent.stopPrice,
+            targetPrice: existingEvent.targetPrice,
+            closePrice: existingEvent.closePrice,
+            pnl: existingEvent.pnl,
+            reason: existingEvent.reason,
+        };
+        const eventId = existingEvent.eventId || makeTradeEventId(payload);
+        mergedEvents.set(eventId, {
+            ...payload,
+            eventId,
+        });
+    }
+
+    for (const event of tradeEvents) {
+        if (event.sessionDate !== sessionDate) {
+            continue;
+        }
+
+        const payload: Omit<TradeEvent, 'id'> = {
+            eventType: event.eventType,
+            sessionDate: event.sessionDate,
+            timestamp: event.timestamp,
+            symbol: event.symbol,
+            side: event.side,
+            position: event.position,
+            qty: event.qty,
+            entryPrice: event.entryPrice,
+            stopPrice: event.stopPrice,
+            targetPrice: event.targetPrice,
+            closePrice: event.closePrice,
+            pnl: event.pnl,
+            reason: event.reason,
+        };
+        const eventId = makeTradeEventId(payload);
+        mergedEvents.set(eventId, {
+            ...payload,
+            eventId,
+        });
+    }
+
+    const events = Array.from(mergedEvents.values())
         .sort((left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime());
     const symbolsFromUi = parseCandidateSymbolsFromUiMessage(appState.orbUiMessage);
 
-    const openBySymbol = new Map<string, TradeEvent>();
-    const closeBySymbol = new Map<string, TradeEvent>();
+    const openBySymbol = new Map<string, Omit<TradeEvent, 'id'>>();
+    const closeBySymbol = new Map<string, Omit<TradeEvent, 'id'>>();
     for (const event of events) {
         if (event.eventType === 'open') {
             openBySymbol.set(event.symbol, event);
@@ -1013,7 +1157,14 @@ function buildLiveSessionRecordFromRuntime(sessionDate: string): DailySessionRec
     const filtersEnabled = appState.breakoutQualityFiltersEnabled;
 
     return {
+        ...(existingRecord ?? {}),
+        schemaVersion: 1,
         sessionDate,
+        sessionMode: appState.sessionMode,
+        status: appState.isRunning ? 'running' : 'completed',
+        continuous: appState.continuous,
+        startedAt: appState.startedAt,
+        updatedAt: new Date().toISOString(),
         strategy: {
             referenceSymbol: strategyConfig.symbol,
             symbol: strategyConfig.symbol,
@@ -1058,31 +1209,117 @@ function buildLiveSessionRecordFromRuntime(sessionDate: string): DailySessionRec
         mostActiveSymbols,
         mostActiveSymbolCount: mostActiveSymbols.length,
         insufficientSymbols: [],
+        sessionEvents: events,
+        runtimeSnapshot: {
+            runtimeStatus: appState.runtimeStatus,
+            orbUiMessage: appState.orbUiMessage,
+            isRunning: appState.isRunning,
+            candidateTradeType: appState.candidateTradeType,
+            breakoutConfirmationCandleMinutes: appState.breakoutConfirmationCandleMinutes,
+            breakoutQualityFiltersEnabled: appState.breakoutQualityFiltersEnabled,
+            breakoutMinVolumeExpansion: appState.breakoutMinVolumeExpansion,
+            breakoutMinRelativeStrengthPct: appState.breakoutMinRelativeStrengthPct,
+            breakoutTrendTimeframeMinutes: appState.breakoutTrendTimeframeMinutes,
+            breakoutTrendLookbackBars: appState.breakoutTrendLookbackBars,
+        },
         notes: [
-            'Live session snapshot rendered from runtime state because canonical daily JSON has not been written yet.',
+            'Canonical session state is updated incrementally from runtime events.',
         ],
     };
 }
 
-async function buildDailySymbolCharts(record: DailySessionRecord, symbols: string[]): Promise<Map<string, string>> {
-    const chartsBySymbol = new Map<string, string>();
+function persistCanonicalDailySession(preferredSessionDate?: string): boolean {
+    const sessionDate = persistenceSessionDate(preferredSessionDate);
+    if (!sessionDate) {
+        return false;
+    }
+
+    const existing = readDailySessionRecord(sessionDate);
+    const hasRuntimeSignals = appState.isRunning
+        || tradeEvents.some((event) => event.sessionDate === sessionDate)
+        || (appState.emulationSessionDate === sessionDate && Boolean(appState.orbUiMessage));
+    if (!existing && !hasRuntimeSignals) {
+        return false;
+    }
+
+    const canonical = buildLiveSessionRecordFromRuntime(sessionDate, existing);
+    writeDailySessionRecordAtomic(sessionDate, canonical);
+    return true;
+}
+
+type DailySymbolSnapshot = {
+    chartSvg?: string;
+    openingPrice?: number;
+    openingRangeHigh?: number;
+    openingRangeLow?: number;
+    breakoutPrice?: number;
+    breakoutTimestamp?: string;
+    confirmationRetestPrice?: number;
+    confirmationRetestTimestamp?: string;
+    atr1m?: number;
+};
+
+function calculateAtr1mFromBars(bars: Bar[], period = 14): number | null {
+    if (bars.length < 2) {
+        return null;
+    }
+
+    const trueRanges: number[] = [];
+    for (let index = 1; index < bars.length; index += 1) {
+        const current = bars[index];
+        const previous = bars[index - 1];
+        const rangeHighLow = current.high - current.low;
+        const rangeHighPrevClose = Math.abs(current.high - previous.close);
+        const rangeLowPrevClose = Math.abs(current.low - previous.close);
+        trueRanges.push(Math.max(rangeHighLow, rangeHighPrevClose, rangeLowPrevClose));
+    }
+
+    const atrWindow = trueRanges.slice(-period);
+    if (!atrWindow.length) {
+        return null;
+    }
+
+    const atr = atrWindow.reduce((sum, value) => sum + value, 0) / atrWindow.length;
+    return Number.isFinite(atr) && atr > 0 ? atr : null;
+}
+
+async function buildDailySymbolCharts(record: DailySessionRecord, symbols: string[]): Promise<Map<string, DailySymbolSnapshot>> {
+    const snapshotsBySymbol = new Map<string, DailySymbolSnapshot>();
     if (!symbols.length) {
-        return chartsBySymbol;
+        return snapshotsBySymbol;
     }
 
     const rowBySymbol = new Map((record.evaluationRows ?? []).map((row) => [row.symbol, row]));
     const tradeBySymbol = new Map((record.emulatedTrades ?? []).map((row) => [row.symbol, row]));
+    const candidateBySymbol = new Map((record.breakoutCandidates ?? []).map((row) => [row.symbol, row]));
+    const activityBySymbol = new Map(
+        (Array.isArray(record.candidateTradeActivity) ? record.candidateTradeActivity : [])
+            .map((row) => [row.symbol, row]),
+    );
     const outcomeBySymbol = new Map((record.finalOutcomes ?? []).map((row) => [row.symbol, row]));
     const client = new AlpacaClient();
 
     await Promise.all(symbols.map(async (symbol) => {
         const row = rowBySymbol.get(symbol);
         const trade = tradeBySymbol.get(symbol);
+        const candidate = candidateBySymbol.get(symbol);
+        const activity = activityBySymbol.get(symbol);
         const outcome = outcomeBySymbol.get(symbol);
-        const determinationTimestamp = row?.confirmationRetestTimestamp ?? row?.breakoutTimestamp ?? null;
-        const entryPrice = trade?.price;
-        const stopPrice = trade?.stopPrice;
-        const targetPrice = trade?.takeProfitPrice;
+        const determinationTimestamp = row?.confirmationRetestTimestamp
+            ?? row?.breakoutTimestamp
+            ?? activity?.entryTimestamp
+            ?? null;
+        const entryPrice = activity?.entryPrice ?? trade?.price ?? candidate?.price;
+        const stopPrice = activity?.stopPrice ?? trade?.stopPrice ?? candidate?.stopPrice;
+        const targetPrice = activity?.targetPrice ?? trade?.takeProfitPrice ?? candidate?.takeProfitPrice;
+        const entryTimestamp = activity?.entryTimestamp ?? determinationTimestamp ?? undefined;
+
+        const snapshot: DailySymbolSnapshot = {
+            breakoutPrice: entryPrice,
+            breakoutTimestamp: entryTimestamp ?? undefined,
+            confirmationRetestPrice: entryPrice,
+            confirmationRetestTimestamp: entryTimestamp ?? undefined,
+        };
 
         if (
             typeof determinationTimestamp !== 'string'
@@ -1101,36 +1338,57 @@ async function buildDailySymbolCharts(record: DailySessionRecord, symbols: strin
             const bars = await client.getIntradayBars(symbol, record.sessionDate);
             const sessionBars = barsForSessionDate(bars, record.sessionDate);
             if (!sessionBars.length) {
+                snapshotsBySymbol.set(symbol, snapshot);
                 return;
+            }
+
+            const openingRangeBars = Math.max(1, strategyConfig.openingRangeMinutes);
+            const openingBars = sessionBars.slice(0, Math.min(openingRangeBars, sessionBars.length));
+            if (openingBars.length) {
+                snapshot.openingPrice = openingBars[0].open;
+                snapshot.openingRangeHigh = Math.max(...openingBars.map((bar) => bar.high));
+                snapshot.openingRangeLow = Math.min(...openingBars.map((bar) => bar.low));
+            }
+
+            const atr1m = calculateAtr1mFromBars(sessionBars, 14);
+            if (atr1m != null) {
+                snapshot.atr1m = atr1m;
             }
 
             const svg = renderCandidateChartSvg({
                 bars: sessionBars,
                 sessionDate: record.sessionDate,
                 determinationTimestamp,
-                entryTimestamp: determinationTimestamp,
+                entryTimestamp,
                 entryPrice,
                 stopPrice,
                 targetPrice,
-                closePrice: typeof outcome?.exitPrice === 'number' ? outcome.exitPrice : null,
-                closeTimestamp: outcome?.exitTimestamp ?? null,
+                closePrice: typeof activity?.closePrice === 'number'
+                    ? activity.closePrice
+                    : (typeof outcome?.exitPrice === 'number' ? outcome.exitPrice : null),
+                closeTimestamp: activity?.closeTimestamp ?? outcome?.exitTimestamp ?? null,
                 openingRangeMinutes: strategyConfig.openingRangeMinutes,
                 maxBarsAfterDetermination: 30,
             });
-            chartsBySymbol.set(symbol, svg);
+            snapshot.chartSvg = svg;
+            snapshotsBySymbol.set(symbol, snapshot);
         } catch (error) {
             logger.warn('Failed building daily drilldown chart', {
                 symbol,
                 sessionDate: record.sessionDate,
                 error: error instanceof Error ? error.message : String(error),
             });
+            snapshotsBySymbol.set(symbol, snapshot);
         }
     }));
 
-    return chartsBySymbol;
+    return snapshotsBySymbol;
 }
 
-async function renderDailySessionView(record: DailySessionRecord): Promise<string> {
+async function renderDailySessionView(
+    record: DailySessionRecord,
+    options?: { sourceDiagnostic?: string },
+): Promise<string> {
     const candidateTradeActivityValue = record.candidateTradeActivity;
     const candidateTradeActivitySummary = (
         candidateTradeActivityValue
@@ -1166,7 +1424,7 @@ async function renderDailySessionView(record: DailySessionRecord): Promise<strin
                 price: row.breakoutPrice ?? undefined,
             }));
 
-    const chartsBySymbol = await buildDailySymbolCharts(
+    const symbolSnapshots = await buildDailySymbolCharts(
         record,
         drilldownCandidates.map((candidate) => candidate.symbol),
     );
@@ -1190,6 +1448,20 @@ async function renderDailySessionView(record: DailySessionRecord): Promise<strin
         }).join('')
         : '<tr><td colspan="5" class="muted">No drilldown candidates were found for this session.</td></tr>';
 
+    const referenceSymbol = record.strategy?.referenceSymbol ?? record.strategy?.symbol ?? 'n/a';
+    const confirmationMinutes = record.breakoutFilters?.breakoutConfirmationCandleMinutes
+        ?? record.breakoutFilters?.confirmationCandleMinutes;
+    const minVolumeExpansion = record.breakoutFilters?.breakoutMinVolumeExpansion
+        ?? record.breakoutFilters?.minVolumeExpansion;
+    const minRelativeStrengthPct = record.breakoutFilters?.breakoutMinRelativeStrengthPct
+        ?? record.breakoutFilters?.minRelativeStrengthPct;
+    const trendTimeframeMinutes = record.breakoutFilters?.breakoutTrendTimeframeMinutes
+        ?? record.breakoutFilters?.trendTimeframeMinutes;
+    const trendLookbackBars = record.breakoutFilters?.breakoutTrendLookbackBars
+        ?? record.breakoutFilters?.trendLookbackBars;
+    const qualityFiltersEnabled = record.breakoutFilters?.breakoutQualityFiltersEnabled
+        ?? record.breakoutFilters?.enabled;
+
     const breakoutCards = drilldownCandidates.length
         ? drilldownCandidates.map((candidate) => {
             const symbol = candidate.symbol;
@@ -1197,8 +1469,22 @@ async function renderDailySessionView(record: DailySessionRecord): Promise<strin
             const trade = emulatedBySymbol.get(symbol);
             const outcome = outcomeBySymbol.get(symbol);
             const activity = activityBySymbol.get(symbol);
+            const symbolSnapshot = symbolSnapshots.get(symbol);
             const quality = evalRow?.qualityDetail ?? null;
-            const chartSvg = chartsBySymbol.get(symbol);
+            const filtersEnabledForSymbol = quality?.filtersEnabled ?? qualityFiltersEnabled;
+            const minVolForSymbol = quality?.minVolumeExpansion ?? minVolumeExpansion;
+            const minRsForSymbol = quality?.minRelativeStrengthPct ?? minRelativeStrengthPct;
+            const qualityPassedLabel = quality
+                ? (quality.passed ? 'YES' : 'NO')
+                : (filtersEnabledForSymbol ? 'PENDING' : 'DISABLED');
+            const trendLabel = quality?.trendAligned == null
+                ? (filtersEnabledForSymbol ? 'pending' : 'disabled')
+                : (quality.trendAligned ? 'aligned' : 'not aligned');
+            const qualityNote = quality?.failReason
+                ?? (filtersEnabledForSymbol
+                    ? 'Awaiting per-symbol quality evaluation data in live snapshot.'
+                    : 'Quality filters disabled.');
+            const chartSvg = symbolSnapshot?.chartSvg;
             const entryTimestamp = activity?.entryTimestamp
                 ?? evalRow?.confirmationRetestTimestamp
                 ?? evalRow?.breakoutTimestamp
@@ -1221,13 +1507,13 @@ async function renderDailySessionView(record: DailySessionRecord): Promise<strin
                         <h3>Breakout</h3>
                         <table class="table compact">
                             <tbody>
-                                <tr><th>Opening Price</th><td>${fmt(evalRow?.openingPrice)}</td></tr>
-                                <tr><th>OR High / Low</th><td>${fmt(evalRow?.openingRangeHigh)} / ${fmt(evalRow?.openingRangeLow)}</td></tr>
-                                <tr><th>Breakout Price</th><td>${fmt(evalRow?.breakoutPrice)}</td></tr>
-                                <tr><th>Breakout Time</th><td>${escapeHtml(evalRow?.breakoutTimestamp ?? 'n/a')}</td></tr>
-                                <tr><th>Retest Price</th><td>${fmt(evalRow?.confirmationRetestPrice)}</td></tr>
-                                <tr><th>Retest Time</th><td>${escapeHtml(evalRow?.confirmationRetestTimestamp ?? 'n/a')}</td></tr>
-                                <tr><th>ATR 1m</th><td>${fmt(evalRow?.atr1m, 4)}</td></tr>
+                                <tr><th>Opening Price</th><td>${fmt(evalRow?.openingPrice ?? symbolSnapshot?.openingPrice)}</td></tr>
+                                <tr><th>OR High / Low</th><td>${fmt(evalRow?.openingRangeHigh ?? symbolSnapshot?.openingRangeHigh)} / ${fmt(evalRow?.openingRangeLow ?? symbolSnapshot?.openingRangeLow)}</td></tr>
+                                <tr><th>Breakout Price</th><td>${fmt(evalRow?.breakoutPrice ?? symbolSnapshot?.breakoutPrice ?? trade?.price ?? candidate.price)}</td></tr>
+                                <tr><th>Breakout Time</th><td>${escapeHtml(evalRow?.breakoutTimestamp ?? symbolSnapshot?.breakoutTimestamp ?? entryTimestamp)}</td></tr>
+                                <tr><th>Retest Price</th><td>${fmt(evalRow?.confirmationRetestPrice ?? symbolSnapshot?.confirmationRetestPrice ?? activity?.entryPrice)}</td></tr>
+                                <tr><th>Retest Time</th><td>${escapeHtml(evalRow?.confirmationRetestTimestamp ?? symbolSnapshot?.confirmationRetestTimestamp ?? entryTimestamp)}</td></tr>
+                                <tr><th>ATR 1m</th><td>${fmt(evalRow?.atr1m ?? symbolSnapshot?.atr1m, 4)}</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -1250,11 +1536,11 @@ async function renderDailySessionView(record: DailySessionRecord): Promise<strin
                         <h3>Quality Filters</h3>
                         <table class="table compact">
                             <tbody>
-                                <tr><th>Passed</th><td>${quality ? (quality.passed ? 'YES' : 'NO') : 'n/a'}</td></tr>
-                                <tr><th>Vol Expansion</th><td>${fmt(quality?.volumeExpansion)} / min ${fmt(quality?.minVolumeExpansion)}</td></tr>
-                                <tr><th>Rel Strength %</th><td>${fmt(quality?.relativeStrengthPct)} / min ${fmt(quality?.minRelativeStrengthPct)}</td></tr>
-                                <tr><th>Trend</th><td>${quality?.trendAligned == null ? 'n/a' : (quality.trendAligned ? 'aligned' : 'not aligned')}</td></tr>
-                                <tr><th>Fail Reason</th><td>${escapeHtml(quality?.failReason ?? 'n/a')}</td></tr>
+                                <tr><th>Passed</th><td>${qualityPassedLabel}</td></tr>
+                                <tr><th>Vol Expansion</th><td>${fmt(quality?.volumeExpansion)} / min ${fmt(minVolForSymbol)}</td></tr>
+                                <tr><th>Rel Strength %</th><td>${fmt(quality?.relativeStrengthPct)} / min ${fmt(minRsForSymbol)}</td></tr>
+                                <tr><th>Trend</th><td>${trendLabel}</td></tr>
+                                <tr><th>Fail Reason</th><td>${escapeHtml(qualityNote)}</td></tr>
                                 <tr><th>Close Reason</th><td>${escapeHtml(activity?.reason ?? 'n/a')}</td></tr>
                             </tbody>
                         </table>
@@ -1268,19 +1554,7 @@ async function renderDailySessionView(record: DailySessionRecord): Promise<strin
         }).join('')
         : '<p class="muted">No breakout candidates were stored for this session.</p>';
 
-    const referenceSymbol = record.strategy?.referenceSymbol ?? record.strategy?.symbol ?? 'n/a';
-    const confirmationMinutes = record.breakoutFilters?.breakoutConfirmationCandleMinutes
-        ?? record.breakoutFilters?.confirmationCandleMinutes;
-    const minVolumeExpansion = record.breakoutFilters?.breakoutMinVolumeExpansion
-        ?? record.breakoutFilters?.minVolumeExpansion;
-    const minRelativeStrengthPct = record.breakoutFilters?.breakoutMinRelativeStrengthPct
-        ?? record.breakoutFilters?.minRelativeStrengthPct;
-    const trendTimeframeMinutes = record.breakoutFilters?.breakoutTrendTimeframeMinutes
-        ?? record.breakoutFilters?.trendTimeframeMinutes;
-    const trendLookbackBars = record.breakoutFilters?.breakoutTrendLookbackBars
-        ?? record.breakoutFilters?.trendLookbackBars;
-    const qualityFiltersEnabled = record.breakoutFilters?.breakoutQualityFiltersEnabled
-        ?? record.breakoutFilters?.enabled;
+    const sourceDiagnostic = options?.sourceDiagnostic?.trim();
 
     return `<!doctype html>
 <html lang="en">
@@ -1318,6 +1592,7 @@ async function renderDailySessionView(record: DailySessionRecord): Promise<strin
     <section class="panel">
         <h1>ORB Daily Session ${escapeHtml(record.sessionDate)}</h1>
         <p class="muted">This view is rendered from the canonical JSON record stored in data/daily.</p>
+        ${sourceDiagnostic ? `<p class="muted" style="margin-top: 6px; font-size: 12px;"><strong>Diagnostic:</strong> ${escapeHtml(sourceDiagnostic)}</p>` : ''}
         <p class="muted">Reference Symbol: ${escapeHtml(referenceSymbol)}</p>
     </section>
     <section class="panel">
@@ -2445,9 +2720,14 @@ async function buildRenderedReport(reportType: ReportKind, anchorDate?: string):
     const anchor = parseAnchorDateInput(anchorDate);
 
     if (reportType === 'today') {
+        let sourceDiagnostic = 'Loaded from existing canonical JSON.';
         let dailyRecord = await loadDailySessionRecord(anchor.isoDate);
         if (!dailyRecord && anchor.isoDate === nyDateString()) {
-            dailyRecord = buildLiveSessionRecordFromRuntime(anchor.isoDate);
+            persistCanonicalDailySession(anchor.isoDate);
+            dailyRecord = await loadDailySessionRecord(anchor.isoDate);
+            if (dailyRecord) {
+                sourceDiagnostic = 'Loaded from just-persisted canonical JSON.';
+            }
         }
 
         if (!dailyRecord) {
@@ -2456,7 +2736,7 @@ async function buildRenderedReport(reportType: ReportKind, anchorDate?: string):
 
         return {
             title: "Today's trading activity",
-            html: await renderDailySessionView(dailyRecord),
+            html: await renderDailySessionView(dailyRecord, { sourceDiagnostic }),
             pdfHtml: renderDailySessionPdfHtml(dailyRecord),
             baseName: `daily-trading-activity-${anchor.isoDate}`,
         };
