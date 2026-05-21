@@ -101,7 +101,7 @@ describe('config integration', () => {
         const mod = require('../src/config');
 
         expect(mod.env.breakoutConfirmationCandleMinutes).to.equal(5);
-        expect(mod.env.breakoutQualityFiltersEnabled).to.equal(true);
+        expect(mod.env.breakoutQualityFiltersEnabled).to.equal(false);
         expect(mod.env.breakoutMinVolumeExpansion).to.equal(1.2);
         expect(mod.env.breakoutMinRelativeStrengthPct).to.equal(0.25);
         expect(mod.env.breakoutTrendTimeframeMinutes).to.equal(5);

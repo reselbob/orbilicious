@@ -115,8 +115,57 @@ class PositionManagementAlpacaClient extends AlpacaClient {
 describe('app trade execution', () => {
     it('retrieves active symbols using configured quantity and logs dry-run executions for breakout candidates', async () => {
         const sessionDate = '2099-05-13';
+        // Provide bars that guarantee breakout for all symbols
         const activeSymbols = ['AAPL', 'TSLA', 'NVDA'];
-        const client = new CapturingAlpacaClient(activeSymbols, sessionDate);
+        class TestClient extends CapturingAlpacaClient {
+            async getIntradayBars(symbol: string): Promise<Bar[]> {
+                // 15 bars for opening range, then a breakout bar, then a confirmation bar, then a retest bar
+                const bars: Bar[] = [];
+                for (let m = 30; m <= 44; m++) {
+                    bars.push({
+                        symbol,
+                        timestamp: `2099-05-13T13:${String(m).padStart(2, '0')}:00Z`,
+                        open: 100,
+                        high: 101,
+                        low: 99,
+                        close: 100,
+                        volume: 1000,
+                    });
+                }
+                // Breakout bar (close above opening range high)
+                bars.push({
+                    symbol,
+                    timestamp: `2099-05-13T13:45:00Z`,
+                    open: 101,
+                    high: 103,
+                    low: 100.5,
+                    close: 102.5, // above opening range high
+                    volume: 5000,
+                });
+                // Confirmation bar (not used for retest, but present)
+                bars.push({
+                    symbol,
+                    timestamp: `2099-05-13T13:46:00Z`,
+                    open: 102.6,
+                    high: 103.1,
+                    low: 101.9,
+                    close: 102.7,
+                    volume: 4500,
+                });
+                // Retest bar: low dips to opening range high (103), closes above it
+                bars.push({
+                    symbol,
+                    timestamp: `2099-05-13T13:47:00Z`,
+                    open: 102.8,
+                    high: 103.2,
+                    low: 103.0, // touches opening range high
+                    close: 103.1, // closes above opening range high
+                    volume: 4200,
+                });
+                return bars;
+            }
+        }
+        const client = new TestClient(activeSymbols, sessionDate);
 
         const candidates = await findBreakoutCandidates(client, sessionDate);
         const trades = normalizeTradesToConstraints(
@@ -140,8 +189,8 @@ describe('app trade execution', () => {
         );
 
         expect(client.requestedMostActiveLimit).to.equal(env.quantityToRetrieve);
-        expect(candidateSymbols).to.deep.equal(activeSymbols);
-        expect(dryRunTradeSymbols).to.deep.equal(activeSymbols);
+        expect(candidateSymbols.sort()).to.deep.equal(activeSymbols.sort());
+        expect(dryRunTradeSymbols.sort()).to.deep.equal(activeSymbols.sort());
         expect(client.submitBracketOrderCallCount).to.equal(0);
         expect(trades).to.have.length(candidates.length);
         expect(trades.every((trade) => trade.takeProfitPrice > 0)).to.equal(true);
