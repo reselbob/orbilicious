@@ -96,6 +96,89 @@ export type OrbReportResult = {
     totalProfitLossToDate: number;
 };
 
+type DailySessionRecord = {
+    schemaVersion: 1;
+    sessionDate: string;
+    sessionMode: string;
+    continuous: boolean;
+    status: 'completed';
+    startedAt: string | null;
+    completedAt: string | null;
+    timezone: string;
+    strategy: {
+        referenceSymbol: string;
+        openingRangeMinutes: number;
+        candleMinutes: number;
+        allowLong: boolean;
+        allowShort: boolean;
+        lastEntryTimeHHMM: string;
+        forceExitTimeHHMM: string;
+    };
+    risk: {
+        maxTotalRisk: number;
+        hardBasketCap: number;
+        maxPositionNotional: number;
+        atrStopMultiple: number;
+        minStopPct: number;
+        stopLossProfitRatio: string;
+        takeProfitMultiple: number;
+    };
+    dataSources: {
+        quantityToRetrieve: number;
+        dataFeed: string;
+        usesHistoricData: boolean;
+    };
+    breakoutFilters: {
+        breakoutConfirmationCandleMinutes: number;
+        breakoutQualityFiltersEnabled: boolean;
+        breakoutMinVolumeExpansion: number;
+        breakoutMinRelativeStrengthPct: number;
+        breakoutTrendTimeframeMinutes: number;
+        breakoutTrendLookbackBars: number;
+    };
+    sessionProgress: {
+        maxSessionBars: number;
+        symbolsScanned: number;
+        breakoutCandidates: number;
+        emulatedTrades: number;
+        finalOutcomes: number;
+    };
+    mostActiveSymbols: string[];
+    mostActiveSymbolCount: number;
+    insufficientSymbols: string[];
+    marketScan: {
+        maxSessionBars: number;
+        candidateTradeType: string;
+    };
+    evaluationRows: OrbEvaluationRow[];
+    breakoutCandidates: AtrBreakoutCandidate[];
+    emulatedTrades: SizedTrade[];
+    finalOutcomes: TradeOutcome[];
+    candidateTradeActivity: {
+        totalCandidatesBoughtAtStart: number;
+        numberOfCandidatesSoldLong: number;
+        numberOfCandidatesBoughtShort: number;
+        totalCostOfBreakoutCandidatePurchases: number;
+        totalAmountOfCashAtStopLossRisk: number;
+        totalProfitLossToDate: number;
+    };
+    totals: {
+        totalCandidatesBoughtAtStart: number;
+        numberOfCandidatesSoldLong: number;
+        numberOfCandidatesBoughtShort: number;
+        totalCostOfBreakoutCandidatePurchases: number;
+        totalAmountOfCashAtStopLossRisk: number;
+        totalProfitLossToDate: number;
+    };
+    artifacts: {
+        htmlReportPath: string;
+        pdfReportPath: string;
+        htmlRelativePath: string;
+        pdfRelativePath: string;
+    };
+    notes: string[];
+};
+
 export type WeeklySummaryDay = {
     sessionDate: string;
     totalCandidatesBoughtAtStart: number;
@@ -153,8 +236,13 @@ type OrbReportComputation = {
     totalProfitLossToDate: number;
     closedOutcomeBySymbol: Map<string, TradeOutcome>;
     finalOutcomeBySymbol: Map<string, TradeOutcome>;
+    finalOutcomes: TradeOutcome[];
     sessionBarsBySymbol: Map<string, Bar[]>;
 };
+
+const dailySessionDir = path.resolve(process.cwd(), "data", "daily");
+const universeDir = path.resolve(process.cwd(), "data", "universe");
+const universeFilePath = path.join(universeDir, "fixed-universe.json");
 
 function candidateAllowedByTradeType(side: 'buy' | 'sell'): boolean {
     if (env.candidateTradeType === 'LONG_AND_SHORT') {
@@ -181,6 +269,154 @@ function candidateTradeTypeLabel(): string {
 }
 
 export class Reports {
+    private static fixedUniverseSymbols: string[] | null = null;
+    private static readonly BAR_FETCH_CONCURRENCY = 8;
+    private static readonly BAR_FETCH_RETRY_COUNT = 2;
+    private static readonly BAR_FETCH_RETRY_DELAY_MS = 350;
+
+    private static readPersistedUniverse(): string[] {
+        try {
+            if (!fs.existsSync(universeFilePath)) {
+                return [];
+            }
+
+            const raw = fs.readFileSync(universeFilePath, "utf8");
+            const parsed = JSON.parse(raw) as { symbols?: unknown };
+            if (!Array.isArray(parsed.symbols)) {
+                return [];
+            }
+
+            return parsed.symbols
+                .map((value) => (typeof value === "string" ? value.trim().toUpperCase() : ""))
+                .filter((value) => value.length > 0);
+        } catch (error) {
+            logger.warn("Failed reading persisted fixed universe", {
+                universeFilePath,
+                error: error instanceof Error ? error.message : String(error),
+            });
+            return [];
+        }
+    }
+
+    private static persistUniverse(symbols: string[]) {
+        try {
+            fs.mkdirSync(universeDir, { recursive: true });
+            const payload = {
+                schemaVersion: 1,
+                generatedAt: new Date().toISOString(),
+                symbolCount: symbols.length,
+                symbols,
+            };
+            fs.writeFileSync(universeFilePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+        } catch (error) {
+            logger.warn("Failed writing persisted fixed universe", {
+                universeFilePath,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+
+    private static async getFixedUniverseSymbols(client: AlpacaClient): Promise<string[]> {
+        const maxUniverseSize = 120;
+        if (Reports.fixedUniverseSymbols && Reports.fixedUniverseSymbols.length) {
+            return Reports.fixedUniverseSymbols.slice(0, maxUniverseSize);
+        }
+
+        const persistedSymbols = Reports.readPersistedUniverse();
+        if (persistedSymbols.length) {
+            const trimmedPersistedSymbols = persistedSymbols.slice(0, maxUniverseSize);
+            Reports.fixedUniverseSymbols = trimmedPersistedSymbols;
+            logger.info('Loaded fixed universe from local persistence', {
+                symbolCount: trimmedPersistedSymbols.length,
+                universeFilePath,
+            });
+            return trimmedPersistedSymbols;
+        }
+
+        const minimumUniverse = Math.max(env.quantityToRetrieve, 40);
+        const desiredUniverse = Math.max(env.quantityToRetrieve * 2, minimumUniverse);
+        const cappedUniverse = Math.min(desiredUniverse, maxUniverseSize);
+        const symbols = await client.getMostActiveSymbols(cappedUniverse);
+
+        if (!symbols.length) {
+            throw new Error('Most active universe is empty; unable to build session ranking.');
+        }
+
+        Reports.fixedUniverseSymbols = symbols;
+        Reports.persistUniverse(symbols);
+        logger.info('Initialized fixed universe for historical volume ranking', {
+            requestedUniverseSize: cappedUniverse,
+            actualUniverseSize: symbols.length,
+            universeFilePath,
+        });
+        return symbols;
+    }
+
+    private static async sleepMs(ms: number): Promise<void> {
+        await new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    private static async getIntradayBarsWithRetry(
+        client: AlpacaClient,
+        symbol: string,
+        sessionDate: string,
+    ): Promise<Bar[]> {
+        let attempt = 0;
+
+        for (; ;) {
+            try {
+                return await client.getIntradayBars(symbol, sessionDate);
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                const isRateLimit = message.includes('429');
+                if (!isRateLimit || attempt >= Reports.BAR_FETCH_RETRY_COUNT) {
+                    throw error;
+                }
+
+                attempt += 1;
+                const delay = Reports.BAR_FETCH_RETRY_DELAY_MS * attempt;
+                logger.warn('Rate limited while loading bars; retrying', {
+                    symbol,
+                    sessionDate,
+                    attempt,
+                    delayMs: delay,
+                });
+                await Reports.sleepMs(delay);
+            }
+        }
+    }
+
+    private static async loadUniverseBars(
+        client: AlpacaClient,
+        universeSymbols: string[],
+        sessionDate: string,
+    ): Promise<Array<{ symbol: string; bars: Bar[] }>> {
+        const results: Array<{ symbol: string; bars: Bar[] }> = [];
+
+        for (let index = 0; index < universeSymbols.length; index += Reports.BAR_FETCH_CONCURRENCY) {
+            const batch = universeSymbols.slice(index, index + Reports.BAR_FETCH_CONCURRENCY);
+            const batchResults = await Promise.all(
+                batch.map(async (symbol) => {
+                    try {
+                        const bars = await Reports.getIntradayBarsWithRetry(client, symbol, sessionDate);
+                        return { symbol, bars: Reports.dedupeAndSortBars(bars) };
+                    } catch (error) {
+                        logger.warn('Failed loading bars for ORB report', {
+                            symbol,
+                            sessionDate,
+                            error: error instanceof Error ? error.message : String(error),
+                        });
+                        return { symbol, bars: [] as Bar[] };
+                    }
+                }),
+            );
+
+            results.push(...batchResults);
+        }
+
+        return results;
+    }
+
     private static weekDatesMondayToFriday(anchorDate: Date): string[] {
         const nyAnchor = toNyParts(anchorDate, strategyConfig.sessionTimezone);
         const utcAnchor = new Date(
@@ -257,6 +493,109 @@ export class Reports {
         return dayOfWeek !== 0 && dayOfWeek !== 6;
     }
 
+    private static dailySessionJsonPath(sessionDate: string): string {
+        return path.join(dailySessionDir, `${sessionDate}.json`);
+    }
+
+    private static writeDailySessionRecord(
+        reportData: OrbReportComputation,
+        htmlReportPath: string,
+        pdfReportPath: string,
+    ) {
+        fs.mkdirSync(dailySessionDir, { recursive: true });
+
+        const record: DailySessionRecord = {
+            schemaVersion: 1,
+            sessionDate: reportData.sessionDate,
+            sessionMode: env.sessionMode,
+            continuous: false,
+            status: 'completed',
+            startedAt: null,
+            completedAt: new Date().toISOString(),
+            timezone: strategyConfig.sessionTimezone,
+            strategy: {
+                referenceSymbol: strategyConfig.symbol,
+                openingRangeMinutes: strategyConfig.openingRangeMinutes,
+                candleMinutes: strategyConfig.candleMinutes,
+                allowLong: strategyConfig.allowLong,
+                allowShort: strategyConfig.allowShort,
+                lastEntryTimeHHMM: strategyConfig.lastEntryTimeHHMM,
+                forceExitTimeHHMM: strategyConfig.forceExitTimeHHMM,
+            },
+            risk: {
+                maxTotalRisk: env.maxTotalRisk,
+                hardBasketCap: env.hardBasketCap,
+                maxPositionNotional: env.maxPositionNotional,
+                atrStopMultiple: env.atrStopMultiple,
+                minStopPct: env.minStopPct,
+                stopLossProfitRatio: env.stopLossProfitRatio,
+                takeProfitMultiple: env.takeProfitMultiple,
+            },
+            dataSources: {
+                quantityToRetrieve: env.quantityToRetrieve,
+                dataFeed: env.dataFeed,
+                usesHistoricData: true,
+            },
+            breakoutFilters: {
+                breakoutConfirmationCandleMinutes: env.breakoutConfirmationCandleMinutes,
+                breakoutQualityFiltersEnabled: env.breakoutQualityFiltersEnabled,
+                breakoutMinVolumeExpansion: env.breakoutMinVolumeExpansion,
+                breakoutMinRelativeStrengthPct: env.breakoutMinRelativeStrengthPct,
+                breakoutTrendTimeframeMinutes: env.breakoutTrendTimeframeMinutes,
+                breakoutTrendLookbackBars: env.breakoutTrendLookbackBars,
+            },
+            sessionProgress: {
+                maxSessionBars: reportData.maxSessionBars,
+                symbolsScanned: reportData.symbols.length,
+                breakoutCandidates: reportData.breakoutCandidates.length,
+                emulatedTrades: reportData.emulatedTrades.length,
+                finalOutcomes: reportData.finalOutcomes.length,
+            },
+            mostActiveSymbols: reportData.symbols,
+            mostActiveSymbolCount: reportData.symbols.length,
+            insufficientSymbols: reportData.insufficientSymbols,
+            marketScan: {
+                maxSessionBars: reportData.maxSessionBars,
+                candidateTradeType: env.candidateTradeType,
+            },
+            evaluationRows: reportData.evaluationRows,
+            breakoutCandidates: reportData.breakoutCandidates,
+            emulatedTrades: reportData.emulatedTrades,
+            finalOutcomes: reportData.finalOutcomes,
+            candidateTradeActivity: {
+                totalCandidatesBoughtAtStart: reportData.totalCandidatesBoughtAtStart,
+                numberOfCandidatesSoldLong: reportData.numberOfCandidatesSoldLong,
+                numberOfCandidatesBoughtShort: reportData.numberOfCandidatesBoughtShort,
+                totalCostOfBreakoutCandidatePurchases: reportData.totalCostOfBreakoutCandidatePurchases,
+                totalAmountOfCashAtStopLossRisk: reportData.totalAmountOfCashAtStopLossRisk,
+                totalProfitLossToDate: reportData.totalProfitLossToDate,
+            },
+            totals: {
+                totalCandidatesBoughtAtStart: reportData.totalCandidatesBoughtAtStart,
+                numberOfCandidatesSoldLong: reportData.numberOfCandidatesSoldLong,
+                numberOfCandidatesBoughtShort: reportData.numberOfCandidatesBoughtShort,
+                totalCostOfBreakoutCandidatePurchases: reportData.totalCostOfBreakoutCandidatePurchases,
+                totalAmountOfCashAtStopLossRisk: reportData.totalAmountOfCashAtStopLossRisk,
+                totalProfitLossToDate: reportData.totalProfitLossToDate,
+            },
+            artifacts: {
+                htmlReportPath,
+                pdfReportPath,
+                htmlRelativePath: path.relative(path.resolve(process.cwd(), 'reports'), htmlReportPath).split(path.sep).join('/'),
+                pdfRelativePath: path.relative(path.resolve(process.cwd(), 'reports'), pdfReportPath).split(path.sep).join('/'),
+            },
+            notes: [
+                'HTML and PDF artifacts are derived from this JSON record.',
+            ],
+        };
+
+        fs.writeFileSync(
+            Reports.dailySessionJsonPath(reportData.sessionDate),
+            `${JSON.stringify(record, null, 2)}\n`,
+            'utf8',
+        );
+    }
+
     private static nyDateRangeInclusive(anchorDate: Date, currentDate: Date): string[] {
         const startNy = toNyParts(anchorDate, strategyConfig.sessionTimezone);
         const endNy = toNyParts(currentDate, strategyConfig.sessionTimezone);
@@ -285,28 +624,46 @@ export class Reports {
         client: AlpacaClient,
         sessionDate: string,
     ): Promise<OrbReportComputation> {
-        const symbols = await client.getMostActiveSymbols(env.quantityToRetrieve);
+        const universeSymbols = await Reports.getFixedUniverseSymbols(client);
         const openingRangeBars = 15;
         const evaluationWindowMinutes = 15;
         const evaluationRows: OrbEvaluationRow[] = [];
         const breakoutCandidates: AtrBreakoutCandidate[] = [];
         const insufficientSymbols: string[] = [];
 
-        const barResults = await Promise.all(
-            symbols.map(async (symbol) => {
-                try {
-                    const bars = await client.getIntradayBars(symbol, sessionDate);
-                    return { symbol, bars: Reports.dedupeAndSortBars(bars) };
-                } catch (error) {
-                    logger.warn("Failed loading bars for ORB report", {
-                        symbol,
-                        sessionDate,
-                        error: error instanceof Error ? error.message : String(error),
-                    });
-                    return { symbol, bars: [] as Bar[] };
+        const universeBarResults = await Reports.loadUniverseBars(client, universeSymbols, sessionDate);
+
+        const rankedBySessionVolume = universeBarResults
+            .map(({ symbol, bars }) => {
+                const sessionBars = bars.filter(
+                    (bar) => toNyParts(bar.timestamp, strategyConfig.sessionTimezone).date === sessionDate,
+                );
+                const sessionVolume = sessionBars.reduce((sum, bar) => sum + bar.volume, 0);
+                return {
+                    symbol,
+                    bars,
+                    sessionVolume,
+                };
+            })
+            .sort((left, right) => {
+                if (right.sessionVolume !== left.sessionVolume) {
+                    return right.sessionVolume - left.sessionVolume;
                 }
-            }),
-        );
+                return left.symbol.localeCompare(right.symbol);
+            });
+
+        const barResults = rankedBySessionVolume
+            .slice(0, env.quantityToRetrieve)
+            .map(({ symbol, bars }) => ({ symbol, bars }));
+
+        const symbols = barResults.map(({ symbol }) => symbol);
+
+        logger.info('Selected most active symbols by session historical volume', {
+            sessionDate,
+            universeSize: universeSymbols.length,
+            selectedCount: symbols.length,
+            symbols,
+        });
 
         const sessionBarCounts = barResults.map(
             ({ bars }) =>
@@ -572,6 +929,8 @@ export class Reports {
             0,
         );
 
+        const finalOutcomes = [...finalOutcomeBySymbol.values()];
+
         return {
             sessionDate,
             symbols,
@@ -588,6 +947,7 @@ export class Reports {
             totalProfitLossToDate,
             closedOutcomeBySymbol,
             finalOutcomeBySymbol,
+            finalOutcomes,
             sessionBarsBySymbol,
         };
     }
@@ -1560,7 +1920,7 @@ export class Reports {
     public static async generateOrbReport(
         client: AlpacaClient,
         sessionDate: string,
-        options?: { usesHistoricData?: boolean },
+        options?: { usesHistoricData?: boolean; generateArtifacts?: boolean },
     ): Promise<OrbReportResult> {
         const reportData = await Reports.computeOrbReportData(client, sessionDate);
         const {
@@ -1768,19 +2128,19 @@ export class Reports {
                                 <tr><th>Exit Price</th><td>${exitPrice}</td></tr>
                                 <tr><th>Exit Type</th><td>${Reports.escapeHtml(exitType)}</td></tr>
                                 ${(() => {
-                                    const d = row?.qualityDetail;
-                                    if (!d) return "";
-                                    const p = (v: boolean | null, skip: boolean) =>
-                                        skip ? "n/a" : (v ? "&#10003;" : "&#10007;");
-                                    const skipped = !d.filtersEnabled;
-                                    return `
+                        const d = row?.qualityDetail;
+                        if (!d) return "";
+                        const p = (v: boolean | null, skip: boolean) =>
+                            skip ? "n/a" : (v ? "&#10003;" : "&#10007;");
+                        const skipped = !d.filtersEnabled;
+                        return `
                                 <tr><th colspan="2" style="padding-top:10px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.6">Quality Filters</th></tr>
                                 <tr><th>Filters Enabled</th><td>${d.filtersEnabled ? "Yes" : "No"}</td></tr>
                                 <tr><th>Vol Expansion</th><td>${d.volumeExpansion !== null ? d.volumeExpansion.toFixed(2) : "n/a"} (min ${d.minVolumeExpansion}) ${p(d.volumeExpansionPassed, skipped)}</td></tr>
                                 <tr><th>Rel Strength</th><td>${d.relativeStrengthPct !== null ? d.relativeStrengthPct.toFixed(2) + "%" : "n/a"} (min ${d.minRelativeStrengthPct}%) ${p(d.relativeStrengthPassed, skipped)}</td></tr>
                                 <tr><th>Trend Alignment</th><td>${d.trendAligned !== null ? (d.trendAligned ? "aligned" : "diverged") : "n/a"} ${p(d.trendAlignmentPassed, skipped)}</td></tr>
                                 ${d.failReason ? `<tr><th>Fail Reason</th><td>${Reports.escapeHtml(d.failReason)}</td></tr>` : ""}`;
-                                })()}
+                    })()}
                             </tbody>
                         </table>
                     </div>
@@ -2199,17 +2559,22 @@ export class Reports {
 </body>
 </html>`;
 
-        Reports.writeHtmlReport(htmlReportPath, htmlDrilldownReport);
-        Reports.writeHtmlReport(pdfSourceHtmlPath, htmlReport);
-        await Reports.renderHtmlToPdf(pdfSourceHtmlPath, pdfReportPath);
-        fs.unlinkSync(pdfSourceHtmlPath);
-        logger.info("PDF report written", { sessionDate, pdfReportPath });
+        const generateArtifacts = options?.generateArtifacts !== false;
+        if (generateArtifacts) {
+            Reports.writeHtmlReport(htmlReportPath, htmlDrilldownReport);
+            Reports.writeHtmlReport(pdfSourceHtmlPath, htmlReport);
+            await Reports.renderHtmlToPdf(pdfSourceHtmlPath, pdfReportPath);
+            fs.unlinkSync(pdfSourceHtmlPath);
+            logger.info("PDF report written", { sessionDate, pdfReportPath });
+        }
 
         if (maxSessionBars < 30) {
             throw new Error(
                 `Session ${sessionDate} has fewer than 30 session bars. Highest session bar count found: ${maxSessionBars}`,
             );
         }
+
+        Reports.writeDailySessionRecord(reportData, htmlReportPath, pdfReportPath);
 
         return {
             sessionDate,

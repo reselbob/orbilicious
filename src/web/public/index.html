@@ -205,6 +205,13 @@
             font-weight: 700;
         }
 
+        .daily-summary-flat-badge {
+            margin-left: 0.5rem;
+            font-size: 0.62rem;
+            letter-spacing: 0.02em;
+            vertical-align: middle;
+        }
+
         .confirmation-backdrop {
             position: fixed;
             inset: 0;
@@ -652,6 +659,8 @@
                                                     data-help-key="continuousMode" aria-label="Help for Continuous mode"
                                                     title="Help for Continuous mode">?</button>
                                             </span>
+                                            <div class="form-text mt-1">OFF = selected date only | ON = selected date
+                                                through today</div>
                                         </div>
                                         <div class="d-flex align-items-center gap-2">
                                             <span class="help-label-row">
@@ -848,6 +857,18 @@
                                 <div class="col-6 col-md-3 d-grid">
                                     <button id="closeReportDetailBtn" class="btn btn-outline-secondary w-100"
                                         type="button">Close Detail</button>
+                                </div>
+                                <div class="col-6 col-md-2">
+                                    <label class="form-label" for="reportDownloadFormat">Download Format</label>
+                                    <select id="reportDownloadFormat" class="form-select">
+                                        <option value="html">HTML</option>
+                                        <option value="pdf">PDF</option>
+                                    </select>
+                                </div>
+                                <div class="col-6 col-md-2 d-grid">
+                                    <label class="form-label d-none d-md-block">&nbsp;</label>
+                                    <button id="downloadReportBtn" class="btn btn-primary w-100" type="button"
+                                        disabled>Download</button>
                                 </div>
                             </div>
 

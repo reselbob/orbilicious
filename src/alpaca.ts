@@ -57,7 +57,7 @@ export class AlpacaClient {
 
     async generateOrbReport(
         sessionDate?: Date | string,
-        options?: { usesHistoricData?: boolean }
+        options?: { usesHistoricData?: boolean; generateArtifacts?: boolean }
     ): Promise<OrbReportResult> {
         const normalizedDate = normalizeSessionDate(sessionDate);
         const { Reports } = await import('./reports');

@@ -93,6 +93,8 @@ const generateReportBtn = document.getElementById('generateReportBtn');
 const closeReportDetailBtn = document.getElementById('closeReportDetailBtn');
 const reportGenerationStatus = document.getElementById('reportGenerationStatus');
 const reportFrame = document.getElementById('reportFrame');
+const reportDownloadFormat = document.getElementById('reportDownloadFormat');
+const downloadReportBtn = document.getElementById('downloadReportBtn');
 const liquiditySessionDateInput = document.getElementById('liquiditySessionDate');
 const liquiditySymbolLimitInput = document.getElementById('liquiditySymbolLimit');
 const liquidityScanBtn = document.getElementById('liquidityScanBtn');
@@ -151,6 +153,8 @@ let tradeCursor = 0;
 let tradeEvents = [];
 let latestBacktestProgress = null;
 let activeTopLevelReportSrc = '';
+let activeReportType = '';
+let activeReportAnchorDate = '';
 let latestOrbUiMessage = '';
 let latestRuntimeStatus = '';
 let latestIsRunning = false;
@@ -375,12 +379,7 @@ function syncEmulationControls() {
         }
     }
 
-    if (isEmulation && !isLiveEmu) {
-        continuousMode.checked = false;
-        continuousMode.disabled = true;
-    } else {
-        continuousMode.disabled = false;
-    }
+    continuousMode.disabled = false;
 }
 
 function formatPrice(value) {
@@ -621,6 +620,46 @@ function eventSessionDate(event) {
     return null;
 }
 
+function dateFromIsoParts(value) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) {
+        return null;
+    }
+
+    const [year, month, day] = value.split('-').map((part) => Number(part));
+    const date = new Date(Date.UTC(year, month - 1, day));
+    if (Number.isNaN(date.getTime())) {
+        return null;
+    }
+
+    return date;
+}
+
+function isoFromUtcDate(date) {
+    const year = String(date.getUTCFullYear()).padStart(4, '0');
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(date.getUTCDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function weekdayRangeInclusive(startIso, endIso) {
+    const start = dateFromIsoParts(startIso);
+    const end = dateFromIsoParts(endIso);
+    if (!start || !end || start.getTime() > end.getTime()) {
+        return [];
+    }
+
+    const rows = [];
+    for (const current = new Date(start); current.getTime() <= end.getTime(); current.setUTCDate(current.getUTCDate() + 1)) {
+        const dayOfWeek = current.getUTCDay();
+        if (dayOfWeek === 0 || dayOfWeek === 6) {
+            continue;
+        }
+        rows.push(isoFromUtcDate(current));
+    }
+
+    return rows;
+}
+
 function renderDailySummary() {
     const dailyTotals = new Map();
 
@@ -648,19 +687,44 @@ function renderDailySummary() {
     dailySummaryHeaderValue.classList.add(summaryClass);
     dailySummaryHeaderValue.textContent = formatPnl(grandTotalPnl);
 
-    if (!dailyTotals.size) {
+    const allSessionDates = new Set(dailyTotals.keys());
+
+    if (latestBacktestProgress
+        && typeof latestBacktestProgress.startSessionDate === 'string'
+        && typeof latestBacktestProgress.endSessionDate === 'string') {
+        const backtestDates = weekdayRangeInclusive(
+            latestBacktestProgress.startSessionDate,
+            latestBacktestProgress.endSessionDate,
+        );
+        for (const date of backtestDates) {
+            allSessionDates.add(date);
+        }
+    }
+
+    for (const event of tradeEvents) {
+        const sessionDate = eventSessionDate(event);
+        if (sessionDate) {
+            allSessionDates.add(sessionDate);
+        }
+    }
+
+    if (!allSessionDates.size) {
         dailySummaryBody.innerHTML = '<tr><td colspan="2" class="text-muted">No closed trades yet.</td></tr>';
         return;
     }
 
-    const rows = Array.from(dailyTotals.entries())
-        .sort((a, b) => a[0].localeCompare(b[0]))
-        .map(([date, pnl]) => {
+    const rows = Array.from(allSessionDates.values())
+        .sort((a, b) => a.localeCompare(b))
+        .map((date) => {
+            const pnl = dailyTotals.get(date) || 0;
             const pnlClass = pnl > 0 ? 'result-profit' : pnl < 0 ? 'result-loss' : 'result-open';
+            const noTradeBadge = pnl === 0
+                ? '<span class="badge text-bg-secondary daily-summary-flat-badge">NO TRADES</span>'
+                : '';
             return `
                 <tr>
                     <td>${date}</td>
-                    <td class="text-end trade-price ${pnlClass}">${formatPnl(pnl)}</td>
+                    <td class="text-end trade-price ${pnlClass}">${formatPnl(pnl)}${noTradeBadge}</td>
                 </tr>`;
         })
         .join('');
@@ -1046,18 +1110,66 @@ async function generateSelectedReport() {
         }
 
         const report = payload.report;
-        if (!report || !report.htmlRelativePath) {
+        const reportPath = report?.viewRelativePath;
+        if (!report || !reportPath) {
             alert('Report generated, but response was missing file paths.');
             return;
         }
 
-        activeTopLevelReportSrc = `/reports/${encodeURI(report.htmlRelativePath)}`;
+        activeTopLevelReportSrc = reportPath;
+        activeReportType = reportType;
+        activeReportAnchorDate = anchorDate;
+        if (downloadReportBtn) {
+            downloadReportBtn.disabled = false;
+        }
         reportFrame.src = activeTopLevelReportSrc;
     } catch (error) {
         alert(`Failed to generate report: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
         reportGenerationStatus.classList.add('d-none');
         generateReportBtn.disabled = false;
+    }
+}
+
+async function downloadSelectedReport() {
+    if (!activeReportType || !activeReportAnchorDate) {
+        alert('Generate a report before downloading.');
+        return;
+    }
+
+    const format = reportDownloadFormat && reportDownloadFormat.value === 'pdf' ? 'pdf' : 'html';
+    if (downloadReportBtn) {
+        downloadReportBtn.disabled = true;
+    }
+
+    try {
+        const response = await fetch('/api/reports/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                reportType: activeReportType,
+                anchorDate: activeReportAnchorDate,
+                format,
+            }),
+        });
+        const payload = await readJson(response);
+        if (!response.ok) {
+            alert(payload.message || 'Failed to download report');
+            return;
+        }
+
+        if (!payload.downloadUrl) {
+            alert('Download path was not returned by the server.');
+            return;
+        }
+
+        window.location.href = payload.downloadUrl;
+    } catch (error) {
+        alert(`Failed to download report: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+        if (downloadReportBtn) {
+            downloadReportBtn.disabled = false;
+        }
     }
 }
 
@@ -1383,6 +1495,9 @@ cancelStartBtn.addEventListener('click', hideStartConfirmationPane);
 stopBtn.addEventListener('click', stopOrbilicious);
 refreshStatusBtn.addEventListener('click', refreshStatus);
 generateReportBtn.addEventListener('click', generateSelectedReport);
+if (downloadReportBtn) {
+    downloadReportBtn.addEventListener('click', downloadSelectedReport);
+}
 closeReportDetailBtn.addEventListener('click', closeReportDetail);
 clearActivityBtn.addEventListener('click', clearActivity);
 liquidityScanBtn.addEventListener('click', generateLiquidityZones);

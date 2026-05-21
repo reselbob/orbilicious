@@ -74,6 +74,14 @@ type GenerateReportRequest = {
     anchorDate?: string;
 };
 
+type DownloadFormat = 'html' | 'pdf';
+
+type DownloadReportRequest = {
+    reportType?: ReportKind;
+    anchorDate?: string;
+    format?: DownloadFormat;
+};
+
 type ActivityLine = {
     id: number;
     timestamp: string;
@@ -113,6 +121,130 @@ type CandidateChartCard = {
     determinationTimestamp: string;
 };
 
+type DailySessionRecord = {
+    sessionDate: string;
+    strategy?: {
+        referenceSymbol?: string;
+        symbol?: string;
+        openingRangeMinutes?: number;
+        candleMinutes?: number;
+        allowLong?: boolean;
+        allowShort?: boolean;
+    };
+    breakoutFilters?: {
+        breakoutConfirmationCandleMinutes?: number;
+        breakoutQualityFiltersEnabled?: boolean;
+        breakoutMinVolumeExpansion?: number;
+        breakoutMinRelativeStrengthPct?: number;
+        breakoutTrendTimeframeMinutes?: number;
+        breakoutTrendLookbackBars?: number;
+        enabled?: boolean;
+        confirmationCandleMinutes?: number;
+        minVolumeExpansion?: number;
+        minRelativeStrengthPct?: number;
+        trendTimeframeMinutes?: number;
+        trendLookbackBars?: number;
+    };
+    artifacts?: {
+        htmlReportPath?: string;
+        pdfReportPath?: string;
+        htmlRelativePath?: string;
+        pdfRelativePath?: string;
+    };
+    totals?: {
+        totalCandidatesBoughtAtStart?: number;
+        numberOfCandidatesSoldLong?: number;
+        numberOfCandidatesBoughtShort?: number;
+        totalCostOfBreakoutCandidatePurchases?: number;
+        totalAmountOfCashAtStopLossRisk?: number;
+        totalProfitLossToDate?: number;
+    };
+    marketScan?: {
+        maxSessionBars?: number;
+        candidateTradeType?: string;
+        requestedLimit?: number;
+        retrievedCount?: number;
+    };
+    evaluationRows?: Array<{
+        symbol: string;
+        openingPrice?: number;
+        openingRangeHigh?: number;
+        openingRangeLow?: number;
+        breakoutPrice?: number | null;
+        breakoutTimestamp?: string | null;
+        confirmationRetestPrice?: number | null;
+        confirmationRetestTimestamp?: string | null;
+        atr1m?: number | null;
+        side?: 'buy' | 'sell' | 'none';
+        qualityDetail?: {
+            filtersEnabled?: boolean;
+            volumeExpansion?: number | null;
+            minVolumeExpansion?: number;
+            volumeExpansionPassed?: boolean;
+            relativeStrengthPct?: number | null;
+            minRelativeStrengthPct?: number;
+            relativeStrengthPassed?: boolean;
+            trendAligned?: boolean | null;
+            trendTimeframeMinutes?: number;
+            trendLookbackBars?: number;
+            trendAlignmentPassed?: boolean;
+            passed?: boolean;
+            failReason?: string | null;
+        } | null;
+    }>;
+    breakoutCandidates?: Array<{
+        symbol: string;
+        side?: 'buy' | 'sell';
+        price?: number;
+        qty?: number;
+        stopPrice?: number;
+        takeProfitPrice?: number;
+        score?: number;
+    }>;
+    emulatedTrades?: Array<{
+        symbol: string;
+        side?: 'buy' | 'sell';
+        price?: number;
+        qty?: number;
+        stopPrice?: number;
+        takeProfitPrice?: number;
+    }>;
+    finalOutcomes?: Array<{
+        symbol: string;
+        side?: 'buy' | 'sell';
+        status?: string;
+        pnl?: number;
+        exitPrice?: number | null;
+        exitTimestamp?: string | null;
+    }>;
+    candidateTradeActivity?: Array<{
+        symbol: string;
+        side?: 'buy' | 'sell';
+        position?: 'long' | 'short';
+        qty?: number;
+        entryPrice?: number;
+        stopPrice?: number;
+        targetPrice?: number;
+        closePrice?: number | null;
+        pnl?: number;
+        status?: string;
+        reason?: string;
+        entryTimestamp?: string;
+        closeTimestamp?: string | null;
+    }> | {
+        totalCandidatesBoughtAtStart?: number;
+        numberOfCandidatesSoldLong?: number;
+        numberOfCandidatesBoughtShort?: number;
+        totalCostOfBreakoutCandidatePurchases?: number;
+        totalAmountOfCashAtStopLossRisk?: number;
+        totalProfitLossToDate?: number;
+    };
+    mostActiveSymbols?: string[];
+    mostActiveSymbolCount?: number;
+    insufficientSymbols?: string[];
+    notes?: string[];
+};
+
 const DEFAULT_PORT = 8787;
 const publicDirCandidates = [
     path.resolve(process.cwd(), 'src', 'web', 'public'),
@@ -121,6 +253,7 @@ const publicDirCandidates = [
 const publicDir = publicDirCandidates.find((dir) => fs.existsSync(path.join(dir, 'index.html')))
     ?? publicDirCandidates[0];
 const reportsDir = path.resolve(process.cwd(), 'reports');
+const dailySessionDir = path.resolve(process.cwd(), 'data', 'daily');
 const MAX_ACTIVITY_LINES = 600;
 const MAX_TRADE_EVENTS = 1000;
 
@@ -181,7 +314,7 @@ function sendJson(res: ServerResponse, statusCode: number, payload: unknown) {
     res.end(body);
 }
 
-function sendFile(res: ServerResponse, filePath: string) {
+function sendFile(res: ServerResponse, filePath: string, options?: { downloadName?: string }) {
     if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
         res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
         res.end('Not Found');
@@ -189,9 +322,17 @@ function sendFile(res: ServerResponse, filePath: string) {
     }
 
     const stat = fs.statSync(filePath);
-    res.writeHead(200, {
+    const headers: Record<string, string | number> = {
         'Content-Type': contentTypeFor(filePath),
         'Content-Length': stat.size,
+    };
+
+    if (options?.downloadName) {
+        headers['Content-Disposition'] = `attachment; filename="${options.downloadName.replace(/"/g, '')}"`;
+    }
+
+    res.writeHead(200, {
+        ...headers,
     });
 
     fs.createReadStream(filePath).pipe(res);
@@ -658,6 +799,398 @@ function listReports() {
     return files;
 }
 
+function dailySessionJsonPath(sessionDate: string): string {
+    return path.join(dailySessionDir, `${sessionDate}.json`);
+}
+
+function readDailySessionRecord(sessionDate: string): DailySessionRecord | null {
+    const filePath = dailySessionJsonPath(sessionDate);
+    if (!fs.existsSync(filePath)) {
+        return null;
+    }
+
+    try {
+        return JSON.parse(fs.readFileSync(filePath, 'utf8')) as DailySessionRecord;
+    } catch (error) {
+        logger.warn('Failed reading daily session JSON', {
+            sessionDate,
+            error: error instanceof Error ? error.message : String(error),
+        });
+        return null;
+    }
+}
+
+async function buildDailySymbolCharts(record: DailySessionRecord, symbols: string[]): Promise<Map<string, string>> {
+    const chartsBySymbol = new Map<string, string>();
+    if (!symbols.length) {
+        return chartsBySymbol;
+    }
+
+    const rowBySymbol = new Map((record.evaluationRows ?? []).map((row) => [row.symbol, row]));
+    const tradeBySymbol = new Map((record.emulatedTrades ?? []).map((row) => [row.symbol, row]));
+    const outcomeBySymbol = new Map((record.finalOutcomes ?? []).map((row) => [row.symbol, row]));
+    const client = new AlpacaClient();
+
+    await Promise.all(symbols.map(async (symbol) => {
+        const row = rowBySymbol.get(symbol);
+        const trade = tradeBySymbol.get(symbol);
+        const outcome = outcomeBySymbol.get(symbol);
+        const determinationTimestamp = row?.confirmationRetestTimestamp ?? row?.breakoutTimestamp ?? null;
+        const entryPrice = trade?.price;
+        const stopPrice = trade?.stopPrice;
+        const targetPrice = trade?.takeProfitPrice;
+
+        if (
+            typeof determinationTimestamp !== 'string'
+            || !determinationTimestamp
+            || typeof entryPrice !== 'number'
+            || !Number.isFinite(entryPrice)
+            || typeof stopPrice !== 'number'
+            || !Number.isFinite(stopPrice)
+            || typeof targetPrice !== 'number'
+            || !Number.isFinite(targetPrice)
+        ) {
+            return;
+        }
+
+        try {
+            const bars = await client.getIntradayBars(symbol, record.sessionDate);
+            const sessionBars = barsForSessionDate(bars, record.sessionDate);
+            if (!sessionBars.length) {
+                return;
+            }
+
+            const svg = renderCandidateChartSvg({
+                bars: sessionBars,
+                sessionDate: record.sessionDate,
+                determinationTimestamp,
+                entryTimestamp: determinationTimestamp,
+                entryPrice,
+                stopPrice,
+                targetPrice,
+                closePrice: typeof outcome?.exitPrice === 'number' ? outcome.exitPrice : null,
+                closeTimestamp: outcome?.exitTimestamp ?? null,
+                openingRangeMinutes: strategyConfig.openingRangeMinutes,
+                maxBarsAfterDetermination: 30,
+            });
+            chartsBySymbol.set(symbol, svg);
+        } catch (error) {
+            logger.warn('Failed building daily drilldown chart', {
+                symbol,
+                sessionDate: record.sessionDate,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }));
+
+    return chartsBySymbol;
+}
+
+async function renderDailySessionView(record: DailySessionRecord): Promise<string> {
+    const candidateTradeActivityValue = record.candidateTradeActivity;
+    const candidateTradeActivitySummary = (
+        candidateTradeActivityValue
+        && !Array.isArray(candidateTradeActivityValue)
+    ) ? candidateTradeActivityValue : {};
+    const totals = record.totals ?? candidateTradeActivitySummary;
+    const artifacts = record.artifacts ?? {};
+    const mostActiveSymbols = record.mostActiveSymbols ?? [];
+    const insufficientSymbols = record.insufficientSymbols ?? [];
+    const evaluationRows = record.evaluationRows ?? [];
+    const breakoutCandidates = record.breakoutCandidates ?? [];
+    const emulatedTrades = record.emulatedTrades ?? [];
+    const finalOutcomes = record.finalOutcomes ?? [];
+    const candidateTradeActivity = Array.isArray(candidateTradeActivityValue)
+        ? candidateTradeActivityValue
+        : [];
+
+    const fmt = (value: number | null | undefined, digits = 2) => (
+        typeof value === 'number' && Number.isFinite(value) ? value.toFixed(digits) : 'n/a'
+    );
+    const rowBySymbol = new Map(evaluationRows.map((row) => [row.symbol, row]));
+    const emulatedBySymbol = new Map(emulatedTrades.map((row) => [row.symbol, row]));
+    const outcomeBySymbol = new Map(finalOutcomes.map((row) => [row.symbol, row]));
+    const activityBySymbol = new Map(candidateTradeActivity.map((row) => [row.symbol, row]));
+
+    const drilldownCandidates = breakoutCandidates.length
+        ? breakoutCandidates
+        : evaluationRows
+            .filter((row) => (row.side && row.side !== 'none') || row.breakoutPrice != null)
+            .map((row) => ({
+                symbol: row.symbol,
+                side: row.side === 'sell' ? 'sell' : row.side === 'buy' ? 'buy' : undefined,
+                price: row.breakoutPrice ?? undefined,
+            }));
+
+    const chartsBySymbol = await buildDailySymbolCharts(
+        record,
+        drilldownCandidates.map((candidate) => candidate.symbol),
+    );
+
+    const drilldownSummaryRows = drilldownCandidates.length
+        ? drilldownCandidates.map((candidate) => {
+            const symbol = candidate.symbol;
+            const evalRow = rowBySymbol.get(symbol);
+            const outcome = outcomeBySymbol.get(symbol);
+            const quality = evalRow?.qualityDetail;
+            const qualityLabel = quality ? (quality.passed ? 'PASS' : 'FAIL') : 'n/a';
+            const statusLabel = (outcome?.status ?? 'n/a').toUpperCase();
+            return `
+            <tr>
+                <td><a href="#drilldown-${escapeHtml(symbol)}">${escapeHtml(symbol)}</a></td>
+                <td>${escapeHtml((candidate.side ?? 'n/a').toUpperCase())}</td>
+                <td>${qualityLabel}</td>
+                <td>${statusLabel}</td>
+                <td>${fmt(outcome?.pnl)}</td>
+            </tr>`;
+        }).join('')
+        : '<tr><td colspan="5" class="muted">No drilldown candidates were found for this session.</td></tr>';
+
+    const breakoutCards = drilldownCandidates.length
+        ? drilldownCandidates.map((candidate) => {
+            const symbol = candidate.symbol;
+            const evalRow = rowBySymbol.get(symbol);
+            const trade = emulatedBySymbol.get(symbol);
+            const outcome = outcomeBySymbol.get(symbol);
+            const activity = activityBySymbol.get(symbol);
+            const quality = evalRow?.qualityDetail ?? null;
+            const chartSvg = chartsBySymbol.get(symbol);
+            const entryTimestamp = activity?.entryTimestamp
+                ?? evalRow?.confirmationRetestTimestamp
+                ?? evalRow?.breakoutTimestamp
+                ?? 'n/a';
+            const exitTimestamp = outcome?.exitTimestamp ?? activity?.closeTimestamp ?? 'n/a';
+            return `
+            <details class="card-detail" id="drilldown-${escapeHtml(symbol)}">
+                <summary>
+                    <span class="symbol">${escapeHtml(symbol)}</span>
+                    <span>${escapeHtml((candidate.side ?? 'n/a').toUpperCase())}</span>
+                    <span>${escapeHtml(entryTimestamp)}</span>
+                    <span>${fmt(trade?.price ?? candidate.price)}</span>
+                    <span>${fmt(trade?.qty, 4)}</span>
+                    <span>${escapeHtml(exitTimestamp)}</span>
+                    <span>${fmt(outcome?.exitPrice)}</span>
+                    <span>${fmt(outcome?.pnl)}</span>
+                </summary>
+                <div class="detail-grid">
+                    <div class="detail-panel">
+                        <h3>Breakout</h3>
+                        <table class="table compact">
+                            <tbody>
+                                <tr><th>Opening Price</th><td>${fmt(evalRow?.openingPrice)}</td></tr>
+                                <tr><th>OR High / Low</th><td>${fmt(evalRow?.openingRangeHigh)} / ${fmt(evalRow?.openingRangeLow)}</td></tr>
+                                <tr><th>Breakout Price</th><td>${fmt(evalRow?.breakoutPrice)}</td></tr>
+                                <tr><th>Breakout Time</th><td>${escapeHtml(evalRow?.breakoutTimestamp ?? 'n/a')}</td></tr>
+                                <tr><th>Retest Price</th><td>${fmt(evalRow?.confirmationRetestPrice)}</td></tr>
+                                <tr><th>Retest Time</th><td>${escapeHtml(evalRow?.confirmationRetestTimestamp ?? 'n/a')}</td></tr>
+                                <tr><th>ATR 1m</th><td>${fmt(evalRow?.atr1m, 4)}</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="detail-panel">
+                        <h3>Trade</h3>
+                        <table class="table compact">
+                            <tbody>
+                                <tr><th>Qty</th><td>${fmt(trade?.qty, 4)}</td></tr>
+                                <tr><th>Entry</th><td>${fmt(trade?.price)}</td></tr>
+                                <tr><th>Stop</th><td>${fmt(trade?.stopPrice)}</td></tr>
+                                <tr><th>Target</th><td>${fmt(trade?.takeProfitPrice)}</td></tr>
+                                <tr><th>Exit</th><td>${fmt(outcome?.exitPrice)}</td></tr>
+                                <tr><th>Exit Time</th><td>${escapeHtml(outcome?.exitTimestamp ?? 'n/a')}</td></tr>
+                                <tr><th>Status</th><td>${escapeHtml((outcome?.status ?? 'n/a').toUpperCase())}</td></tr>
+                                <tr><th>P/L</th><td>${fmt(outcome?.pnl)}</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="detail-panel">
+                        <h3>Quality Filters</h3>
+                        <table class="table compact">
+                            <tbody>
+                                <tr><th>Passed</th><td>${quality ? (quality.passed ? 'YES' : 'NO') : 'n/a'}</td></tr>
+                                <tr><th>Vol Expansion</th><td>${fmt(quality?.volumeExpansion)} / min ${fmt(quality?.minVolumeExpansion)}</td></tr>
+                                <tr><th>Rel Strength %</th><td>${fmt(quality?.relativeStrengthPct)} / min ${fmt(quality?.minRelativeStrengthPct)}</td></tr>
+                                <tr><th>Trend</th><td>${quality?.trendAligned == null ? 'n/a' : (quality.trendAligned ? 'aligned' : 'not aligned')}</td></tr>
+                                <tr><th>Fail Reason</th><td>${escapeHtml(quality?.failReason ?? 'n/a')}</td></tr>
+                                <tr><th>Close Reason</th><td>${escapeHtml(activity?.reason ?? 'n/a')}</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="detail-panel" style="grid-column: 1 / -1;">
+                        <h3>Trade Monitor Chart</h3>
+                        ${chartSvg ?? '<p class="muted">Chart unavailable for this symbol (missing entry/stop/target data).</p>'}
+                    </div>
+                </div>
+            </details>`;
+        }).join('')
+        : '<p class="muted">No breakout candidates were stored for this session.</p>';
+
+    const referenceSymbol = record.strategy?.referenceSymbol ?? record.strategy?.symbol ?? 'n/a';
+    const confirmationMinutes = record.breakoutFilters?.breakoutConfirmationCandleMinutes
+        ?? record.breakoutFilters?.confirmationCandleMinutes;
+    const minVolumeExpansion = record.breakoutFilters?.breakoutMinVolumeExpansion
+        ?? record.breakoutFilters?.minVolumeExpansion;
+    const minRelativeStrengthPct = record.breakoutFilters?.breakoutMinRelativeStrengthPct
+        ?? record.breakoutFilters?.minRelativeStrengthPct;
+    const trendTimeframeMinutes = record.breakoutFilters?.breakoutTrendTimeframeMinutes
+        ?? record.breakoutFilters?.trendTimeframeMinutes;
+    const trendLookbackBars = record.breakoutFilters?.breakoutTrendLookbackBars
+        ?? record.breakoutFilters?.trendLookbackBars;
+    const qualityFiltersEnabled = record.breakoutFilters?.breakoutQualityFiltersEnabled
+        ?? record.breakoutFilters?.enabled;
+
+    return `<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ORB Daily Session ${escapeHtml(record.sessionDate)}</title>
+    <style>
+        body { margin: 0; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: linear-gradient(180deg, #f8fafc, #eef2ff); color: #0f172a; padding: 24px; }
+        .panel { max-width: 1100px; margin: 0 auto 18px; background: #fff; border: 1px solid #e2e8f0; border-radius: 18px; padding: 20px; box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08); }
+        h1, h2 { margin: 0 0 10px; }
+        .muted { color: #475569; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+        .metric { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 14px; padding: 12px; }
+        .metric-label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #64748b; }
+        .metric-value { display: block; margin-top: 6px; font-size: 24px; font-weight: 700; }
+        ul { margin: 8px 0 0; padding-left: 20px; }
+        a { color: #2563eb; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .table { width: 100%; border-collapse: collapse; }
+        .table th, .table td { border-bottom: 1px solid #e2e8f0; padding: 10px; text-align: left; }
+        .table.compact th, .table.compact td { padding: 7px 8px; font-size: 13px; }
+        .card-detail { border: 1px solid #e2e8f0; border-radius: 14px; margin-bottom: 10px; background: #fcfdff; }
+        .card-detail summary { cursor: pointer; list-style: none; display: grid; grid-template-columns: 1.05fr .7fr 1.2fr .8fr .8fr 1.2fr .8fr .75fr; gap: 10px; padding: 12px; align-items: center; font-size: 12px; }
+        .card-detail summary::-webkit-details-marker { display: none; }
+        .card-detail .symbol { font-weight: 700; color: #1d4ed8; }
+        .drilldown-header { display: grid; grid-template-columns: 1.05fr .7fr 1.2fr .8fr .8fr 1.2fr .8fr .75fr; gap: 10px; padding: 10px 12px; border: 1px solid #dbe4f0; border-radius: 10px; background: #f8fbff; margin-bottom: 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #475569; font-weight: 700; }
+        .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; padding: 10px 12px 12px; border-top: 1px solid #e2e8f0; }
+        .detail-panel { border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; background: #fff; }
+        .detail-panel h3 { margin: 2px 0 8px; font-size: 14px; color: #334155; }
+        .candidate-live-chart-svg { width: 100%; height: auto; display: block; border-radius: 8px; border: 1px solid #1e293b; background: #0f172a; }
+    </style>
+</head>
+<body>
+    <section class="panel">
+        <h1>ORB Daily Session ${escapeHtml(record.sessionDate)}</h1>
+        <p class="muted">This view is rendered from the canonical JSON record stored in data/daily.</p>
+        <p class="muted">Reference Symbol: ${escapeHtml(referenceSymbol)}</p>
+    </section>
+    <section class="panel">
+        <h2>Totals</h2>
+        <div class="grid">
+            <div class="metric"><span class="metric-label">Candidates Bought at Start</span><span class="metric-value">${totals.totalCandidatesBoughtAtStart ?? 0}</span></div>
+            <div class="metric"><span class="metric-label">Sold Long</span><span class="metric-value">${totals.numberOfCandidatesSoldLong ?? 0}</span></div>
+            <div class="metric"><span class="metric-label">Bought Short</span><span class="metric-value">${totals.numberOfCandidatesBoughtShort ?? 0}</span></div>
+            <div class="metric"><span class="metric-label">P/L to Date</span><span class="metric-value">${Number(totals.totalProfitLossToDate ?? 0).toFixed(2)}</span></div>
+        </div>
+    </section>
+    <section class="panel">
+        <h2>Market Scan</h2>
+        <div class="grid">
+            <div class="metric"><span class="metric-label">Max Session Bars</span><span class="metric-value">${record.marketScan?.maxSessionBars ?? 0}</span></div>
+            <div class="metric"><span class="metric-label">Trade Type</span><span class="metric-value">${escapeHtml(record.marketScan?.candidateTradeType ?? 'n/a')}</span></div>
+            <div class="metric"><span class="metric-label">Scanned Symbols</span><span class="metric-value">${record.mostActiveSymbolCount ?? mostActiveSymbols.length}</span></div>
+            <div class="metric"><span class="metric-label">Insufficient Data</span><span class="metric-value">${insufficientSymbols.length}</span></div>
+        </div>
+        <details class="card-detail" style="margin-top: 12px;">
+            <summary>
+                <span class="symbol">Show Market Scan Symbol Lists</span>
+                <span>${mostActiveSymbols.length} scanned</span>
+                <span>${insufficientSymbols.length} insufficient</span>
+                <span>Optional</span>
+            </summary>
+            <div class="detail-grid">
+                <div class="detail-panel">
+                    <h3>Scanned Symbols</h3>
+                    <ul>${mostActiveSymbols.length ? mostActiveSymbols.map((symbol) => `<li>${escapeHtml(symbol)}</li>`).join('') : '<li>None</li>'}</ul>
+                </div>
+                <div class="detail-panel">
+                    <h3>Insufficient Symbols</h3>
+                    <ul>${insufficientSymbols.length ? insufficientSymbols.map((symbol) => `<li>${escapeHtml(symbol)}</li>`).join('') : '<li>None</li>'}</ul>
+                </div>
+            </div>
+        </details>
+    </section>
+    <section class="panel">
+        <h2>Breakout Filters</h2>
+        <table class="table">
+            <tbody>
+                <tr><th>Enabled</th><td>${qualityFiltersEnabled == null ? 'n/a' : (qualityFiltersEnabled ? 'Yes' : 'No')}</td></tr>
+                <tr><th>Confirmation Candle (min)</th><td>${confirmationMinutes ?? 'n/a'}</td></tr>
+                <tr><th>Min Volume Expansion</th><td>${fmt(minVolumeExpansion)}</td></tr>
+                <tr><th>Min Relative Strength %</th><td>${fmt(minRelativeStrengthPct)}</td></tr>
+                <tr><th>Trend Timeframe (min)</th><td>${trendTimeframeMinutes ?? 'n/a'}</td></tr>
+                <tr><th>Trend Lookback Bars</th><td>${trendLookbackBars ?? 'n/a'}</td></tr>
+            </tbody>
+        </table>
+    </section>
+    <section class="panel">
+        <h2>Symbol Drilldown</h2>
+        <p class="muted">Click any candidate row to expand details and chart.</p>
+        <div class="drilldown-header">
+            <span>Symbol</span>
+            <span>Trade Type</span>
+            <span>Entry Date</span>
+            <span>Entry Price</span>
+            <span>Quantity</span>
+            <span>Exit Date</span>
+            <span>Exit Price</span>
+            <span>P/L</span>
+        </div>
+        ${breakoutCards}
+        <details class="card-detail">
+            <summary>
+                <span class="symbol">Show all scanned symbols</span>
+                <span>${mostActiveSymbols.length} symbols</span>
+                <span>Debug View</span>
+                <span>Optional</span>
+            </summary>
+            <div class="detail-grid">
+                <div class="detail-panel" style="grid-column: 1 / -1;">
+                    <h3>Scanned Symbols</h3>
+                    <table class="table compact">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Symbol</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${mostActiveSymbols.length
+            ? mostActiveSymbols.map((symbol, index) => `
+                            <tr>
+                                <td>${index + 1}</td>
+                                <td>${escapeHtml(symbol)}</td>
+                            </tr>`).join('')
+            : '<tr><td colspan="2" class="muted">No scanned symbols recorded for this session.</td></tr>'}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </details>
+    </section>
+    <section class="panel">
+        <h2>Artifacts</h2>
+        <table class="table">
+            <tbody>
+                <tr><th>HTML</th><td>${artifacts.htmlRelativePath ? `<a href="/reports/${encodeURI(artifacts.htmlRelativePath)}" target="_self">Open HTML report</a>` : 'n/a'}</td></tr>
+                <tr><th>PDF</th><td>${artifacts.pdfRelativePath ? `<a href="/reports/${encodeURI(artifacts.pdfRelativePath)}" target="_self">Open PDF report</a>` : 'n/a'}</td></tr>
+            </tbody>
+        </table>
+    </section>
+    <section class="panel">
+        <h2>Notes</h2>
+        <ul>${(record.notes ?? []).map((note) => `<li>${escapeHtml(note)}</li>`).join('')}</ul>
+    </section>
+</body>
+</html>`;
+}
+
+async function loadDailySessionRecord(sessionDate: string): Promise<DailySessionRecord | null> {
+    return readDailySessionRecord(sessionDate);
+}
+
 function nyDateString(date = new Date()): string {
     const formatter = new Intl.DateTimeFormat('en-CA', {
         timeZone: 'America/New_York',
@@ -1067,16 +1600,32 @@ async function renderHtmlToPdf(htmlPath: string, pdfPath: string) {
     }
 }
 
-async function generateWeeklyTradingActivityReport(anchorDate: Date): Promise<{
+type WeeklyTradingActivityReport = {
     title: string;
-    htmlRelativePath: string;
-    pdfRelativePath: string;
     weekStartDate: string;
     weekEndDate: string;
     longs: number;
     shorts: number;
     pnl: number;
-}> {
+    dailyRowsData: Array<{
+        sessionDate: string;
+        longs: number;
+        shorts: number;
+        pnl: number;
+        detailLink: string;
+    }>;
+};
+
+type MonthlyTradingActivityReport = {
+    title: string;
+    monthLabel: string;
+    totalLongs: number;
+    totalShorts: number;
+    totalPnl: number;
+    weeklyReports: WeeklyTradingActivityReport[];
+};
+
+async function buildWeeklyTradingActivityReport(anchorDate: Date): Promise<WeeklyTradingActivityReport> {
     const anchorIso = isoDateUTC(anchorDate);
     const anchorWeekday = anchorDate.getUTCDay();
     const mondayOffset = (anchorWeekday + 6) % 7;
@@ -1111,13 +1660,16 @@ async function generateWeeklyTradingActivityReport(anchorDate: Date): Promise<{
         const sessionDate = isoDateUTC(current);
 
         try {
-            const daily = await orbService.generateDailyReport(sessionDate, { usesHistoricData: true });
+            const daily = await loadDailySessionRecord(sessionDate);
+            if (!daily) {
+                continue;
+            }
             dailyRowsData.push({
                 sessionDate,
-                longs: daily.numberOfCandidatesSoldLong,
-                shorts: daily.numberOfCandidatesBoughtShort,
-                pnl: daily.totalProfitLossToDate,
-                detailLink: `/reports/${encodeURI(relativeReportPath(daily.htmlReportPath))}`,
+                longs: daily.totals?.numberOfCandidatesSoldLong ?? 0,
+                shorts: daily.totals?.numberOfCandidatesBoughtShort ?? 0,
+                pnl: daily.totals?.totalProfitLossToDate ?? 0,
+                detailLink: `/api/reports/render?type=today&anchorDate=${encodeURIComponent(sessionDate)}`,
             });
         } catch {
             // Skip unavailable sessions (future/holiday/no data) instead of failing entire weekly report.
@@ -1128,13 +1680,20 @@ async function generateWeeklyTradingActivityReport(anchorDate: Date): Promise<{
     const totalShorts = dailyRowsData.reduce((sum, day) => sum + day.shorts, 0);
     const totalPnl = dailyRowsData.reduce((sum, day) => sum + day.pnl, 0);
 
-    const reportDir = path.resolve(process.cwd(), 'reports');
-    const htmlReportPath = path.join(reportDir, `weekly-trading-activity-${weekEndDate}.html`);
-    const pdfReportPath = path.join(reportDir, `weekly-trading-activity-${weekEndDate}.pdf`);
-    const pdfSourceHtmlPath = path.join(reportDir, `weekly-trading-activity-${weekEndDate}-pdf-source.html`);
+    return {
+        title: `Weekly ORB Drilldown Report for the Week of ${weekStartDate} through ${weekEndDate}`,
+        weekStartDate,
+        weekEndDate,
+        longs: totalLongs,
+        shorts: totalShorts,
+        pnl: totalPnl,
+        dailyRowsData,
+    };
+}
 
-    const dailyRows = dailyRowsData.length
-        ? dailyRowsData.map((day) => `
+function renderWeeklyTradingActivityHtml(weeklyReport: WeeklyTradingActivityReport): string {
+    const dailyRows = weeklyReport.dailyRowsData.length
+        ? weeklyReport.dailyRowsData.map((day) => `
         <tr>
             <td>${escapeHtml(day.sessionDate)}</td>
             <td>${day.longs}</td>
@@ -1148,12 +1707,12 @@ async function generateWeeklyTradingActivityReport(anchorDate: Date): Promise<{
             </tr>`,
         ];
 
-    const html = `<!doctype html>
+    return `<!doctype html>
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Weekly Trading Activity ${escapeHtml(weekEndDate)}</title>
+    <title>Weekly Trading Activity ${escapeHtml(weeklyReport.weekEndDate)}</title>
     <style>
         body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(180deg, #f4f7fb, #eef3f9); color: #102a43; padding: 24px; }
         .panel { background: white; border-radius: 14px; padding: 20px; box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08); margin-bottom: 16px; border: 1px solid #e6edf5; }
@@ -1173,9 +1732,9 @@ async function generateWeeklyTradingActivityReport(anchorDate: Date): Promise<{
 </head>
 <body>
     <section class="panel">
-        <h1>Weekly ORB Drilldown Report for the Week of ${escapeHtml(weekStartDate)} through ${escapeHtml(weekEndDate)}</h1>
+        <h1>${escapeHtml(weeklyReport.title)}</h1>
         <p>Breakout Candidate Trade Type: ${escapeHtml(candidateTradeTypeLabel(env.candidateTradeType))}</p>
-        <p>Totals | Longs: ${totalLongs} | Shorts: ${totalShorts} | P/L: <span class="${pnlClass(totalPnl)}">${totalPnl.toFixed(2)}</span></p>
+        <p>Totals | Longs: ${weeklyReport.longs} | Shorts: ${weeklyReport.shorts} | P/L: <span class="${pnlClass(weeklyReport.pnl)}">${weeklyReport.pnl.toFixed(2)}</span></p>
     </section>
     <section class="panel">
         <h2>Daily Drilldown</h2>
@@ -1196,29 +1755,9 @@ async function generateWeeklyTradingActivityReport(anchorDate: Date): Promise<{
     </section>
 </body>
 </html>`;
-
-    writeHtmlReport(htmlReportPath, html);
-    writeHtmlReport(pdfSourceHtmlPath, html);
-    await renderHtmlToPdf(pdfSourceHtmlPath, pdfReportPath);
-    fs.unlinkSync(pdfSourceHtmlPath);
-
-    return {
-        title: `Weekly ORB Drilldown Report for the Week of ${weekStartDate} through ${weekEndDate}`,
-        htmlRelativePath: relativeReportPath(htmlReportPath),
-        pdfRelativePath: relativeReportPath(pdfReportPath),
-        weekStartDate,
-        weekEndDate,
-        longs: totalLongs,
-        shorts: totalShorts,
-        pnl: totalPnl,
-    };
 }
 
-async function generateMonthlyTradingActivityReport(anchorDate: Date): Promise<{
-    title: string;
-    htmlRelativePath: string;
-    pdfRelativePath: string;
-}> {
+async function buildMonthlyTradingActivityReport(anchorDate: Date): Promise<MonthlyTradingActivityReport> {
     const year = anchorDate.getUTCFullYear();
     const month = anchorDate.getUTCMonth() + 1;
     const firstDay = new Date(Date.UTC(year, month - 1, 1));
@@ -1239,20 +1778,11 @@ async function generateMonthlyTradingActivityReport(anchorDate: Date): Promise<{
         .sort()
         .map((iso) => new Date(`${iso}T00:00:00Z`));
 
-    const weeklyReports: Array<{
-        title: string;
-        htmlRelativePath: string;
-        pdfRelativePath: string;
-        weekStartDate: string;
-        weekEndDate: string;
-        longs: number;
-        shorts: number;
-        pnl: number;
-    }> = [];
+    const weeklyReports: WeeklyTradingActivityReport[] = [];
 
     for (const weekAnchor of weekAnchors) {
         try {
-            const weeklyReport = await generateWeeklyTradingActivityReport(weekAnchor);
+            const weeklyReport = await buildWeeklyTradingActivityReport(weekAnchor);
             weeklyReports.push(weeklyReport);
         } catch {
             // Skip weeks with no available market session data instead of failing the whole month report.
@@ -1268,35 +1798,41 @@ async function generateMonthlyTradingActivityReport(anchorDate: Date): Promise<{
     const totalPnl = weeklyReports.reduce((sum, report) => sum + report.pnl, 0);
     const monthLabel = `${year}-${String(month).padStart(2, '0')}`;
 
-    const reportDir = path.resolve(process.cwd(), 'reports');
-    const htmlReportPath = path.join(reportDir, `monthly-trading-activity-${monthLabel}.html`);
-    const pdfReportPath = path.join(reportDir, `monthly-trading-activity-${monthLabel}.pdf`);
-    const pdfSourceHtmlPath = path.join(reportDir, `monthly-trading-activity-${monthLabel}-pdf-source.html`);
+    return {
+        title: "Month's trading activity",
+        monthLabel,
+        totalLongs,
+        totalShorts,
+        totalPnl,
+        weeklyReports,
+    };
+}
 
-    const weeklyRows = weeklyReports.map((week) => `
+function renderMonthlyTradingActivityHtml(monthlyReport: MonthlyTradingActivityReport): string {
+    const weeklyRows = monthlyReport.weeklyReports.map((week) => `
         <tr>
             <td>${escapeHtml(`${week.weekStartDate} to ${week.weekEndDate}`)}</td>
             <td>${week.longs}</td>
             <td>${week.shorts}</td>
             <td class="${pnlClass(week.pnl)}">${week.pnl.toFixed(2)}</td>
-            <td><a href="/reports/${encodeURI(week.htmlRelativePath)}" target="_self">View Week Details</a></td>
+            <td><a href="/api/reports/render?type=week&anchorDate=${encodeURIComponent(week.weekEndDate)}" target="_self">View Week Details</a></td>
         </tr>`).join('\n');
 
     const summaryRow = `
         <tr>
             <th>Total</th>
-            <th>${totalLongs}</th>
-            <th>${totalShorts}</th>
-            <th class="${pnlClass(totalPnl)}">${totalPnl.toFixed(2)}</th>
+            <th>${monthlyReport.totalLongs}</th>
+            <th>${monthlyReport.totalShorts}</th>
+            <th class="${pnlClass(monthlyReport.totalPnl)}">${monthlyReport.totalPnl.toFixed(2)}</th>
             <th>-</th>
         </tr>`;
 
-    const html = `<!doctype html>
+    return `<!doctype html>
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Monthly Trading Activity ${escapeHtml(monthLabel)}</title>
+    <title>Monthly Trading Activity ${escapeHtml(monthlyReport.monthLabel)}</title>
     <style>
         body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(180deg, #f4f7fb, #eef3f9); color: #102a43; padding: 24px; }
         .panel { background: white; border-radius: 14px; padding: 20px; box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08); margin-bottom: 16px; border: 1px solid #e6edf5; }
@@ -1318,9 +1854,9 @@ async function generateMonthlyTradingActivityReport(anchorDate: Date): Promise<{
 <body>
     <section class="panel">
         <h1>Month's Trading Activity</h1>
-        <p>Month: ${escapeHtml(monthLabel)}</p>
+        <p>Month: ${escapeHtml(monthlyReport.monthLabel)}</p>
         <p>Breakout Candidate Trade Type: ${escapeHtml(candidateTradeTypeLabel(env.candidateTradeType))}</p>
-        <p>Totals | Longs: ${totalLongs} | Shorts: ${totalShorts} | P/L: <span class="${pnlClass(totalPnl)}">${totalPnl.toFixed(2)}</span></p>
+        <p>Totals | Longs: ${monthlyReport.totalLongs} | Shorts: ${monthlyReport.totalShorts} | P/L: <span class="${pnlClass(monthlyReport.totalPnl)}">${monthlyReport.totalPnl.toFixed(2)}</span></p>
     </section>
     <section class="panel">
         <h2>Weekly Drilldown</h2>
@@ -1344,45 +1880,396 @@ async function generateMonthlyTradingActivityReport(anchorDate: Date): Promise<{
     </section>
 </body>
 </html>`;
+}
 
-    writeHtmlReport(htmlReportPath, html);
-    writeHtmlReport(pdfSourceHtmlPath, html);
+type RenderedReportResult = {
+    title: string;
+    html: string;
+    pdfHtml?: string;
+    baseName: string;
+};
+
+function renderDailySessionPdfHtml(record: DailySessionRecord): string {
+    const totals = record.totals ?? {};
+    const evaluationRows = record.evaluationRows ?? [];
+    const breakoutCandidates = record.breakoutCandidates ?? [];
+    const emulatedTrades = record.emulatedTrades ?? [];
+    const finalOutcomes = record.finalOutcomes ?? [];
+    const mostActiveSymbols = record.mostActiveSymbols ?? [];
+    const insufficientSymbols = record.insufficientSymbols ?? [];
+    const breakoutFilters = record.breakoutFilters ?? {};
+    const rowBySymbol = new Map(evaluationRows.map((row) => [row.symbol, row]));
+    const tradeBySymbol = new Map(emulatedTrades.map((row) => [row.symbol, row]));
+    const outcomeBySymbol = new Map(finalOutcomes.map((row) => [row.symbol, row]));
+    const candidateMap = new Map<string, { symbol: string; side?: 'buy' | 'sell'; price?: number }>();
+
+    for (const candidate of breakoutCandidates) {
+        candidateMap.set(candidate.symbol, {
+            symbol: candidate.symbol,
+            side: candidate.side,
+            price: candidate.price,
+        });
+    }
+
+    for (const row of evaluationRows) {
+        if (!candidateMap.has(row.symbol) && ((row.side && row.side !== 'none') || row.breakoutPrice != null)) {
+            candidateMap.set(row.symbol, {
+                symbol: row.symbol,
+                side: row.side === 'sell' ? 'sell' : row.side === 'buy' ? 'buy' : undefined,
+                price: row.breakoutPrice ?? undefined,
+            });
+        }
+    }
+
+    const candidates = [...candidateMap.values()].sort((a, b) => a.symbol.localeCompare(b.symbol));
+    const fmt = (value: number | null | undefined, digits = 2) => (
+        typeof value === 'number' && Number.isFinite(value) ? value.toFixed(digits) : 'n/a'
+    );
+    const qualityValue = (symbol: string) => {
+        const quality = rowBySymbol.get(symbol)?.qualityDetail;
+        if (!quality) return 'n/a';
+        return quality.passed ? 'PASS' : `FAIL (${quality.failReason ?? 'rule'})`;
+    };
+
+    const candidateRows = candidates.length
+        ? candidates.map((candidate) => {
+            const symbol = candidate.symbol;
+            const row = rowBySymbol.get(symbol);
+            const trade = tradeBySymbol.get(symbol);
+            const outcome = outcomeBySymbol.get(symbol);
+            const entryTs = row?.confirmationRetestTimestamp ?? row?.breakoutTimestamp ?? 'n/a';
+            const exitTs = outcome?.exitTimestamp ?? 'n/a';
+            return `<tr>
+                <td>${escapeHtml(symbol)}</td>
+                <td>${escapeHtml((candidate.side ?? 'n/a').toUpperCase())}</td>
+                <td>${escapeHtml(entryTs)}</td>
+                <td>${fmt(trade?.price ?? candidate.price)}</td>
+                <td>${fmt(trade?.qty, 4)}</td>
+                <td>${escapeHtml(exitTs)}</td>
+                <td>${fmt(outcome?.exitPrice)}</td>
+                <td>${fmt(outcome?.pnl)}</td>
+                <td>${escapeHtml(qualityValue(symbol))}</td>
+            </tr>`;
+        }).join('')
+        : '<tr><td colspan="9">No breakout candidates were recorded for this date.</td></tr>';
+
+    const evaluationRowsHtml = evaluationRows.length
+        ? evaluationRows.map((row) => {
+            const quality = row.qualityDetail;
+            const qualityLabel = quality
+                ? (quality.passed ? 'PASS' : `FAIL (${quality.failReason ?? 'rule'})`)
+                : 'n/a';
+            return `<tr>
+                <td>${escapeHtml(row.symbol)}</td>
+                <td>${escapeHtml((row.side ?? 'none').toUpperCase())}</td>
+                <td>${fmt(row.openingPrice)}</td>
+                <td>${fmt(row.openingRangeHigh)}</td>
+                <td>${fmt(row.openingRangeLow)}</td>
+                <td>${fmt(row.breakoutPrice)}</td>
+                <td>${escapeHtml(row.breakoutTimestamp ?? 'n/a')}</td>
+                <td>${fmt(row.confirmationRetestPrice)}</td>
+                <td>${escapeHtml(row.confirmationRetestTimestamp ?? 'n/a')}</td>
+                <td>${fmt(row.atr1m, 4)}</td>
+                <td>${escapeHtml(qualityLabel)}</td>
+            </tr>`;
+        }).join('')
+        : '<tr><td colspan="11">No evaluation rows were recorded for this date.</td></tr>';
+
+    const tradeRows = emulatedTrades.length
+        ? emulatedTrades.map((trade) => {
+            const outcome = outcomeBySymbol.get(trade.symbol);
+            return `<tr>
+                <td>${escapeHtml(trade.symbol)}</td>
+                <td>${escapeHtml((trade.side ?? 'n/a').toUpperCase())}</td>
+                <td>${fmt(trade.price)}</td>
+                <td>${fmt(trade.qty, 4)}</td>
+                <td>${fmt(trade.stopPrice)}</td>
+                <td>${fmt(trade.takeProfitPrice)}</td>
+                <td>${escapeHtml((outcome?.status ?? 'n/a').toUpperCase())}</td>
+                <td>${fmt(outcome?.exitPrice)}</td>
+                <td>${escapeHtml(outcome?.exitTimestamp ?? 'n/a')}</td>
+                <td>${fmt(outcome?.pnl)}</td>
+            </tr>`;
+        }).join('')
+        : '<tr><td colspan="10">No emulated trades were executed for this date.</td></tr>';
+
+    return `<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ORB Daily Session ${escapeHtml(record.sessionDate)}</title>
+    <style>
+        @page { size: A4 landscape; margin: 0.45in; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; color: #111827; margin: 0; }
+        h1, h2 { margin: 0 0 8px; }
+        h3 { margin: 0 0 8px; font-size: 14px; }
+        .subtitle { color: #4b5563; margin-bottom: 8px; }
+        .panel { border: 1px solid #d1d5db; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+        .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+        .metric { border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; }
+        .metric-label { font-size: 11px; color: #6b7280; text-transform: uppercase; }
+        .metric-value { font-size: 18px; font-weight: 700; margin-top: 4px; }
+        table { width: 100%; border-collapse: collapse; font-size: 11px; }
+        th, td { border: 1px solid #d1d5db; padding: 6px; text-align: left; vertical-align: top; }
+        th { background: #f3f4f6; text-transform: uppercase; font-size: 11px; letter-spacing: .02em; }
+        .pill-list { font-size: 11px; color: #374151; line-height: 1.45; }
+        .pill-list strong { color: #111827; }
+        .tight { margin-top: 6px; }
+    </style>
+</head>
+<body>
+    <section class="panel">
+        <h1>ORB Daily Session Report</h1>
+        <p class="subtitle">Session Date: ${escapeHtml(record.sessionDate)}</p>
+        <div class="grid">
+            <div class="metric"><div class="metric-label">Candidates</div><div class="metric-value">${totals.totalCandidatesBoughtAtStart ?? 0}</div></div>
+            <div class="metric"><div class="metric-label">Sold Long</div><div class="metric-value">${totals.numberOfCandidatesSoldLong ?? 0}</div></div>
+            <div class="metric"><div class="metric-label">Bought Short</div><div class="metric-value">${totals.numberOfCandidatesBoughtShort ?? 0}</div></div>
+            <div class="metric"><div class="metric-label">P/L</div><div class="metric-value">${Number(totals.totalProfitLossToDate ?? 0).toFixed(2)}</div></div>
+        </div>
+    </section>
+    <section class="panel">
+        <h2>Market Scan & Filters</h2>
+        <div class="grid">
+            <div class="metric"><div class="metric-label">Max Session Bars</div><div class="metric-value">${record.marketScan?.maxSessionBars ?? 0}</div></div>
+            <div class="metric"><div class="metric-label">Scanned Symbols</div><div class="metric-value">${record.mostActiveSymbolCount ?? mostActiveSymbols.length}</div></div>
+            <div class="metric"><div class="metric-label">Insufficient</div><div class="metric-value">${insufficientSymbols.length}</div></div>
+            <div class="metric"><div class="metric-label">Trade Type</div><div class="metric-value">${escapeHtml(record.marketScan?.candidateTradeType ?? 'n/a')}</div></div>
+        </div>
+        <p class="pill-list tight"><strong>Breakout Filters:</strong>
+            Confirm Candle ${breakoutFilters.breakoutConfirmationCandleMinutes ?? 'n/a'}m,
+            Quality ${breakoutFilters.breakoutQualityFiltersEnabled === true ? 'Enabled' : breakoutFilters.breakoutQualityFiltersEnabled === false ? 'Disabled' : 'n/a'},
+            Min Vol Exp ${fmt(breakoutFilters.breakoutMinVolumeExpansion)},
+            Min Rel Strength ${fmt(breakoutFilters.breakoutMinRelativeStrengthPct)}%,
+            Trend ${breakoutFilters.breakoutTrendTimeframeMinutes ?? 'n/a'}m x ${breakoutFilters.breakoutTrendLookbackBars ?? 'n/a'} bars
+        </p>
+        <p class="pill-list tight"><strong>Scanned Symbols:</strong> ${escapeHtml(mostActiveSymbols.join(', ') || 'None')}</p>
+        <p class="pill-list tight"><strong>Insufficient Symbols:</strong> ${escapeHtml(insufficientSymbols.join(', ') || 'None')}</p>
+    </section>
+    <section class="panel">
+        <h2>Breakout Candidate Detail</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Symbol</th>
+                    <th>Trade Type</th>
+                    <th>Entry Date</th>
+                    <th>Entry Price</th>
+                    <th>Quantity</th>
+                    <th>Exit Date</th>
+                    <th>Exit Price</th>
+                    <th>P/L</th>
+                    <th>Quality</th>
+                </tr>
+            </thead>
+            <tbody>${candidateRows}</tbody>
+        </table>
+    </section>
+    <section class="panel">
+        <h2>Evaluation Rows</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Symbol</th>
+                    <th>Side</th>
+                    <th>Open</th>
+                    <th>OR High</th>
+                    <th>OR Low</th>
+                    <th>Breakout</th>
+                    <th>Breakout Time</th>
+                    <th>Retest</th>
+                    <th>Retest Time</th>
+                    <th>ATR</th>
+                    <th>Quality</th>
+                </tr>
+            </thead>
+            <tbody>${evaluationRowsHtml}</tbody>
+        </table>
+    </section>
+    <section class="panel">
+        <h2>Executed Trades & Outcomes</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Symbol</th>
+                    <th>Side</th>
+                    <th>Entry</th>
+                    <th>Qty</th>
+                    <th>Stop</th>
+                    <th>Target</th>
+                    <th>Status</th>
+                    <th>Exit</th>
+                    <th>Exit Time</th>
+                    <th>P/L</th>
+                </tr>
+            </thead>
+            <tbody>${tradeRows}</tbody>
+        </table>
+    </section>
+</body>
+</html>`;
+}
+
+function renderWeeklyTradingActivityPdfHtml(weeklyReport: WeeklyTradingActivityReport): string {
+    const rows = weeklyReport.dailyRowsData.length
+        ? weeklyReport.dailyRowsData.map((day) => `<tr>
+            <td>${escapeHtml(day.sessionDate)}</td>
+            <td>${day.longs}</td>
+            <td>${day.shorts}</td>
+            <td>${day.pnl.toFixed(2)}</td>
+        </tr>`).join('')
+        : '<tr><td colspan="4">No reportable sessions for this week.</td></tr>';
+
+    return `<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapeHtml(weeklyReport.title)}</title>
+    <style>
+        @page { size: A4 portrait; margin: 0.5in; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; color: #111827; }
+        h1, h2 { margin: 0 0 8px; }
+        .panel { border: 1px solid #d1d5db; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+        .summary { color: #4b5563; margin: 0; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        th, td { border: 1px solid #d1d5db; padding: 7px; text-align: left; }
+        th { background: #f3f4f6; text-transform: uppercase; font-size: 11px; }
+    </style>
+</head>
+<body>
+    <section class="panel">
+        <h1>${escapeHtml(weeklyReport.title)}</h1>
+        <p class="summary">Totals | Longs: ${weeklyReport.longs} | Shorts: ${weeklyReport.shorts} | P/L: ${weeklyReport.pnl.toFixed(2)}</p>
+    </section>
+    <section class="panel">
+        <h2>Daily Summary</h2>
+        <table>
+            <thead><tr><th>Session Date</th><th>Longs</th><th>Shorts</th><th>P/L</th></tr></thead>
+            <tbody>${rows}</tbody>
+        </table>
+    </section>
+</body>
+</html>`;
+}
+
+function renderMonthlyTradingActivityPdfHtml(monthlyReport: MonthlyTradingActivityReport): string {
+    const rows = monthlyReport.weeklyReports.length
+        ? monthlyReport.weeklyReports.map((week) => `<tr>
+            <td>${escapeHtml(`${week.weekStartDate} to ${week.weekEndDate}`)}</td>
+            <td>${week.longs}</td>
+            <td>${week.shorts}</td>
+            <td>${week.pnl.toFixed(2)}</td>
+        </tr>`).join('')
+        : '<tr><td colspan="4">No reportable weekly data for this month.</td></tr>';
+
+    return `<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Monthly Trading Activity ${escapeHtml(monthlyReport.monthLabel)}</title>
+    <style>
+        @page { size: A4 portrait; margin: 0.5in; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; color: #111827; }
+        h1, h2 { margin: 0 0 8px; }
+        .panel { border: 1px solid #d1d5db; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+        .summary { color: #4b5563; margin: 0; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        th, td { border: 1px solid #d1d5db; padding: 7px; text-align: left; }
+        th { background: #f3f4f6; text-transform: uppercase; font-size: 11px; }
+    </style>
+</head>
+<body>
+    <section class="panel">
+        <h1>Month's Trading Activity</h1>
+        <p class="summary">Month: ${escapeHtml(monthlyReport.monthLabel)} | Longs: ${monthlyReport.totalLongs} | Shorts: ${monthlyReport.totalShorts} | P/L: ${monthlyReport.totalPnl.toFixed(2)}</p>
+    </section>
+    <section class="panel">
+        <h2>Weekly Summary</h2>
+        <table>
+            <thead><tr><th>Week</th><th>Longs</th><th>Shorts</th><th>P/L</th></tr></thead>
+            <tbody>${rows}</tbody>
+        </table>
+    </section>
+</body>
+</html>`;
+}
+
+async function buildRenderedReport(reportType: ReportKind, anchorDate?: string): Promise<RenderedReportResult> {
+    const anchor = parseAnchorDateInput(anchorDate);
+
+    if (reportType === 'today') {
+        const dailyRecord = await loadDailySessionRecord(anchor.isoDate);
+        if (!dailyRecord) {
+            throw new Error(`No daily report JSON was found for ${anchor.isoDate}.`);
+        }
+
+        return {
+            title: "Today's trading activity",
+            html: await renderDailySessionView(dailyRecord),
+            pdfHtml: renderDailySessionPdfHtml(dailyRecord),
+            baseName: `daily-trading-activity-${anchor.isoDate}`,
+        };
+    }
+
+    if (reportType === 'week') {
+        const weekly = await buildWeeklyTradingActivityReport(anchor.dateUtc);
+        return {
+            title: weekly.title,
+            html: renderWeeklyTradingActivityHtml(weekly),
+            pdfHtml: renderWeeklyTradingActivityPdfHtml(weekly),
+            baseName: `weekly-trading-activity-${weekly.weekEndDate}`,
+        };
+    }
+
+    const monthly = await buildMonthlyTradingActivityReport(anchor.dateUtc);
+    return {
+        title: monthly.title,
+        html: renderMonthlyTradingActivityHtml(monthly),
+        pdfHtml: renderMonthlyTradingActivityPdfHtml(monthly),
+        baseName: `monthly-trading-activity-${monthly.monthLabel}`,
+    };
+}
+
+async function writeRenderedReportArtifact(
+    report: RenderedReportResult,
+    format: DownloadFormat,
+): Promise<{ relativePath: string; downloadName: string }> {
+    fs.mkdirSync(reportsDir, { recursive: true });
+
+    if (format === 'html') {
+        const htmlReportPath = path.join(reportsDir, `${report.baseName}.html`);
+        writeHtmlReport(htmlReportPath, report.html);
+        return {
+            relativePath: relativeReportPath(htmlReportPath),
+            downloadName: `${report.baseName}.html`,
+        };
+    }
+
+    const pdfSourceHtmlPath = path.join(reportsDir, `${report.baseName}-pdf-source.html`);
+    const pdfReportPath = path.join(reportsDir, `${report.baseName}.pdf`);
+    writeHtmlReport(pdfSourceHtmlPath, report.pdfHtml ?? report.html);
     await renderHtmlToPdf(pdfSourceHtmlPath, pdfReportPath);
     fs.unlinkSync(pdfSourceHtmlPath);
 
     return {
-        title: "Month's trading activity",
-        htmlRelativePath: relativeReportPath(htmlReportPath),
-        pdfRelativePath: relativeReportPath(pdfReportPath),
+        relativePath: relativeReportPath(pdfReportPath),
+        downloadName: `${report.baseName}.pdf`,
     };
 }
 
 async function generateReportByType(reportType: ReportKind, anchorDate?: string): Promise<{
     title: string;
-    htmlRelativePath: string;
-    pdfRelativePath: string;
+    viewRelativePath: string;
 }> {
     const anchor = parseAnchorDateInput(anchorDate);
-
-    if (reportType === 'today') {
-        const daily = await orbService.generateDailyReport(anchor.isoDate, { usesHistoricData: true });
-        return {
-            title: "Today's trading activity",
-            htmlRelativePath: relativeReportPath(daily.htmlReportPath),
-            pdfRelativePath: relativeReportPath(daily.pdfReportPath),
-        };
-    }
-
-    if (reportType === 'week') {
-        const weekly = await generateWeeklyTradingActivityReport(anchor.dateUtc);
-        return {
-            title: weekly.title,
-            htmlRelativePath: weekly.htmlRelativePath,
-            pdfRelativePath: weekly.pdfRelativePath,
-        };
-    }
-
-    return generateMonthlyTradingActivityReport(anchor.dateUtc);
+    const rendered = await buildRenderedReport(reportType, anchor.isoDate);
+    return {
+        title: rendered.title,
+        viewRelativePath: `/api/reports/render?type=${encodeURIComponent(reportType)}&anchorDate=${encodeURIComponent(anchor.isoDate)}`,
+    };
 }
 
 async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: string, url: URL) {
@@ -1793,7 +2680,92 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
             return;
         }
 
-        sendFile(res, fullPath);
+        const download = url.searchParams.get('download') === '1';
+        sendFile(res, fullPath, download ? { downloadName: path.basename(fullPath) } : undefined);
+        return;
+    }
+
+    if (req.method === 'GET' && pathname === '/api/reports/render') {
+        const reportType = (url.searchParams.get('type') || '').trim() as ReportKind;
+        const anchorDate = (url.searchParams.get('anchorDate') || '').trim();
+
+        if (reportType !== 'today' && reportType !== 'week' && reportType !== 'month') {
+            sendJson(res, 400, { ok: false, message: 'Invalid report type. Use today, week, or month.' });
+            return;
+        }
+
+        try {
+            const rendered = await buildRenderedReport(reportType, anchorDate);
+            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+            res.end(rendered.html);
+        } catch (error) {
+            logger.error('Failed rendering report', { reportType, anchorDate, error });
+            sendJson(res, 500, {
+                ok: false,
+                message: error instanceof Error ? error.message : 'Failed rendering report',
+            });
+        }
+        return;
+    }
+
+    if (req.method === 'POST' && pathname === '/api/reports/download') {
+        let payload: DownloadReportRequest;
+        try {
+            payload = await parseJsonBody<DownloadReportRequest>(req);
+        } catch (error) {
+            sendJson(res, 400, {
+                ok: false,
+                message: error instanceof Error ? error.message : 'Bad request payload',
+            });
+            return;
+        }
+
+        const reportType = payload.reportType;
+        const format: DownloadFormat = payload.format === 'pdf' ? 'pdf' : 'html';
+        if (reportType !== 'today' && reportType !== 'week' && reportType !== 'month') {
+            sendJson(res, 400, {
+                ok: false,
+                message: 'Invalid report type. Use today, week, or month.',
+            });
+            return;
+        }
+
+        try {
+            const rendered = await buildRenderedReport(reportType, payload.anchorDate);
+            const written = await writeRenderedReportArtifact(rendered, format);
+            sendJson(res, 200, {
+                ok: true,
+                relativePath: written.relativePath,
+                format,
+                downloadUrl: `/api/reports/view?path=${encodeURIComponent(written.relativePath)}&download=1`,
+                generatedAt: new Date().toISOString(),
+            });
+        } catch (error) {
+            logger.error('Failed preparing report download', { reportType, anchorDate: payload.anchorDate, format, error });
+            sendJson(res, 500, {
+                ok: false,
+                message: error instanceof Error ? error.message : 'Failed preparing report download',
+            });
+        }
+        return;
+    }
+
+    if (req.method === 'GET' && pathname === '/api/reports/daily') {
+        const sessionDate = (url.searchParams.get('date') || '').trim();
+        if (!isValidSessionDate(sessionDate)) {
+            sendJson(res, 400, { ok: false, message: 'Missing or invalid date. Use YYYY-MM-DD.' });
+            return;
+        }
+
+        const record = await loadDailySessionRecord(sessionDate);
+        if (!record) {
+            sendJson(res, 404, { ok: false, message: `No daily report available for ${sessionDate}` });
+            return;
+        }
+
+        const html = await renderDailySessionView(record);
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.end(html);
         return;
     }
 
@@ -1811,6 +2783,11 @@ function handlePublic(req: IncomingMessage, res: ServerResponse, pathname: strin
     }
 
     sendFile(res, fullPath);
+}
+
+function legacyDailyReportDateFromPath(pathname: string): string | null {
+    const match = pathname.match(/\/orb-report-(\d{4}-\d{2}-\d{2})\.html$/);
+    return match ? match[1] : null;
 }
 
 function stampHtmlVersion() {
@@ -1846,6 +2823,17 @@ export function startWebServer(port = DEFAULT_PORT) {
         }
 
         if (pathname.startsWith('/reports/')) {
+            const legacyDailyDate = legacyDailyReportDateFromPath(pathname);
+            if (legacyDailyDate) {
+                const record = await loadDailySessionRecord(legacyDailyDate);
+                if (record) {
+                    const html = await renderDailySessionView(record);
+                    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+                    res.end(html);
+                    return;
+                }
+            }
+
             const relativePath = pathname.replace('/reports/', '');
             const reportPath = safeJoin(reportsDir, relativePath);
             if (!reportPath) {

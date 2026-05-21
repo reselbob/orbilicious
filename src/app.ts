@@ -88,12 +88,21 @@ function emitTradeCloseUiStatus(symbol: string, pnl: number) {
     emitUiStatusEvent({ message: `Closing ${symbol} for a ${status} of ${amount}.` });
 }
 
-async function emitWaitingForBreakoutsUiStatus(client: AlpacaClient) {
+function formatSessionDateForUi(sessionDate: string): string {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(sessionDate)) {
+        return sessionDate;
+    }
+
+    const [year, month, day] = sessionDate.split('-');
+    return `${month}/${day}/${year}`;
+}
+
+async function emitWaitingForBreakoutsUiStatus(client: AlpacaClient, sessionDate: string) {
     try {
         const symbols = await client.getMostActiveSymbols(env.quantityToRetrieve);
         if (symbols.length) {
             emitUiStatusEvent({
-                message: `Waiting for breakouts. Breakout candidate symbols: ${symbols.join(', ')}`,
+                message: `Waiting for breakouts. Breakout candidate symbols for day ${formatSessionDateForUi(sessionDate)}: ${symbols.join(', ')}`,
             });
             return;
         }
@@ -116,7 +125,7 @@ async function emitOpeningRangeUiStatusForSession(client: AlpacaClient, sessionD
         emitUiStatusEvent({
             message: `High range prices: ${openingRange.high.toFixed(2)}, Low range prices: ${openingRange.low.toFixed(2)}.`,
         });
-        await emitWaitingForBreakoutsUiStatus(client);
+        await emitWaitingForBreakoutsUiStatus(client, sessionDate);
     } catch {
         // If bars are unavailable, keep at least the initial status visible.
     }
@@ -927,9 +936,12 @@ export async function startApp(options?: StartAppOptions) {
             continuousMode,
         });
 
-        const allDates = sessionDatesFromAnchorToToday(env.sessionDate);
-        const weekdayDates = allDates.filter(isWeekdaySessionDate);
-        const endSessionDate = toNyParts(new Date(), strategyConfig.sessionTimezone).date;
+        const endSessionDate = continuousMode
+            ? toNyParts(new Date(), strategyConfig.sessionTimezone).date
+            : env.sessionDate;
+        const weekdayDates = continuousMode
+            ? sessionDatesFromAnchorToToday(env.sessionDate).filter(isWeekdaySessionDate)
+            : (isWeekdaySessionDate(env.sessionDate) ? [env.sessionDate] : []);
 
         emitBacktestProgressEvent({
             startSessionDate: env.sessionDate,
@@ -966,7 +978,10 @@ export async function startApp(options?: StartAppOptions) {
         for (const sessionDate of weekdayDates) {
             try {
                 await emitOpeningRangeUiStatusForSession(client, sessionDate);
-                const report = await client.generateOrbReport(sessionDate, { usesHistoricData: true });
+                const report = await client.generateOrbReport(sessionDate, {
+                    usesHistoricData: true,
+                    generateArtifacts: false,
+                });
                 emitHistoricalTradeMonitorEvents(report);
                 processedDates += 1;
             } catch (error) {
@@ -1058,7 +1073,7 @@ export async function startApp(options?: StartAppOptions) {
                         // Keep polling; opening-range bars may still be settling in the data source.
                     }
                 } else if (!reportedWaitingBreakoutsByDate.has(sessionDate)) {
-                    await emitWaitingForBreakoutsUiStatus(client);
+                    await emitWaitingForBreakoutsUiStatus(client, sessionDate);
                     reportedWaitingBreakoutsByDate.add(sessionDate);
                 }
 
@@ -1070,7 +1085,7 @@ export async function startApp(options?: StartAppOptions) {
                     forceExitTime: strategyConfig.forceExitTimeHHMM,
                 });
 
-                await client.generateOrbReport(sessionDate);
+                await client.generateOrbReport(sessionDate, { generateArtifacts: false });
                 reportedDates.add(sessionDate);
                 logger.info('Completed live end-of-day ORB report', { sessionDate });
 

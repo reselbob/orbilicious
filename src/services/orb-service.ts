@@ -8,6 +8,7 @@ import type {
 
 export type GenerateDailyReportOptions = {
     usesHistoricData?: boolean;
+    generateArtifacts?: boolean;
 };
 
 export type RunTradingCycleOptions = {
