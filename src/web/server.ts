@@ -3346,6 +3346,34 @@ export function startWebServer(port = DEFAULT_PORT) {
         const url = new URL(req.url, 'http://localhost');
         const pathname = url.pathname;
 
+
+        // Serve OpenAPI spec and Swagger UI HTML directly
+        if (pathname === '/api/openapi.yaml') {
+            // Try both possible locations
+            const openapiPaths = [
+                path.resolve(__dirname, 'openapi.yaml'),
+                path.resolve(process.cwd(), 'src', 'web', 'openapi.yaml'),
+            ];
+            const foundPath = openapiPaths.find((p) => fs.existsSync(p));
+            if (foundPath) {
+                sendFile(res, foundPath);
+            } else {
+                res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+                res.end('Not Found');
+            }
+            return;
+        }
+        if (pathname === '/api.html') {
+            const apiHtmlPath = path.resolve(publicDir, 'api.html');
+            if (fs.existsSync(apiHtmlPath)) {
+                sendFile(res, apiHtmlPath);
+            } else {
+                res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+                res.end('Not Found');
+            }
+            return;
+        }
+
         if (pathname.startsWith('/api/')) {
             await handleApi(req, res, pathname, url);
             return;

@@ -1,0 +1,495 @@
+openapi: 3.0.3
+info:
+  title: ORBilicious API
+  version: 1.0.0
+  description: API documentation for ORBilicious endpoints.
+servers:
+  - url: /api
+paths:
+  /optimal-filters:
+    get:
+      summary: Get optimal filter values
+      parameters:
+        - in: query
+          name: symbol
+          schema:
+            type: string
+          required: false
+        - in: query
+          name: sessionDate
+          schema:
+            type: string
+          required: false
+      responses:
+        '200':
+          description: Returns optimal filter values for trading strategy configuration, helping to tune the algorithm for best performance on a given symbol and session date.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OptimalFiltersResponse'
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: Health check endpoint to verify that the ORBilicious backend service is running and responsive.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /orbilicious/status:
+    get:
+      summary: Get current app state
+      responses:
+        '200':
+          description: Returns the current application state, including runtime status, session mode, and configuration details for monitoring and diagnostics.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppStatusResponse'
+  /alpaca/check-sip:
+    get:
+      summary: Check real-time data feed support
+      responses:
+        '200':
+          description: Checks if the Alpaca brokerage account supports real-time SIP (Securities Information Processor) data feed, which is required for live trading.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SipSupportResponse'
+  /orbilicious/activity:
+    get:
+      summary: Get recent activity lines
+      parameters:
+        - in: query
+          name: since
+          schema:
+            type: integer
+          required: false
+      responses:
+        '200':
+          description: Retrieves recent activity log lines from the ORBilicious process, including system, stdout, and stderr messages for debugging and audit purposes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityLinesResponse'
+  /orbilicious/trades:
+    get:
+      summary: Get recent trade events
+      parameters:
+        - in: query
+          name: since
+          schema:
+            type: integer
+          required: false
+      responses:
+        '200':
+          description: Returns a list of recent trade events, including order executions and trade lifecycle changes, for monitoring trading activity.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TradeEventsResponse'
+  /orbilicious/candidate-chart:
+    get:
+      summary: Get a chart SVG for a candidate trade
+      parameters:
+        - in: query
+          name: symbol
+          schema:
+            type: string
+        - in: query
+          name: sessionDate
+          schema:
+            type: string
+        - in: query
+          name: determinationTimestamp
+          schema:
+            type: string
+        - in: query
+          name: entryTimestamp
+          schema:
+            type: string
+        - in: query
+          name: entryPrice
+          schema:
+            type: number
+        - in: query
+          name: stopPrice
+          schema:
+            type: number
+        - in: query
+          name: targetPrice
+          schema:
+            type: number
+        - in: query
+          name: closePrice
+          schema:
+            type: number
+        - in: query
+          name: closeTimestamp
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Generates and returns an SVG chart visualizing a single candidate trade, including entry, stop, target, and price action for a given symbol and session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateChartResponse'
+  /orbilicious/candidate-charts:
+    get:
+      summary: Get multiple live candidate charts
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+          required: false
+      responses:
+        '200':
+          description: Returns SVG charts for multiple live candidate trades, providing a visual overview of current trade setups and their price action.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateChartsResponse'
+  /liquidity-zones:
+    get:
+      summary: Get liquidity zones for most active symbols
+      parameters:
+        - in: query
+          name: sessionDate
+          schema:
+            type: string
+          required: false
+        - in: query
+          name: limit
+          schema:
+            type: integer
+          required: false
+      responses:
+        '200':
+          description: Returns liquidity zone data for the most active symbols, helping to identify key price levels and support/resistance areas for trading decisions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiquidityZonesResponse'
+  /orbilicious/start:
+    post:
+      summary: Start the ORBilicious process
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '202':
+          description: Starts the ORBilicious trading process, initializing the trading session and preparing the system for live or emulated trading.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StartResponse'
+  /orbilicious/stop:
+    post:
+      summary: Stop the ORBilicious process
+      responses:
+        '202':
+          description: Stops the ORBilicious trading process, halting all trading activity and cleaning up session state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StopResponse'
+  /reports/generate:
+    post:
+      summary: Generate a report
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Generates a new trading report (HTML or PDF) for the requested period, summarizing session activity, trades, and performance metrics.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportGeneratedResponse'
+  /reports/view:
+    get:
+      summary: View a report file
+      parameters:
+        - in: query
+          name: path
+          schema:
+            type: string
+          required: true
+      responses:
+        '200':
+          description: Returns the contents of a previously generated report file for viewing or download.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportFileResponse'
+  /reports/render:
+    get:
+      summary: Render a report as HTML
+      parameters:
+        - in: query
+          name: type
+          schema:
+            type: string
+          required: true
+        - in: query
+          name: anchorDate
+          schema:
+            type: string
+          required: true
+      responses:
+        '200':
+          description: Renders a report as HTML for the specified type and anchor date, providing a human-readable summary of trading activity and results.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RenderedReportResponse'
+  /reports/download:
+    post:
+      summary: Download a report
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Provides a download link for a generated report (HTML or PDF), allowing users to save or share trading summaries.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DownloadLinkResponse'
+  /reports/daily:
+    get:
+      summary: Render a daily session report
+      parameters:
+        - in: query
+          name: date
+          schema:
+            type: string
+          required: true
+      responses:
+        '200':
+          description: Renders a detailed daily session report, including all trades, metrics, and charts for the specified trading day.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DailyReportResponse'
+
+components:
+  schemas:
+    OptimalFiltersResponse:
+      type: object
+      properties:
+        symbol:
+          type: string
+        sessionDate:
+          type: string
+        filters:
+          type: object
+          additionalProperties: true
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        uptime:
+          type: number
+    AppStatusResponse:
+      type: object
+      properties:
+        isRunning:
+          type: boolean
+        runtimeStatus:
+          type: string
+        sessionMode:
+          type: string
+        orbUiMessage:
+          type: string
+        candidateTradeType:
+          type: string
+        breakoutConfirmationCandleMinutes:
+          type: number
+        breakoutQualityFiltersEnabled:
+          type: boolean
+        breakoutMinVolumeExpansion:
+          type: number
+        breakoutMinRelativeStrengthPct:
+          type: number
+        breakoutTrendTimeframeMinutes:
+          type: number
+        breakoutTrendLookbackBars:
+          type: number
+    SipSupportResponse:
+      type: object
+      properties:
+        sipSupported:
+          type: boolean
+        message:
+          type: string
+    ActivityLinesResponse:
+      type: object
+      properties:
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActivityLine'
+    ActivityLine:
+      type: object
+      properties:
+        id:
+          type: integer
+        timestamp:
+          type: string
+        stream:
+          type: string
+        message:
+          type: string
+    TradeEventsResponse:
+      type: object
+      properties:
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/TradeEvent'
+    TradeEvent:
+      type: object
+      properties:
+        id:
+          type: integer
+        eventType:
+          type: string
+        sessionDate:
+          type: string
+        timestamp:
+          type: string
+        symbol:
+          type: string
+        side:
+          type: string
+        position:
+          type: string
+        qty:
+          type: number
+        entryPrice:
+          type: number
+        stopPrice:
+          type: number
+        targetPrice:
+          type: number
+        closePrice:
+          type: number
+        pnl:
+          type: number
+        reason:
+          type: string
+    CandidateChartResponse:
+      type: object
+      properties:
+        svg:
+          type: string
+        symbol:
+          type: string
+        sessionDate:
+          type: string
+    CandidateChartsResponse:
+      type: object
+      properties:
+        charts:
+          type: array
+          items:
+            $ref: '#/components/schemas/CandidateChartResponse'
+    LiquidityZonesResponse:
+      type: object
+      properties:
+        zones:
+          type: array
+          items:
+            type: object
+            properties:
+              symbol:
+                type: string
+              levels:
+                type: array
+                items:
+                  type: number
+    StartResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+    StopResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+    ReportGeneratedResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        relativePath:
+          type: string
+        format:
+          type: string
+        downloadUrl:
+          type: string
+        generatedAt:
+          type: string
+    ReportFileResponse:
+      type: object
+      properties:
+        content:
+          type: string
+        fileName:
+          type: string
+    RenderedReportResponse:
+      type: object
+      properties:
+        html:
+          type: string
+        summary:
+          type: string
+    DownloadLinkResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        relativePath:
+          type: string
+        format:
+          type: string
+        downloadUrl:
+          type: string
+        generatedAt:
+          type: string
+    DailyReportResponse:
+      type: object
+      properties:
+        sessionDate:
+          type: string
+        status:
+          type: string
+        trades:
+          type: array
+          items:
+            $ref: '#/components/schemas/TradeEvent'
+        metrics:
+          type: object
+        notes:
+          type: array
+          items:
+            type: string
