@@ -39,19 +39,16 @@ The intended user of this application is a person familiar with the practice of 
 **Be advised:** The creator of this application is NOT a financial adviser in any sense and takes absolutely no responsibility for the performance and behavior of this application. You are using the application AT YOUR OWN RISK!
 
 ## Strategy rules
+
+- **Retest target profit-taking:** If the stock price reaches the target price set for the retest (confirmation) bar, the trade is immediately closed and profit is taken. This ensures that profits are captured as soon as the retest target is achieved, regardless of further price action.
   
-- Universe: configurable number of most-active stocks (default 40), determined 30 seconds after the NY market opens.
-- Opening range: begins 1 minute after NY market open (default 9:31 ET) and ends 15 minutes later (default 9:46 ET).
-- Entry confirmation: first 1-minute candle close above OR high for long, or below OR low for short.
-- Breakout close confirmation: by default the breakout close must occur on a 5-minute confirmation candle outside the opening range (not just a 1-minute spike).
-- Breakout quality filters: by default candidates must pass volume expansion, relative strength/weakness, and higher-timeframe trend alignment checks.
-- Candidate trade type: Candidates can be filtered by direction. Long-only mode accepts only bullish breakouts. Short-only mode accepts only bearish breakouts. Both mode (default) accepts either direction.
+**Pre-retest target profit-taking:** If the stock price reaches the target price before a retest event occurs, the trade is immediately closed and profit is taken. This ensures that profits are captured if the target is achieved before a retest, regardless of further price action.
+
 - Selection: Breakout candidates for long and short trades determined by breakout score.
 - Stop loss:
   - Long: The stop loss for a long trade is primarily anchored to the low of the opening range. If a breakout wick anchor exists (the bar immediately before the breakout), its high is used as the stop price for additional conservatism. If not, the stop price defaults to the most conservative value among the opening-range low, an ATR-based stop (using a 14-bar average true range up to the confirmation retest), and the minimum stop-percent rule. The stop is only valid if the distance from entry to stop is positive and not equal at two-decimal precision. If these conditions are not met, the trade is rejected.
   - Short: The stop loss for a short trade is primarily anchored to the high of the opening range. If a breakout wick anchor exists (the bar immediately before the breakout), its low is used as the stop price for additional conservatism. If not, the stop price defaults to the most conservative value among the opening-range high, an ATR-based stop (using a 14-bar average true range up to the confirmation retest), and the minimum stop-percent rule. The stop is only valid if the distance from entry to stop is positive and not equal at two-decimal precision. If these conditions are not met, the trade is rejected.
-  - In both cases, the stop loss logic ensures that risk is managed by always using the most conservative and protective stop available, and trades with invalid or insufficient stop distance are not executed.
-- Profit target: 4R, where R is the entry-to-stop distance. by default (1:4), or the ratio declared in the environment variable `STOP_LOSS_PROFIT_RATIO`
+- Profit target: 4R, where R is the entry-to-stop distance. by default (1:4), or the ratio declared in the environment variable `STOP_LOSS_PROFIT_RATIO`. **If the price reaches the profit target before a retest confirmation occurs, the trade is closed immediately and profit is taken, regardless of retest status.**
 - Risk budget: total planned stop-loss exposure across the full basket defaults to $1000.
 - Basket normalization: trade sizes are scaled so the full basket fits both:
   - configured total stop-loss risk cap
