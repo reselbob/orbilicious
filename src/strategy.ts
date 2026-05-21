@@ -5,7 +5,8 @@ import { logger } from './logger';
 export function isWithinOpeningRange(bar: Bar, sessionDate: string, cfg: StrategyConfig): boolean {
     const p = toNyParts(bar.timestamp, cfg.sessionTimezone);
     if (p.date !== sessionDate) return false;
-    const startMinutes = cfg.sessionOpenHour * 60 + cfg.sessionOpenMinute;
+    // Opening range starts 1 minute after NY open
+    const startMinutes = cfg.sessionOpenHour * 60 + cfg.sessionOpenMinute + 1;
     const endMinutes = startMinutes + cfg.openingRangeMinutes - 1;
     const barMinutes = p.hour * 60 + p.minute;
     return barMinutes >= startMinutes && barMinutes <= endMinutes;
@@ -14,9 +15,19 @@ export function isWithinOpeningRange(bar: Bar, sessionDate: string, cfg: Strateg
 export function isAfterOpeningRange(bar: Bar, sessionDate: string, cfg: StrategyConfig): boolean {
     const p = toNyParts(bar.timestamp, cfg.sessionTimezone);
     if (p.date !== sessionDate) return false;
-    const cutoff = cfg.sessionOpenHour * 60 + cfg.sessionOpenMinute + cfg.openingRangeMinutes;
+    // Opening range ends 15 minutes after it starts (so 16 minutes after NY open)
+    const cutoff = cfg.sessionOpenHour * 60 + cfg.sessionOpenMinute + 1 + cfg.openingRangeMinutes;
     const barMinutes = p.hour * 60 + p.minute;
     return barMinutes >= cutoff;
+}
+
+// Helper to determine if current time is 30 seconds after NY open
+export function isThirtySecondsAfterOpen(bar: Bar, cfg: StrategyConfig): boolean {
+    const p = toNyParts(bar.timestamp, cfg.sessionTimezone);
+    const openMinutes = cfg.sessionOpenHour * 60 + cfg.sessionOpenMinute;
+    const barMinutes = p.hour * 60 + p.minute;
+    // This assumes bar timestamp is at least minute-level; for sub-minute, adjust as needed
+    return barMinutes === openMinutes && p.second >= 30;
 }
 
 export function isAfterTimeHHMM(bar: Bar, hhmm: string, timeZone = 'America/New_York'): boolean {

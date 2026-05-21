@@ -34,8 +34,8 @@ A complete Node + TypeScript starter project for a 15-minute Opening Range Break
 
 ## Strategy rules
   
-- Universe: configurable number of most-active stocks (default 40).
-- Opening range: 9:30 to 9:44 ET.
+- Universe: configurable number of most-active stocks (default 40), determined 30 seconds after the NY market opens.
+- Opening range: begins 1 minute after NY market open (default 9:31 ET) and ends 15 minutes later (default 9:46 ET).
 - Entry confirmation: first 1-minute candle close above OR high for long, or below OR low for short.
 - Breakout close confirmation: by default the breakout close must occur on a 5-minute confirmation candle outside the opening range (not just a 1-minute spike).
 - Breakout quality filters: by default candidates must pass volume expansion, relative strength/weakness, and higher-timeframe trend alignment checks.
