@@ -40,9 +40,9 @@ The intended user of this application is a person familiar with the practice of 
 
 ## Strategy rules
 
-- **Retest target profit-taking:** If the stock price reaches the target price set for the retest (confirmation) bar, the trade is immediately closed and profit is taken. This ensures that profits are captured as soon as the retest target is achieved, regardless of further price action.
+- Retest target profit-taking: If the stock price reaches the target price set for the retest (confirmation) bar, the trade is immediately closed and profit is taken. This ensures that profits are captured as soon as the retest target is achieved, regardless of further price action.
   
-**Pre-retest target profit-taking:** If the stock price reaches the target price before a retest event occurs, the trade is immediately closed and profit is taken. This ensures that profits are captured if the target is achieved before a retest, regardless of further price action.
+- Pre-retest target profit-taking: If the stock price reaches the target price before a retest event occurs, the trade is immediately closed and profit is taken. This ensures that profits are captured if the target is achieved before a retest, regardless of further price action.
 
 - Selection: Breakout candidates for long and short trades determined by breakout score.
 - Stop loss:
