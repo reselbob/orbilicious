@@ -1280,6 +1280,7 @@ function getBreakoutTrendLookbackBars() {
 
 function applyBreakoutQualityInputsEnabled() {
     const enabled = getBreakoutQualityFiltersEnabled();
+    breakoutConfirmationCandleMinutesInput.disabled = !enabled;
     breakoutMinVolumeExpansionInput.disabled = !enabled;
     breakoutMinRelativeStrengthPctInput.disabled = !enabled;
     breakoutTrendTimeframeMinutesInput.disabled = !enabled;

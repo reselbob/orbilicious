@@ -34,9 +34,6 @@ A complete Node + TypeScript starter project for a 15-minute Opening Range Break
 
 ## Strategy rules
   
-**Dynamic Maximize Profit Probability:**
-The Maximize Profit Probability button now uses a data-driven backend analysis. When clicked, it fetches recent historical price data for the selected symbol and session, analyzes volume expansion, relative strength, and trend, and automatically sets the breakout confirmation and quality filter values to optimize for current market conditions. This enables adaptive, context-aware filter settings for each run.
-
 - Universe: configurable number of most-active stocks (default 40).
 - Opening range: 9:30 to 9:44 ET.
 - Entry confirmation: first 1-minute candle close above OR high for long, or below OR low for short.
@@ -52,6 +49,8 @@ The Maximize Profit Probability button now uses a data-driven backend analysis. 
 - Basket normalization: trade sizes are scaled so the full basket fits both:
   - configured total stop-loss risk cap
   - Alpaca account buying power
+  
+- Dynamic Maximize Profit Probability: The Maximize Profit Probability button uses a data-driven backend analysis. When clicked, it fetches recent historical price data for the selected symbol and session, analyzes volume expansion, relative strength, and trend, and automatically sets the breakout confirmation and quality filter values to optimize for current market conditions. This enables adaptive, context-aware filter settings for each run.
 
 ## Operational Rules
 
