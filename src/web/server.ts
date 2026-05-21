@@ -115,8 +115,8 @@ type CandidateChartCard = {
 
 const DEFAULT_PORT = 8787;
 const publicDirCandidates = [
-    path.resolve(__dirname, 'public'),
     path.resolve(process.cwd(), 'src', 'web', 'public'),
+    path.resolve(__dirname, 'public'),
 ];
 const publicDir = publicDirCandidates.find((dir) => fs.existsSync(path.join(dir, 'index.html')))
     ?? publicDirCandidates[0];
@@ -1386,6 +1386,25 @@ async function generateReportByType(reportType: ReportKind, anchorDate?: string)
 }
 
 async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: string, url: URL) {
+    // Dynamic optimal filter values endpoint
+    if (req.method === 'GET' && pathname === '/api/optimal-filters') {
+        const symbol = (url.searchParams.get('symbol') || '').trim().toUpperCase() || 'SPY';
+        const sessionDate = url.searchParams.get('sessionDate') || '';
+        try {
+            const filters = await orbService.getOptimalFilters(symbol, sessionDate);
+            sendJson(res, 200, { ok: true, symbol, filters, usedFallback: false });
+        } catch (error) {
+            const fallbackFilters = orbService.getDefaultOptimalFilters();
+            sendJson(res, 200, {
+                ok: true,
+                symbol,
+                filters: fallbackFilters,
+                usedFallback: true,
+                message: error instanceof Error ? error.message : String(error),
+            });
+        }
+        return;
+    }
     if (req.method === 'GET' && pathname === '/api/health') {
         sendJson(res, 200, { ok: true, service: 'orbilicious-web' });
         return;

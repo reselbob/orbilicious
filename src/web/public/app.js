@@ -8,14 +8,65 @@ const MAX_PROFIT_FILTERS = {
     breakoutTrendLookbackBars: 3,
 };
 
+function setMaximizeProfitStatus(message, tone = 'muted') {
+    const statusEl = document.getElementById('maximizeProfitStatus');
+    if (!statusEl) return;
+    statusEl.textContent = message;
+    statusEl.classList.remove('text-muted', 'text-success', 'text-warning', 'text-danger');
+    if (tone === 'success') statusEl.classList.add('text-success');
+    else if (tone === 'warning') statusEl.classList.add('text-warning');
+    else if (tone === 'danger') statusEl.classList.add('text-danger');
+    else statusEl.classList.add('text-muted');
+}
+
 function setMaximizeProfitFilters() {
-    breakoutConfirmationCandleMinutesInput.value = MAX_PROFIT_FILTERS.breakoutConfirmationCandleMinutes;
-    breakoutQualityFiltersEnabledInput.checked = MAX_PROFIT_FILTERS.breakoutQualityFiltersEnabled;
-    breakoutMinVolumeExpansionInput.value = MAX_PROFIT_FILTERS.breakoutMinVolumeExpansion;
-    breakoutMinRelativeStrengthPctInput.value = MAX_PROFIT_FILTERS.breakoutMinRelativeStrengthPct;
-    breakoutTrendTimeframeMinutesInput.value = MAX_PROFIT_FILTERS.breakoutTrendTimeframeMinutes;
-    breakoutTrendLookbackBarsInput.value = MAX_PROFIT_FILTERS.breakoutTrendLookbackBars;
-    applyBreakoutQualityInputsEnabled();
+    const sessionDate = emulationDateInput && emulationDateInput.value ? emulationDateInput.value : '';
+    const symbol = 'SPY';
+
+    // Maximize Profit Probability always enables breakout quality filters.
+    breakoutQualityFiltersEnabledInput.checked = true;
+    breakoutQualityFiltersEnabledInput.dispatchEvent(new Event('input', { bubbles: true }));
+    breakoutQualityFiltersEnabledInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+    setMaximizeProfitStatus('Loading dynamic filter values...', 'muted');
+
+    fetch(`/api/optimal-filters?symbol=${encodeURIComponent(symbol)}&sessionDate=${encodeURIComponent(sessionDate)}`)
+        .then(async (res) => {
+            const data = await res.json().catch(() => ({ ok: false, message: 'Invalid server response.' }));
+            if (!res.ok || !data.ok || !data.filters) {
+                throw new Error(data.message || `Request failed (${res.status}).`);
+            }
+            return data;
+        })
+        .then((data) => {
+            const filters = data.filters;
+            breakoutConfirmationCandleMinutesInput.value = filters.breakoutConfirmationCandleMinutes;
+            breakoutQualityFiltersEnabledInput.checked = true;
+            breakoutQualityFiltersEnabledInput.dispatchEvent(new Event('input', { bubbles: true }));
+            breakoutQualityFiltersEnabledInput.dispatchEvent(new Event('change', { bubbles: true }));
+            breakoutMinVolumeExpansionInput.value = filters.breakoutMinVolumeExpansion;
+            breakoutMinRelativeStrengthPctInput.value = filters.breakoutMinRelativeStrengthPct;
+            breakoutTrendTimeframeMinutesInput.value = filters.breakoutTrendTimeframeMinutes;
+            breakoutTrendLookbackBarsInput.value = filters.breakoutTrendLookbackBars;
+            requestAnimationFrame(() => applyBreakoutQualityInputsEnabled());
+            if (data.usedFallback) {
+                setMaximizeProfitStatus('Applied fallback max-profit filters (dynamic analysis unavailable).', 'warning');
+            } else {
+                setMaximizeProfitStatus('Applied dynamic max-profit filters from market data.', 'success');
+            }
+        })
+        .catch((err) => {
+            breakoutConfirmationCandleMinutesInput.value = MAX_PROFIT_FILTERS.breakoutConfirmationCandleMinutes;
+            breakoutQualityFiltersEnabledInput.checked = true;
+            breakoutQualityFiltersEnabledInput.dispatchEvent(new Event('input', { bubbles: true }));
+            breakoutQualityFiltersEnabledInput.dispatchEvent(new Event('change', { bubbles: true }));
+            breakoutMinVolumeExpansionInput.value = MAX_PROFIT_FILTERS.breakoutMinVolumeExpansion;
+            breakoutMinRelativeStrengthPctInput.value = MAX_PROFIT_FILTERS.breakoutMinRelativeStrengthPct;
+            breakoutTrendTimeframeMinutesInput.value = MAX_PROFIT_FILTERS.breakoutTrendTimeframeMinutes;
+            breakoutTrendLookbackBarsInput.value = MAX_PROFIT_FILTERS.breakoutTrendLookbackBars;
+            requestAnimationFrame(() => applyBreakoutQualityInputsEnabled());
+            setMaximizeProfitStatus(`Applied local fallback max-profit filters: ${err.message}`, 'danger');
+        });
 }
 
 const maximizeProfitBtn = document.getElementById('maximizeProfitBtn');
