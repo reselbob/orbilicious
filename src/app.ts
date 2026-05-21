@@ -102,7 +102,7 @@ async function emitWaitingForBreakoutsUiStatus(client: AlpacaClient, sessionDate
         const symbols = await client.getMostActiveSymbols(env.quantityToRetrieve);
         if (symbols.length) {
             emitUiStatusEvent({
-                message: `Waiting for breakouts. Breakout candidate symbols for day ${formatSessionDateForUi(sessionDate)}: ${symbols.join(', ')}`,
+                message: `Identified Breakout Candidates, ${symbols.join(', ')}`,
             });
             return;
         }
@@ -110,7 +110,7 @@ async function emitWaitingForBreakoutsUiStatus(client: AlpacaClient, sessionDate
         // Fall through to default message if symbol lookup fails.
     }
 
-    emitUiStatusEvent({ message: 'Waiting for breakouts' });
+    emitUiStatusEvent({ message: 'No Breakout Candidates Identified Yet' });
 }
 
 async function emitOpeningRangeUiStatusForSession(client: AlpacaClient, sessionDate: string) {

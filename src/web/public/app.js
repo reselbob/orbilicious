@@ -1547,7 +1547,7 @@ function renderLiquidityZones(payload) {
         })
         .join('');
 
-            setActiveLiquidityRow(0, { focus: false });
+    setActiveLiquidityRow(0, { focus: false });
 }
 
 async function generateLiquidityZones() {

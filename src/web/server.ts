@@ -432,6 +432,50 @@ function isValidSessionDate(value: string): boolean {
     return value <= todayIso;
 }
 
+function isNyMarketOpenNow(): boolean {
+    const nyNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const dayOfWeek = nyNow.getDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+        return false;
+    }
+
+    const currentMinutes = nyNow.getHours() * 60 + nyNow.getMinutes();
+    const marketOpenMinutes = 9 * 60 + 30;
+    const marketCloseMinutes = 16 * 60;
+    return currentMinutes >= marketOpenMinutes && currentMinutes < marketCloseMinutes;
+}
+
+function currentNyDateIso(): string {
+    const nyNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const year = nyNow.getFullYear();
+    const month = String(nyNow.getMonth() + 1).padStart(2, '0');
+    const day = String(nyNow.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function refreshRuntimeStatusFromClock() {
+    if (!appState.isRunning || appState.runtimeStatus !== 'Waiting for market open') {
+        return;
+    }
+
+    if (!isNyMarketOpenNow()) {
+        return;
+    }
+
+    if (appState.sessionMode === 'EMULATION') {
+        const isLiveEmulation = Boolean(appState.emulationSessionDate)
+            && appState.emulationSessionDate === currentNyDateIso();
+        if (appState.continuous && isLiveEmulation) {
+            appState.runtimeStatus = 'Running in real time (emulation)';
+        }
+        return;
+    }
+
+    if (appState.continuous) {
+        appState.runtimeStatus = 'Running in real time';
+    }
+}
+
 function resolveAppEntryPoint(): { command: string; args: string[] } {
     const isSourceServerRuntime = __filename.endsWith('.ts');
     if (isSourceServerRuntime) {
@@ -817,6 +861,207 @@ function readDailySessionRecord(sessionDate: string): DailySessionRecord | null 
         });
         return null;
     }
+}
+
+function parseCandidateSymbolsFromUiMessage(message: string | null): string[] {
+    if (!message) {
+        return [];
+    }
+
+    const prefix = 'Identified Breakout Candidates,';
+    if (!message.startsWith(prefix)) {
+        return [];
+    }
+
+    return message
+        .slice(prefix.length)
+        .split(',')
+        .map((symbol) => symbol.trim().toUpperCase())
+        .filter((symbol) => symbol.length > 0);
+}
+
+function buildLiveSessionRecordFromRuntime(sessionDate: string): DailySessionRecord {
+    const events = tradeEvents
+        .filter((event) => event.sessionDate === sessionDate)
+        .sort((left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime());
+    const symbolsFromUi = parseCandidateSymbolsFromUiMessage(appState.orbUiMessage);
+
+    const openBySymbol = new Map<string, TradeEvent>();
+    const closeBySymbol = new Map<string, TradeEvent>();
+    for (const event of events) {
+        if (event.eventType === 'open') {
+            openBySymbol.set(event.symbol, event);
+            continue;
+        }
+
+        closeBySymbol.set(event.symbol, event);
+    }
+
+    const symbolSet = new Set<string>([
+        ...symbolsFromUi,
+        ...Array.from(openBySymbol.keys()),
+        ...Array.from(closeBySymbol.keys()),
+    ]);
+    const symbols = Array.from(symbolSet.values()).sort((a, b) => a.localeCompare(b));
+
+    const breakoutCandidates: NonNullable<DailySessionRecord['breakoutCandidates']> = [];
+    const emulatedTrades: NonNullable<DailySessionRecord['emulatedTrades']> = [];
+    const finalOutcomes: NonNullable<DailySessionRecord['finalOutcomes']> = [];
+    const candidateTradeActivity: Exclude<DailySessionRecord['candidateTradeActivity'], undefined | {
+        totalCandidatesBoughtAtStart?: number;
+        numberOfCandidatesSoldLong?: number;
+        numberOfCandidatesBoughtShort?: number;
+        totalCostOfBreakoutCandidatePurchases?: number;
+        totalAmountOfCashAtStopLossRisk?: number;
+        totalProfitLossToDate?: number;
+    }> = [];
+
+    let longCount = 0;
+    let shortCount = 0;
+    let totalCost = 0;
+    let totalRisk = 0;
+    let totalPnl = 0;
+
+    for (const symbol of symbols) {
+        const open = openBySymbol.get(symbol);
+        const close = closeBySymbol.get(symbol);
+
+        if (open) {
+            const qty = typeof open.qty === 'number' ? open.qty : 0;
+            const entryPrice = typeof open.entryPrice === 'number' ? open.entryPrice : undefined;
+            const stopPrice = typeof open.stopPrice === 'number' ? open.stopPrice : undefined;
+            const targetPrice = typeof open.targetPrice === 'number' ? open.targetPrice : undefined;
+            const side = open.side ?? 'buy';
+
+            breakoutCandidates.push({
+                symbol,
+                side,
+                price: entryPrice,
+                qty,
+                stopPrice,
+                takeProfitPrice: targetPrice,
+            });
+
+            emulatedTrades.push({
+                symbol,
+                side,
+                price: entryPrice,
+                qty,
+                stopPrice,
+                takeProfitPrice: targetPrice,
+            });
+
+            const isLong = side === 'buy';
+            if (isLong) {
+                longCount += 1;
+            } else {
+                shortCount += 1;
+            }
+
+            if (typeof entryPrice === 'number') {
+                totalCost += entryPrice * qty;
+            }
+
+            if (
+                typeof entryPrice === 'number'
+                && typeof stopPrice === 'number'
+                && Number.isFinite(entryPrice)
+                && Number.isFinite(stopPrice)
+            ) {
+                const riskPerShare = Math.abs(entryPrice - stopPrice);
+                totalRisk += riskPerShare * qty;
+            }
+
+            candidateTradeActivity.push({
+                symbol,
+                side,
+                position: open.position,
+                qty,
+                entryPrice,
+                stopPrice,
+                targetPrice,
+                closePrice: typeof close?.closePrice === 'number' ? close.closePrice : null,
+                pnl: typeof close?.pnl === 'number' ? close.pnl : undefined,
+                status: close ? 'closed' : 'open',
+                reason: close?.reason,
+                entryTimestamp: open.timestamp,
+                closeTimestamp: close?.timestamp ?? null,
+            });
+        }
+
+        if (close) {
+            const status = close.reason?.includes('stop')
+                ? 'stop'
+                : close.reason?.includes('profit')
+                    ? 'profit'
+                    : 'closed';
+            const pnl = typeof close.pnl === 'number' ? close.pnl : 0;
+            totalPnl += pnl;
+
+            finalOutcomes.push({
+                symbol,
+                side: close.side,
+                status,
+                pnl,
+                exitPrice: typeof close.closePrice === 'number' ? close.closePrice : null,
+                exitTimestamp: close.timestamp,
+            });
+        }
+    }
+
+    const mostActiveSymbols = symbolsFromUi.length ? symbolsFromUi : symbols;
+    const filtersEnabled = appState.breakoutQualityFiltersEnabled;
+
+    return {
+        sessionDate,
+        strategy: {
+            referenceSymbol: strategyConfig.symbol,
+            symbol: strategyConfig.symbol,
+            openingRangeMinutes: strategyConfig.openingRangeMinutes,
+            candleMinutes: strategyConfig.candleMinutes,
+            allowLong: strategyConfig.allowLong,
+            allowShort: strategyConfig.allowShort,
+        },
+        breakoutFilters: {
+            breakoutConfirmationCandleMinutes: appState.breakoutConfirmationCandleMinutes,
+            breakoutQualityFiltersEnabled: filtersEnabled,
+            breakoutMinVolumeExpansion: appState.breakoutMinVolumeExpansion,
+            breakoutMinRelativeStrengthPct: appState.breakoutMinRelativeStrengthPct,
+            breakoutTrendTimeframeMinutes: appState.breakoutTrendTimeframeMinutes,
+            breakoutTrendLookbackBars: appState.breakoutTrendLookbackBars,
+            enabled: filtersEnabled,
+            confirmationCandleMinutes: appState.breakoutConfirmationCandleMinutes,
+            minVolumeExpansion: appState.breakoutMinVolumeExpansion,
+            minRelativeStrengthPct: appState.breakoutMinRelativeStrengthPct,
+            trendTimeframeMinutes: appState.breakoutTrendTimeframeMinutes,
+            trendLookbackBars: appState.breakoutTrendLookbackBars,
+        },
+        totals: {
+            totalCandidatesBoughtAtStart: breakoutCandidates.length,
+            numberOfCandidatesSoldLong: longCount,
+            numberOfCandidatesBoughtShort: shortCount,
+            totalCostOfBreakoutCandidatePurchases: Number(totalCost.toFixed(2)),
+            totalAmountOfCashAtStopLossRisk: Number(totalRisk.toFixed(2)),
+            totalProfitLossToDate: Number(totalPnl.toFixed(2)),
+        },
+        marketScan: {
+            maxSessionBars: 0,
+            candidateTradeType: appState.candidateTradeType,
+            requestedLimit: appState.mostActiveSymbolLimit,
+            retrievedCount: mostActiveSymbols.length,
+        },
+        evaluationRows: [],
+        breakoutCandidates,
+        emulatedTrades,
+        finalOutcomes,
+        candidateTradeActivity,
+        mostActiveSymbols,
+        mostActiveSymbolCount: mostActiveSymbols.length,
+        insufficientSymbols: [],
+        notes: [
+            'Live session snapshot rendered from runtime state because canonical daily JSON has not been written yet.',
+        ],
+    };
 }
 
 async function buildDailySymbolCharts(record: DailySessionRecord, symbols: string[]): Promise<Map<string, string>> {
@@ -2200,7 +2445,11 @@ async function buildRenderedReport(reportType: ReportKind, anchorDate?: string):
     const anchor = parseAnchorDateInput(anchorDate);
 
     if (reportType === 'today') {
-        const dailyRecord = await loadDailySessionRecord(anchor.isoDate);
+        let dailyRecord = await loadDailySessionRecord(anchor.isoDate);
+        if (!dailyRecord && anchor.isoDate === nyDateString()) {
+            dailyRecord = buildLiveSessionRecordFromRuntime(anchor.isoDate);
+        }
+
         if (!dailyRecord) {
             throw new Error(`No daily report JSON was found for ${anchor.isoDate}.`);
         }
@@ -2297,6 +2546,7 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
     }
 
     if (req.method === 'GET' && pathname === '/api/orbilicious/status') {
+        refreshRuntimeStatusFromClock();
         sendJson(res, 200, appState);
         return;
     }
