@@ -19,8 +19,6 @@
 - [Notes](#notes)
 - [Recommended next upgrades](#recommended-next-upgrades)
 
-![ORBilicious Dashboard with Maximize Profit feature](docs/orb-dashboard-latest.png)
-
 A complete Node + TypeScript starter project for a 15-minute Opening Range Breakout strategy on 1-minute bars with:
 
 - Alpaca market-data integration
@@ -31,6 +29,8 @@ A complete Node + TypeScript starter project for a 15-minute Opening Range Break
 - Basket normalization to fit both total planned stop-loss risk and available buying power
 - Winston-based structured logging
 - Source-level ORB PDF report generation (end-of-day live or historical by date)
+
+![ORBilicious Dashboard with Maximize Profit feature](docs/dashboard.png)
 
 ## Strategy rules
   
