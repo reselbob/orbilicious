@@ -42,8 +42,9 @@ A complete Node + TypeScript starter project for a 15-minute Opening Range Break
 - Candidate trade type: Candidates can be filtered by direction. Long-only mode accepts only bullish breakouts. Short-only mode accepts only bearish breakouts. Both mode (default) accepts either direction.
 - Selection: Breakout candidates for long and short trades determined by breakout score.
 - Stop loss:
-  - Long: opening-range low
-  - Short: opening-range high
+  - Long: The stop loss for a long trade is primarily anchored to the low of the opening range. If a breakout wick anchor exists (the bar immediately before the breakout), its high is used as the stop price for additional conservatism. If not, the stop price defaults to the most conservative value among the opening-range low, an ATR-based stop (using a 14-bar average true range up to the confirmation retest), and the minimum stop-percent rule. The stop is only valid if the distance from entry to stop is positive and not equal at two-decimal precision. If these conditions are not met, the trade is rejected.
+  - Short: The stop loss for a short trade is primarily anchored to the high of the opening range. If a breakout wick anchor exists (the bar immediately before the breakout), its low is used as the stop price for additional conservatism. If not, the stop price defaults to the most conservative value among the opening-range high, an ATR-based stop (using a 14-bar average true range up to the confirmation retest), and the minimum stop-percent rule. The stop is only valid if the distance from entry to stop is positive and not equal at two-decimal precision. If these conditions are not met, the trade is rejected.
+  - In both cases, the stop loss logic ensures that risk is managed by always using the most conservative and protective stop available, and trades with invalid or insufficient stop distance are not executed.
 - Profit target: 4R, where R is the entry-to-stop distance. by default (1:4), or the ratio declared in the environment variable `STOP_LOSS_PROFIT_RATIO`
 - Risk budget: total planned stop-loss exposure across the full basket defaults to $1000.
 - Basket normalization: trade sizes are scaled so the full basket fits both:
