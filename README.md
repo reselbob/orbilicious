@@ -32,6 +32,12 @@ A complete Node + TypeScript starter project for a 15-minute Opening Range Break
 
 ![ORBilicious Dashboard with Maximize Profit feature](docs/dashboard.png)
 
+## Intended User
+
+The intended user of this application is a person familiar with the practice of active investing in the NY Stock Markets and understands the Open Range Breakout strategy as it applies to day trading.
+
+**Be advised:** The creator of this application is NOT a financial adviser in any sense and takes absolutely no responsibility for the performance and behavior of this application. You are using the application AT YOUR OWN RISK!
+
 ## Strategy rules
   
 - Universe: configurable number of most-active stocks (default 40), determined 30 seconds after the NY market opens.
