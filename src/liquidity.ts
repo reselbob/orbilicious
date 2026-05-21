@@ -42,6 +42,13 @@ export type SymbolLiquiditySnapshot = {
     sessionDate: string;
     latestPrice: number;
     totalVolume: number;
+    chartBars: Array<{
+        timestamp: string;
+        open: number;
+        high: number;
+        low: number;
+        close: number;
+    }>;
     zones: LiquidityZone[];
 };
 
@@ -263,12 +270,20 @@ export function findLiquidityZonesForSymbol(
 
     const latestPrice = sessionBars[sessionBars.length - 1].close;
     const totalVolume = sessionBars.reduce((sum, bar) => sum + bar.volume, 0);
+    const chartBars = sessionBars.map((bar) => ({
+        timestamp: bar.timestamp,
+        open: Number(bar.open.toFixed(4)),
+        high: Number(bar.high.toFixed(4)),
+        low: Number(bar.low.toFixed(4)),
+        close: Number(bar.close.toFixed(4)),
+    }));
 
     return {
         symbol,
         sessionDate,
         latestPrice: Number(latestPrice.toFixed(2)),
         totalVolume,
+        chartBars,
         zones,
     };
 }

@@ -427,8 +427,7 @@ function isValidSessionDate(value: string): boolean {
         return false;
     }
 
-    const today = new Date();
-    const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const todayIso = toNyParts(new Date(), strategyConfig.sessionTimezone).date;
 
     return value <= todayIso;
 }

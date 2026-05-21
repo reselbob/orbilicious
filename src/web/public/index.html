@@ -190,6 +190,177 @@
             border-radius: 0.45rem;
         }
 
+        .liquidity-zone-row {
+            cursor: pointer;
+        }
+
+        .liquidity-zone-row:hover {
+            background: #eef6ff !important;
+        }
+
+        .liquidity-zone-row:focus {
+            outline: 2px solid #0d6efd;
+            outline-offset: -2px;
+            background: #e7f1ff !important;
+        }
+
+        .liquidity-chart-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 1065;
+            background: rgba(15, 23, 42, 0.55);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+
+        .liquidity-chart-modal.d-none {
+            display: none !important;
+        }
+
+        .liquidity-chart-modal-pane {
+            width: min(980px, 100%);
+            max-height: 88vh;
+            overflow: auto;
+            background: #fff;
+            border: 1px solid #cbd5e1;
+            border-radius: 0.8rem;
+            box-shadow: 0 1rem 2.5rem rgba(15, 23, 42, 0.25);
+        }
+
+        .liquidity-chart-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.75rem 0.9rem;
+            border-bottom: 1px solid #e2e8f0;
+            position: sticky;
+            top: 0;
+            background: #fff;
+            z-index: 1;
+        }
+
+        .liquidity-chart-modal-body {
+            padding: 0.9rem;
+            background: #0f172a;
+            color: #e2e8f0;
+        }
+
+        .liquidity-chart-modal-body svg {
+            width: 100%;
+            height: auto;
+            display: block;
+            border-radius: 0.45rem;
+            border: 1px solid #1e293b;
+            background: #0b1220;
+        }
+
+        .liquidity-chart-modal-meta {
+            margin-top: 0.65rem;
+            background: rgba(15, 23, 42, 0.65);
+            border: 1px solid #334155;
+            border-radius: 0.5rem;
+            padding: 0.55rem;
+            font-size: 0.84rem;
+        }
+
+        .liquidity-chart-modal-bottom {
+            margin-top: 0.65rem;
+            display: grid;
+            grid-template-columns: minmax(0, 2fr) minmax(230px, 1fr);
+            gap: 0.65rem;
+            align-items: start;
+        }
+
+        .liquidity-chart-modal-legend {
+            background: rgba(15, 23, 42, 0.65);
+            border: 1px solid #334155;
+            border-radius: 0.5rem;
+            padding: 0.55rem;
+            font-size: 0.81rem;
+            color: #cbd5e1;
+        }
+
+        .liquidity-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+            line-height: 1.2;
+            margin-bottom: 0.35rem;
+        }
+
+        .liquidity-legend-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .liquidity-legend-line,
+        .liquidity-legend-swatch {
+            width: 1.15rem;
+            min-width: 1.15rem;
+            height: 0.6rem;
+            border-radius: 0.15rem;
+            border: 1px solid #64748b;
+            display: inline-block;
+        }
+
+        .liquidity-legend-line {
+            border-top-width: 2px;
+            border-left: 0;
+            border-right: 0;
+            border-bottom: 0;
+            border-radius: 0;
+            height: 0;
+            width: 1.25rem;
+            min-width: 1.25rem;
+        }
+
+        .liquidity-legend-line-latest {
+            border-top-color: #facc15;
+            border-top-style: dashed;
+        }
+
+        .liquidity-legend-line-zone {
+            border-top-color: #94a3b8;
+            border-top-style: dashed;
+        }
+
+        .liquidity-legend-line-candle-up {
+            border-top-color: #22c55e;
+            border-top-style: solid;
+        }
+
+        .liquidity-legend-line-candle-down {
+            border-top-color: #ef4444;
+            border-top-style: solid;
+        }
+
+        .liquidity-legend-swatch-high {
+            background: rgba(249, 115, 22, 0.55);
+            border-color: #f97316;
+        }
+
+        .liquidity-legend-swatch-low {
+            background: rgba(34, 197, 94, 0.55);
+            border-color: #22c55e;
+        }
+
+        .liquidity-legend-swatch-volume {
+            background: rgba(56, 189, 248, 0.55);
+            border-color: #38bdf8;
+        }
+
+        @media (max-width: 980px) {
+            .liquidity-chart-modal-bottom {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .liquidity-zone-row-selected {
+            background: #e7f1ff !important;
+        }
+
         #dailySummaryHeaderValue.result-profit {
             color: #198754;
             font-weight: 700;
@@ -1054,6 +1225,17 @@
             </div>
         </div>
         <div id="tradeChartTooltipBody" class="trade-chart-tooltip-body text-light small">Loading chart...</div>
+    </div>
+
+    <div id="liquidityChartModal" class="liquidity-chart-modal d-none" role="dialog" aria-modal="true"
+        aria-labelledby="liquidityChartTitle" aria-describedby="liquidityChartBody">
+        <div class="liquidity-chart-modal-pane">
+            <div class="liquidity-chart-modal-header">
+                <strong id="liquidityChartTitle">Liquidity Zone Chart</strong>
+                <button id="closeLiquidityChartModalBtn" type="button" class="btn btn-sm btn-outline-secondary">Close</button>
+            </div>
+            <div id="liquidityChartBody" class="liquidity-chart-modal-body">Loading chart...</div>
+        </div>
     </div>
 
     <script src="./app.js"></script>

@@ -102,6 +102,10 @@ const liquidityScanStatus = document.getElementById('liquidityScanStatus');
 const liquiditySummary = document.getElementById('liquiditySummary');
 const liquiditySortMode = document.getElementById('liquiditySortMode');
 const liquidityZoneBody = document.getElementById('liquidityZoneBody');
+const liquidityChartModal = document.getElementById('liquidityChartModal');
+const liquidityChartTitle = document.getElementById('liquidityChartTitle');
+const liquidityChartBody = document.getElementById('liquidityChartBody');
+const closeLiquidityChartModalBtn = document.getElementById('closeLiquidityChartModalBtn');
 const tradeMonitorBody = document.getElementById('tradeMonitorBody');
 const dailySummaryBody = document.getElementById('dailySummaryBody');
 const dailySummaryHeaderDetail = document.getElementById('dailySummaryHeaderDetail');
@@ -159,6 +163,7 @@ let latestOrbUiMessage = '';
 let latestRuntimeStatus = '';
 let latestIsRunning = false;
 let latestLiquidityPayload = null;
+let activeLiquidityRowIndex = -1;
 let sipProbeUnsupported = false;
 let activeFieldHelpAnchor = null;
 let activeTradeChartAnchor = null;
@@ -1197,6 +1202,285 @@ function liquidityTypeLabel(value) {
     return value || '-';
 }
 
+function liquidityTypeColor(zoneType) {
+    if (zoneType === 'swing-high') return '#f97316';
+    if (zoneType === 'swing-low') return '#22c55e';
+    return '#38bdf8';
+}
+
+function closeLiquidityChartModal() {
+    if (!liquidityChartModal) return;
+    liquidityChartModal.classList.add('d-none');
+    if (liquidityChartBody) {
+        liquidityChartBody.innerHTML = '';
+    }
+}
+
+function formatLiquidityChartTimeLabel(timestamp) {
+    try {
+        return new Intl.DateTimeFormat('en-US', {
+            timeZone: 'America/New_York',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+        }).format(new Date(timestamp));
+    } catch {
+        return '';
+    }
+}
+
+function renderLiquidityLegendHtml() {
+    return `<div class="liquidity-chart-modal-legend">
+        <div class="fw-semibold mb-2">Legend</div>
+        <div class="liquidity-legend-item"><span class="liquidity-legend-line liquidity-legend-line-latest"></span><span>Dotted yellow line: latest price</span></div>
+        <div class="liquidity-legend-item"><span class="liquidity-legend-line liquidity-legend-line-zone"></span><span>Dotted colored line: zone reference price</span></div>
+        <div class="liquidity-legend-item"><span class="liquidity-legend-swatch liquidity-legend-swatch-high"></span><span>Orange zone: swing high</span></div>
+        <div class="liquidity-legend-item"><span class="liquidity-legend-swatch liquidity-legend-swatch-low"></span><span>Green zone: swing low</span></div>
+        <div class="liquidity-legend-item"><span class="liquidity-legend-swatch liquidity-legend-swatch-volume"></span><span>Blue zone: volume node</span></div>
+        <div class="liquidity-legend-item"><span class="liquidity-legend-line liquidity-legend-line-candle-up"></span><span>Green candle: close above open</span></div>
+        <div class="liquidity-legend-item"><span class="liquidity-legend-line liquidity-legend-line-candle-down"></span><span>Red candle: close below open</span></div>
+    </div>`;
+}
+
+function renderLiquidityZoneChartSvg(symbol, sessionDate, zones, selectedZone, chartBars) {
+    if (!Array.isArray(zones) || !zones.length) {
+        return '<div class="small text-light">No zone data available for chart.</div>';
+    }
+
+    const latestPrice = zones[0]?.latestPrice;
+    const values = [];
+    for (const zone of zones) {
+        if (typeof zone.zoneLow === 'number') values.push(zone.zoneLow);
+        if (typeof zone.zoneHigh === 'number') values.push(zone.zoneHigh);
+        if (typeof zone.referencePrice === 'number') values.push(zone.referencePrice);
+    }
+    if (typeof latestPrice === 'number') values.push(latestPrice);
+
+    const bars = Array.isArray(chartBars)
+        ? chartBars
+            .map((bar) => {
+                const timeMs = new Date(bar.timestamp).getTime();
+                const open = Number(bar.open);
+                const high = Number(bar.high);
+                const low = Number(bar.low);
+                const close = Number(bar.close);
+                if (!Number.isFinite(timeMs) || !Number.isFinite(open) || !Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(close)) {
+                    return null;
+                }
+                values.push(open);
+                values.push(high);
+                values.push(low);
+                values.push(close);
+                return {
+                    timestamp: bar.timestamp,
+                    timeMs,
+                    open,
+                    high,
+                    low,
+                    close,
+                };
+            })
+            .filter((bar) => bar !== null)
+            .sort((left, right) => left.timeMs - right.timeMs)
+        : [];
+
+    const minPrice = Math.min(...values);
+    const maxPrice = Math.max(...values);
+    const pad = Math.max((maxPrice - minPrice) * 0.12, 0.08);
+    const yMin = Math.max(0, minPrice - pad);
+    const yMax = maxPrice + pad;
+    const range = Math.max(0.0001, yMax - yMin);
+
+    const width = 860;
+    const height = 520;
+    const margin = { top: 26, right: 20, bottom: 58, left: 86 };
+    const plotW = width - margin.left - margin.right;
+    const plotH = height - margin.top - margin.bottom;
+    const zoneBandW = plotW;
+    const zoneStartX = margin.left;
+    const zoneEndX = zoneStartX + zoneBandW;
+
+    const yFor = (price) => margin.top + ((yMax - price) / range) * plotH;
+    const minTimeMs = bars.length ? bars[0].timeMs : 0;
+    const maxTimeMs = bars.length ? bars[bars.length - 1].timeMs : 1;
+    const timeRangeMs = Math.max(1, maxTimeMs - minTimeMs);
+    const xForTime = (timeMs) => margin.left + ((timeMs - minTimeMs) / timeRangeMs) * plotW;
+    const ticks = Array.from({ length: 6 }, (_, index) => {
+        const value = yMin + (range * index) / 5;
+        return { value, y: yFor(value) };
+    });
+    const timeTicks = bars.length
+        ? Array.from({ length: 6 }, (_, index) => {
+            const ratio = index / 5;
+            const timeMs = minTimeMs + (timeRangeMs * ratio);
+            return {
+                x: margin.left + (plotW * ratio),
+                label: formatLiquidityChartTimeLabel(timeMs),
+            };
+        })
+        : [];
+
+    const rows = zones
+        .slice()
+        .sort((a, b) => b.strengthScore - a.strengthScore)
+        .map((zone) => {
+            const yTop = yFor(zone.zoneHigh);
+            const yBottom = yFor(zone.zoneLow);
+            const rectY = Math.min(yTop, yBottom);
+            const rectH = Math.max(2, Math.abs(yBottom - yTop));
+            const selected =
+                selectedZone
+                && zone.symbol === selectedZone.symbol
+                && zone.zoneLow === selectedZone.zoneLow
+                && zone.zoneHigh === selectedZone.zoneHigh
+                && zone.zoneType === selectedZone.zoneType;
+            const color = liquidityTypeColor(zone.zoneType);
+            const stroke = selected ? '#f8fafc' : '#1e293b';
+            const strokeWidth = selected ? 2.2 : 1.2;
+            const refY = yFor(zone.referencePrice);
+            return `<g>
+                <rect x="${zoneStartX}" y="${rectY}" width="${zoneBandW}" height="${rectH}" fill="${color}" fill-opacity="0.35" stroke="${stroke}" stroke-width="${strokeWidth}" />
+                <line x1="${zoneStartX}" y1="${refY}" x2="${zoneEndX}" y2="${refY}" stroke="${color}" stroke-width="1.2" stroke-dasharray="3 3" />
+            </g>`;
+        })
+        .join('');
+
+    const candleSlotWidth = bars.length ? (plotW / bars.length) : plotW;
+    const candleBodyWidth = Math.max(2, Math.min(10, candleSlotWidth * 0.65));
+    const candlesticks = bars
+        .map((bar) => {
+            const x = xForTime(bar.timeMs);
+            const yOpen = yFor(bar.open);
+            const yClose = yFor(bar.close);
+            const yHigh = yFor(bar.high);
+            const yLow = yFor(bar.low);
+            const bullish = bar.close >= bar.open;
+            const bodyTop = Math.min(yOpen, yClose);
+            const bodyHeight = Math.max(1.2, Math.abs(yClose - yOpen));
+            const color = bullish ? '#22c55e' : '#ef4444';
+            return `<g>
+                <line x1="${x}" y1="${yHigh}" x2="${x}" y2="${yLow}" stroke="${color}" stroke-width="1" />
+                <rect x="${x - (candleBodyWidth / 2)}" y="${bodyTop}" width="${candleBodyWidth}" height="${bodyHeight}" fill="${color}" fill-opacity="0.9" stroke="${color}" stroke-width="1" />
+            </g>`;
+        })
+        .join('');
+
+    const latestPriceLine = typeof latestPrice === 'number'
+        ? (() => {
+            const y = yFor(latestPrice);
+            return `<g>
+                <line x1="${margin.left}" y1="${y}" x2="${margin.left + plotW}" y2="${y}" stroke="#facc15" stroke-width="1.4" stroke-dasharray="6 3" />
+                <text x="${margin.left + 4}" y="${y - 6}" fill="#fde68a" font-size="11">Latest ${latestPrice.toFixed(2)}</text>
+            </g>`;
+        })()
+        : '';
+
+    return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Liquidity zone chart for ${symbol} on ${sessionDate}">
+        <rect x="0" y="0" width="${width}" height="${height}" fill="#0b1220" rx="8" />
+        <text x="${margin.left}" y="18" fill="#e2e8f0" font-size="14" font-weight="700">${symbol} Liquidity Zones - ${sessionDate}</text>
+        <line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${margin.top + plotH}" stroke="#475569" />
+        <line x1="${margin.left}" y1="${margin.top + plotH}" x2="${margin.left + plotW}" y2="${margin.top + plotH}" stroke="#475569" />
+        <text x="${margin.left - 64}" y="${margin.top - 8}" fill="#cbd5e1" font-size="11">Price ($)</text>
+        <text x="${margin.left + plotW - 96}" y="${margin.top + plotH + 34}" fill="#cbd5e1" font-size="11">Time (ET)</text>
+        ${ticks.map((tick) => `<g>
+            <line x1="${margin.left}" y1="${tick.y}" x2="${margin.left + plotW}" y2="${tick.y}" stroke="rgba(148,163,184,0.2)" />
+            <text x="${margin.left - 10}" y="${tick.y + 4}" fill="#cbd5e1" font-size="11" text-anchor="end">${tick.value.toFixed(2)}</text>
+        </g>`).join('')}
+        ${timeTicks.map((tick) => `<g>
+            <line x1="${tick.x}" y1="${margin.top + plotH}" x2="${tick.x}" y2="${margin.top + plotH + 5}" stroke="#94a3b8" />
+            <text x="${tick.x}" y="${margin.top + plotH + 20}" fill="#cbd5e1" font-size="10" text-anchor="middle">${tick.label}</text>
+        </g>`).join('')}
+        ${rows}
+        ${candlesticks}
+        ${latestPriceLine}
+    </svg>`;
+}
+
+function openLiquidityZoneChart(zone) {
+    if (!liquidityChartModal || !liquidityChartTitle || !liquidityChartBody) {
+        return;
+    }
+    if (!latestLiquidityPayload || !Array.isArray(latestLiquidityPayload.zones)) {
+        return;
+    }
+
+    const symbol = String(zone.symbol || '');
+    const sessionDate = String(zone.sessionDate || latestLiquidityPayload.sessionDate || '');
+    const symbolSnapshot = Array.isArray(latestLiquidityPayload.symbols)
+        ? latestLiquidityPayload.symbols.find((entry) => String(entry.symbol || '') === symbol && String(entry.sessionDate || '') === sessionDate)
+        : null;
+    const chartBars = symbolSnapshot && Array.isArray(symbolSnapshot.chartBars)
+        ? symbolSnapshot.chartBars
+        : [];
+    const symbolZones = latestLiquidityPayload.zones
+        .filter((entry) => String(entry.symbol || '') === symbol && String(entry.sessionDate || '') === sessionDate)
+        .slice()
+        .sort((left, right) => right.strengthScore - left.strengthScore);
+
+    liquidityChartTitle.textContent = `${symbol} Liquidity Zones`;
+    const svg = renderLiquidityZoneChartSvg(symbol, sessionDate, symbolZones, zone, chartBars);
+    const metaRows = symbolZones
+        .map((entry) => `<tr>
+            <td>${liquidityTypeLabel(entry.zoneType)}</td>
+            <td>${formatPrice(entry.zoneLow)} - ${formatPrice(entry.zoneHigh)}</td>
+            <td>${entry.strengthScore.toFixed(1)}</td>
+            <td>${entry.touchCount}</td>
+            <td>${formatPercent(entry.nearestPriceDistancePct)}</td>
+        </tr>`)
+        .join('');
+    liquidityChartBody.innerHTML = `${svg}
+        <div class="liquidity-chart-modal-bottom">
+            <div class="liquidity-chart-modal-meta">
+                <div class="fw-semibold mb-2">Zones for ${symbol} (${sessionDate})</div>
+                <table class="table table-sm table-dark table-striped align-middle mb-0">
+                    <thead><tr><th>Type</th><th>Zone</th><th>Strength</th><th>Touches</th><th>Distance</th></tr></thead>
+                    <tbody>${metaRows}</tbody>
+                </table>
+            </div>
+            ${renderLiquidityLegendHtml()}
+        </div>`;
+    liquidityChartModal.classList.remove('d-none');
+}
+
+function getLiquidityRows() {
+    if (!liquidityZoneBody) return [];
+    return Array.from(liquidityZoneBody.querySelectorAll('tr.liquidity-zone-row'));
+}
+
+function setActiveLiquidityRow(index, options = {}) {
+    const { focus = true } = options;
+    const rows = getLiquidityRows();
+    if (!rows.length) {
+        activeLiquidityRowIndex = -1;
+        return;
+    }
+
+    const normalizedIndex = Math.max(0, Math.min(index, rows.length - 1));
+    activeLiquidityRowIndex = normalizedIndex;
+
+    rows.forEach((row, rowIndex) => {
+        const isActive = rowIndex === normalizedIndex;
+        row.tabIndex = isActive ? 0 : -1;
+        row.classList.toggle('liquidity-zone-row-selected', isActive);
+    });
+
+    if (focus) {
+        rows[normalizedIndex].focus();
+    }
+}
+
+function activateLiquidityRow(row) {
+    if (!(row instanceof HTMLElement)) {
+        return;
+    }
+
+    const zoneIndex = Number(row.getAttribute('data-zone-index'));
+    const zones = sortedLiquidityZones(latestLiquidityPayload);
+    const zone = Number.isFinite(zoneIndex) ? zones[zoneIndex] : null;
+    if (!zone) return;
+    openLiquidityZoneChart(zone);
+}
+
 function sortedLiquidityZones(payload) {
     if (!payload || !Array.isArray(payload.zones)) {
         return [];
@@ -1248,10 +1532,10 @@ function renderLiquidityZones(payload) {
     const zones = sortedLiquidityZones(payload);
 
     liquidityZoneBody.innerHTML = zones
-        .map((zone) => {
+        .map((zone, index) => {
             const lastTouch = zone.lastTouchedAt ? formatTradeDateTime(zone.lastTouchedAt) : '-';
             return `
-                <tr>
+                <tr class="liquidity-zone-row" tabindex="-1" data-zone-index="${index}" data-symbol="${zone.symbol}" data-zone-low="${zone.zoneLow}" data-zone-high="${zone.zoneHigh}" data-zone-type="${zone.zoneType}">
                     <td><span class="trade-symbol">${zone.symbol}</span></td>
                     <td class="trade-price">${formatPrice(zone.zoneLow)} - ${formatPrice(zone.zoneHigh)}</td>
                     <td>${liquidityTypeLabel(zone.zoneType)}</td>
@@ -1262,6 +1546,8 @@ function renderLiquidityZones(payload) {
                 </tr>`;
         })
         .join('');
+
+            setActiveLiquidityRow(0, { focus: false });
 }
 
 async function generateLiquidityZones() {
@@ -1451,10 +1737,91 @@ if (closeTradeChartTooltipBtn) {
     closeTradeChartTooltipBtn.addEventListener('click', closeTradeChartTooltip);
 }
 
+if (closeLiquidityChartModalBtn) {
+    closeLiquidityChartModalBtn.addEventListener('click', closeLiquidityChartModal);
+}
+
+if (liquidityChartModal) {
+    liquidityChartModal.addEventListener('click', (event) => {
+        const target = event.target instanceof Element ? event.target : null;
+        if (!target) return;
+        if (target.id === 'liquidityChartModal') {
+            closeLiquidityChartModal();
+        }
+    });
+}
+
+if (liquidityZoneBody) {
+    liquidityZoneBody.addEventListener('click', (event) => {
+        const target = event.target instanceof Element ? event.target : null;
+        if (!target || !latestLiquidityPayload || !Array.isArray(latestLiquidityPayload.zones)) {
+            return;
+        }
+
+        const row = target.closest('tr.liquidity-zone-row');
+        if (!(row instanceof HTMLElement)) {
+            return;
+        }
+
+        const rows = getLiquidityRows();
+        const rowIndex = rows.indexOf(row);
+        if (rowIndex >= 0) {
+            setActiveLiquidityRow(rowIndex, { focus: false });
+        }
+        activateLiquidityRow(row);
+    });
+
+    liquidityZoneBody.addEventListener('keydown', (event) => {
+        const target = event.target instanceof Element ? event.target : null;
+        const row = target ? target.closest('tr.liquidity-zone-row') : null;
+        if (!(row instanceof HTMLElement)) {
+            return;
+        }
+
+        const rows = getLiquidityRows();
+        const rowIndex = rows.indexOf(row);
+        if (rowIndex < 0) {
+            return;
+        }
+
+        if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            setActiveLiquidityRow(rowIndex + 1, { focus: true });
+            return;
+        }
+
+        if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            setActiveLiquidityRow(rowIndex - 1, { focus: true });
+            return;
+        }
+
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            setActiveLiquidityRow(rowIndex, { focus: true });
+            activateLiquidityRow(row);
+        }
+    });
+
+    liquidityZoneBody.addEventListener('focusin', (event) => {
+        const target = event.target instanceof Element ? event.target : null;
+        const row = target ? target.closest('tr.liquidity-zone-row') : null;
+        if (!(row instanceof HTMLElement)) {
+            return;
+        }
+        const rows = getLiquidityRows();
+        const rowIndex = rows.indexOf(row);
+        if (rowIndex >= 0) {
+            setActiveLiquidityRow(rowIndex, { focus: false });
+        }
+    });
+}
+
 document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
         closeFieldHelp();
         closeTradeChartTooltip();
+        closeLiquidityChartModal();
     }
 });
 
