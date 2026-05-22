@@ -3,7 +3,6 @@
 ## Table of Contents
 
 - [Setup](#setup)
-  - [Configure .env](#configure-env)
 - [User Manual](#user-manual)
   - [Runtime Controls](#runtime-controls)
   - [How to use the Breakout Confirmation and Quality Filters](#how-to-use-the-breakout-confirmation-and-quality-filters)
