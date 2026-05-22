@@ -3,7 +3,7 @@ import { describe, it } from 'mocha';
 import { computeOpeningRange, generateOrbSignal } from '../src/strategy';
 import { Bar, Position, StrategyConfig } from '../src/types';
 import { AlpacaClient } from '../src/alpaca';
-import { findBreakoutCandidates } from '../src/app';
+import { findBreakoutCandidates, evaluateSymbol } from '../src/app';
 import { buildWeightedRiskTrades } from '../src/basket';
 import { env, strategyConfig } from '../src/config';
 import { logger } from '../src/logger';
@@ -554,5 +554,55 @@ describe('strategy integration', () => {
                 preBreakoutWick: expectedShortStop,
             },
         });
+    });
+
+    it('closes position when target was hit on an earlier bar but latest bar is below target', async () => {
+        const symbol = 'TGTEST';
+        const sessionDate = '2026-05-21';
+        const originalDryRun = env.dryRun;
+
+        env.dryRun = true;
+
+        try {
+            // Directly insert a simulated position so we don't need to reproduce
+            // the full breakout + retest logic.
+            const { simulatedPositions } = require('../src/app');
+            const entryPrice = 100;
+            const stopPrice = 95;
+            const takeProfitPrice = 110;
+
+            simulatedPositions.set(symbol, {
+                side: 'long',
+                entryPrice,
+                stopPrice,
+                takeProfitPrice,
+                qty: 10,
+            });
+
+            // Bars: an intermediate bar hits the target (high >= 110), then a
+            // pullback bar (latest bar) has high < 110.  Without the fix only
+            // latestBar is checked and the hit is missed.
+            const bars: Bar[] = [
+                { symbol, timestamp: '2026-05-21T13:30:00Z', open: 100, high: 101, low: 99, close: 100, volume: 1000 },
+                { symbol, timestamp: '2026-05-21T13:31:00Z', open: 100, high: 101, low: 99, close: 100, volume: 1000 },
+                // Target-hit bar (high >= takeProfitPrice)
+                { symbol, timestamp: '2026-05-21T13:32:00Z', open: 108, high: 112, low: 107, close: 111, volume: 1000 },
+                // Pullback bar — high < takeProfitPrice, becomes latestBar
+                { symbol, timestamp: '2026-05-21T13:33:00Z', open: 109, high: 109.5, low: 108, close: 109, volume: 1000 },
+            ];
+
+            class TestClient extends AlpacaClient {
+                async getMostActiveSymbols() { return [symbol]; }
+                async getOpenPosition() { return null; }
+                async getIntradayBars() { return bars; }
+            }
+            const client = new TestClient();
+
+            await evaluateSymbol(client, symbol, sessionDate);
+
+            expect(simulatedPositions.has(symbol)).to.be.false;
+        } finally {
+            env.dryRun = originalDryRun;
+        }
     });
 });

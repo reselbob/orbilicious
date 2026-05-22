@@ -193,7 +193,7 @@ function makeTimestamp(sessionDate: string, hourEt: number, minuteEt: number) {
  */
 function makeOpeningRangeBars(symbol: string, sessionDate: string, openingHigh = 101, openingLow = 99): Bar[] {
     const bars: Bar[] = [];
-    for (let minute = 30; minute <= 44; minute++) {
+    for (let minute = 31; minute <= 44; minute++) {
         bars.push({
             symbol,
             timestamp: makeTimestamp(sessionDate, 9, minute),
@@ -564,6 +564,7 @@ describe('Operational Rules support', () => {
         env.sessionDate = '2026-05-14';
         env.dryRun = true;
         env.quantityToRetrieve = 2;
+        strategyConfig.openingRangeMinutes = 14;
 
         withMockDateSequence([
             '2026-05-17T16:00:00Z',
@@ -590,13 +591,13 @@ describe('Operational Rules support', () => {
             return makeHistoricalReport(normalized);
         }) as typeof AlpacaClient.prototype.generateOrbReport);
 
-        await startApp();
+        await startApp({ continuous: true });
 
         const output = writes.join('');
         expect(generatedDates).to.deep.equal(['2026-05-14', '2026-05-15']);
         expect(output).to.include('__UI_STATUS__Determing open range.');
         expect(output).to.include('__UI_STATUS__High range prices: 101.00, Low range prices: 99.00.');
-        expect(output).to.include('__UI_STATUS__Waiting for breakouts. Breakout candidate symbols: SPY, AAPL');
+        expect(output).to.include('__UI_STATUS__Identified Breakout Candidates, SPY, AAPL');
         expect(output).to.include('__UI_STATUS__Closing SPY for a profit of $8.00.');
         expect(output.indexOf('__UI_STATUS__Closing SPY for a profit of $8.00.')).to.be.lessThan(output.indexOf('"eventType":"close"'));
     });
@@ -673,6 +674,7 @@ describe('Operational Rules support', () => {
         env.sessionDate = '';
         env.dryRun = false;
         env.pollIntervalSeconds = 0;
+        strategyConfig.openingRangeMinutes = 14;
 
         withMockDateSequence([
             ...Array.from({ length: 20 }, () => '2026-05-19T13:46:00Z'),
@@ -699,7 +701,7 @@ describe('Operational Rules support', () => {
         const output = writes.join('');
         expect(output).to.include('__UI_STATUS__Determing open range.');
         expect(output).to.include('__UI_STATUS__High range prices: 101.00, Low range prices: 99.00.');
-        expect(output).to.include('__UI_STATUS__Waiting for breakouts. Breakout candidate symbols: SPY, QQQ');
+        expect(output).to.include('__UI_STATUS__Identified Breakout Candidates, SPY, QQQ');
     });
 
     // Rules 10-16: Verifies that runCycle immediately returns without querying the
@@ -760,10 +762,15 @@ describe('Operational Rules support', () => {
                 this.closedSymbols.push(symbol);
                 return { symbol, status: 'closed' };
             }
+
+            async submitBracketOrder() {
+                return { id: 'mock-order', status: 'accepted' };
+            }
         }
 
-        env.dryRun = true;
+        env.dryRun = false;
         env.quantityToRetrieve = 3;
+        strategyConfig.openingRangeMinutes = 14;
 
         const writes = captureStdout();
         const client = new EvaluationClient();
@@ -771,7 +778,7 @@ describe('Operational Rules support', () => {
 
         expect(client.requestedLimit).to.equal(env.quantityToRetrieve);
         expect(firstPass.map((candidate) => candidate.symbol)).to.deep.equal(['READY']);
-        expect(client.closedSymbols).to.deep.equal([]);
+        expect(client.closedSymbols).to.deep.equal(['HAS_POSITION']);
         expect(writes.join('')).to.include('__UI_STATUS__Closing HAS_POSITION for a profit of $2.00.');
 
         const seededTrades = normalizeTradesToConstraints(buildWeightedRiskTrades(firstPass, 1000), 1000, 25000, 5000);
@@ -805,6 +812,7 @@ describe('Operational Rules support', () => {
         }
 
         env.quantityToRetrieve = 4;
+        strategyConfig.openingRangeMinutes = 14;
         const candidates = await findBreakoutCandidates(new CandidateClient(), '2026-05-19');
         const bySymbol = new Map(candidates.map((candidate) => [candidate.symbol, candidate]));
 
@@ -839,6 +847,7 @@ describe('Operational Rules support', () => {
         }
 
         const client = new CandidateTypeClient();
+        strategyConfig.openingRangeMinutes = 14;
 
         env.candidateTradeType = 'LONG';
         const longOnly = await findBreakoutCandidates(client, '2026-05-20');
@@ -878,6 +887,7 @@ describe('Operational Rules support', () => {
 
         env.breakoutConfirmationCandleMinutes = 5;
         env.breakoutQualityFiltersEnabled = true;
+        strategyConfig.openingRangeMinutes = 14;
         env.breakoutMinVolumeExpansion = 1.1;
         env.breakoutMinRelativeStrengthPct = 0.25;
         env.breakoutTrendTimeframeMinutes = 5;

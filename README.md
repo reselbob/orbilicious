@@ -392,7 +392,7 @@ The list below follows the order the app actually applies rules at runtime.
 
 - _Test: `rules.test.ts` (rules 7 and 32: end-of-day report)_
 
-#### Logging
+### Logging
 
 Logs are written to:
 
@@ -409,7 +409,7 @@ Use `.env` to control log verbosity:
 LOG_LEVEL=debug
 ```
 
-#### Environment variables
+### Environment variables
 
 The app reads configuration from `.env` (via `dotenv`) and supports the following variables.
 

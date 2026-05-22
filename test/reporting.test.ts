@@ -367,6 +367,7 @@ describe('reporting tests', () => {
 
     it('filters historical report trades by CANDIDATE_TRADE_TYPE', async function () {
         this.timeout(120_000);
+        (Reports as unknown as { fixedUniverseSymbols: string[] | null }).fixedUniverseSymbols = ['LONG_A', 'SHORT_A'];
         const client = new MixedDirectionDeterministicClient();
         const previousTradeType = env.candidateTradeType;
 
@@ -391,6 +392,7 @@ describe('reporting tests', () => {
 
     it('applies 5-minute close confirmation and quality filters in historical reports', async function () {
         this.timeout(120_000);
+        (Reports as unknown as { fixedUniverseSymbols: string[] | null }).fixedUniverseSymbols = ['SPIKE_ONLY', 'WEAK_RS', 'CONFIRMED'];
         const client = new QualityFilterDeterministicClient();
         const previousSettings = {
             breakoutConfirmationCandleMinutes: env.breakoutConfirmationCandleMinutes,

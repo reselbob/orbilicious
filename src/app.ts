@@ -556,16 +556,21 @@ export async function evaluateSymbol(
             }
 
 
-            // New logic: If price hits takeProfitPrice before retest confirmation, close trade and take profit immediately.
+            // Scan all session bars (not just latestBar) so a target/stop hit on any
+            // bar since entry is caught — even if the latest bar no longer shows the hit.
             if (env.dryRun && rawSim) {
-                const stopHit = rawSim.side === 'long'
-                    ? latestBar.low <= rawSim.stopPrice
-                    : latestBar.high >= rawSim.stopPrice;
-                const targetHit = rawSim.side === 'long'
-                    ? latestBar.high >= rawSim.takeProfitPrice
-                    : latestBar.low <= rawSim.takeProfitPrice;
+                const hitBar = sessionBars.find(bar => {
+                    if (rawSim.side === 'long') {
+                        return bar.low <= rawSim.stopPrice || bar.high >= rawSim.takeProfitPrice;
+                    } else {
+                        return bar.high >= rawSim.stopPrice || bar.low <= rawSim.takeProfitPrice;
+                    }
+                });
 
-                if (stopHit || targetHit) {
+                if (hitBar) {
+                    const stopHit = rawSim.side === 'long'
+                        ? hitBar.low <= rawSim.stopPrice
+                        : hitBar.high >= rawSim.stopPrice;
                     const exitPrice = stopHit
                         ? rawSim.stopPrice
                         : rawSim.takeProfitPrice;
@@ -589,7 +594,7 @@ export async function evaluateSymbol(
                     emitTradeMonitorEvent({
                         eventType: 'close',
                         sessionDate,
-                        timestamp: latestBar.timestamp,
+                        timestamp: hitBar.timestamp,
                         symbol,
                         side: rawSim.side === 'long' ? 'sell' : 'buy',
                         position: rawSim.side,
