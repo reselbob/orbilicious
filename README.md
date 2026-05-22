@@ -39,7 +39,7 @@ The intended user of this application is a person familiar with the practice of 
 
 ## Important Disclaimer
 
-**Be advised:** The creator of this application is NOT a financial adviser in any sense and takes absolutely no responsibility for the performance and behavior of this application. You are using the application AT YOUR OWN RISK!
+**Be advised:** The creator of this application is NOT a financial adviser in any sense and takes absolutely no responsibility for the performance and behavior of this application. **You are using the application AT YOUR OWN RISK!**
 
 ## User Manual
 
@@ -53,11 +53,9 @@ npm install
 
 1. Create and configure `.env` as described below.
 
-#### Configure `.env`
+2. Configure `.env`. Use [.env.example](.env.example) as the starting template for your local runtime configuration.
 
-Use [.env.example](.env.example) as the starting template for your local runtime configuration.
-
-Copy the file into `.env`:
+3. Copy the file into `.env`:
 
 ```bash
 cp .env.example .env
@@ -74,13 +72,13 @@ Then edit `.env` for operational use:
 
 The comments in [.env.example](/home/reselbob/Projects/orbilicious/.env.example) explain the meaning of each variable inline.
 
-1. Run in dev mode:
+Run in dev mode:
 
 ```bash
 npm run dev
 ```
 
-1. Or build and run:
+Or build and run:
 
 ```bash
 npm run build
