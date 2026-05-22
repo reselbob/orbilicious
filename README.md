@@ -2,22 +2,24 @@
 
 ## Table of Contents
 
-- [Strategy rules](#strategy-rules)
-- [Operational Rules](#operational-rules)
-- [Logging](#logging)
 - [Setup](#setup)
-  - [Configure `.env`](#configure-env)
+  - [Configure .env](#configure-env)
 - [Web UI Usage](#web-ui-usage)
   - [Runtime Controls](#runtime-controls)
   - [How to use the Breakout Confirmation and Quality Filters](#how-to-use-the-breakout-confirmation-and-quality-filters)
   - [Trade Monitor](#trade-monitor)
   - [Daily Summary](#daily-summary)
   - [Reports](#reports)
-- [Environment variables](#environment-variables)
-- [Report modes and scheduling](#report-modes-and-scheduling)
+  - [Reports Detail](#reports-detail)
+- [Developer Notes](#developer-notes)
+  - [Strategy Rules](#strategy-rules)
+  - [Operational Rules](#operational-rules)
+- [Logging](#logging)
+- [Environment Variables](#environment-variables)
+- [Report Modes and Scheduling](#report-modes-and-scheduling)
 - [Tests](#tests)
 - [Notes](#notes)
-- [Recommended next upgrades](#recommended-next-upgrades)
+- [Recommended Next Upgrades](#recommended-next-upgrades)
 
 A complete Node + TypeScript starter project for a 15-minute Opening Range Breakout strategy on 1-minute bars with:
 
@@ -41,6 +43,195 @@ The intended user of this application is a person familiar with the practice of 
 **Be advised:** The creator of this application is NOT a financial adviser in any sense and takes absolutely no responsibility for the performance and behavior of this application. You are using the application AT YOUR OWN RISK!
 
 ## User Manual
+
+### Setup
+
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+1. Create and configure `.env` as described below.
+
+#### Configure `.env`
+
+Use [.env.example](.env.example) as the starting template for your local runtime configuration.
+
+Copy the file into `.env`:
+
+```bash
+cp .env.example .env
+```
+
+Then edit `.env` for operational use:
+
+1. Set `APCA_API_KEY_ID` and `APCA_API_SECRET_KEY` to your own Alpaca credentials.
+2. Set `SESSION_MODE` to the mode you intend to run: `EMULATION`, `PAPER`, or `LIVE`. (This value is reset automatically when the UI resets the value.)
+3. Set `SESSION_DATE` to a historical date for historical emulation, or leave it blank for current-day operation. (This value is reset automatically when the UI resets the value.)
+4. Set `ALPACA_DATA_FEED` to `iex` if delayed market data is acceptable, or `sip` if your Alpaca account has the required entitlement for real-time consolidated market data.
+5. Review trading controls such as `MAX_TOTAL_RISK`, `HARD_BASKET_CAP`, `MAX_POSITION_NOTIONAL`, and `MAX_POSITIONS_PER_SIDE` before running. (This value is reset automatically when the UI resets the value.)
+6. If you are operating against live capital, verify `ALPACA_TRADING_BASE_URL`, `SESSION_MODE=LIVE`, and all risk settings before starting the app.
+
+The comments in [.env.example](/home/reselbob/Projects/orbilicious/.env.example) explain the meaning of each variable inline.
+
+1. Run in dev mode:
+
+```bash
+npm run dev
+```
+
+1. Or build and run:
+
+```bash
+npm run build
+npm start
+```
+
+### Web UI Usage
+
+The web client provides a complete control panel to run and monitor the ORB strategy. Start it using:
+
+```bash
+./start.sh
+```
+
+This launches both the trading app and web server on port 8787 (or use `WEB_PORT=XXXX ./start.sh` to override), and opens the browser automatically.
+
+#### Runtime Controls
+
+![Runtime Controls](docs/runtime-controls.png)
+
+- **Session mode**: Choose `EMULATION` (Alpaca data, no orders), `PAPER` (paper trading), or `LIVE` (live trading).
+- **Emulation session date**: For `EMULATION` mode, select a past trading day to run a historical backtest from that date forward.
+- **Most active stocks to scan**: Set how many most-active symbols are retrieved before breakout candidate discovery starts (default `40`).
+- **Continuous mode**: Run the strategy continuously (only available in `PAPER` and `LIVE` modes).
+- **Breakout Candidate Trade Type**: Filter which breakout directions are considered. Choose `Long` to accept only bullish breakouts, `Short` to accept only bearish breakouts, or `Both` (default) to accept either direction.
+- **Money in Account**: Total account capital available (default $25,000). Overrides `HARD_BASKET_CAP` env var.
+- **Max Amount to Risk Per Trading Day**: Maximum total stop-loss risk per day (default $1,000). Overrides `MAX_TOTAL_RISK` env var.
+- **Current status**: Real-time execution state (running, stopped, error details).
+- **Backtest progress**: For historical runs, shows current date, total dates, and completion.
+
+#### How to use the Breakout Confirmation and Quality Filters
+
+![Breakout Confirmation and Quality Filters](docs/breakout-quality-filter.png)
+
+Use these controls together to reduce false breakouts while keeping enough opportunities for your session goals.
+
+- **Breakout Confirmation Candle (minutes)** controls how long the breakout candle is. The breakout must close outside the opening range on this timeframe.
+- **Breakout Quality Filters** turns quality gating on or off. Quality gating means a breakout must pass all enabled quality checks before it is considered tradeable (volume expansion, relative strength/weakness, and higher-timeframe trend alignment).
+- **Min Volume Expansion** requires breakout-candle volume to exceed recent confirmation-candle volume by a minimum ratio.
+- **Min Relative Strength (%)** requires the breakout close to clear the opening-range boundary by a minimum percentage.
+- **Trend Timeframe (minutes)** and **Trend Lookback Bars** define higher-timeframe trend alignment.
+
+Suggested workflow:
+
+1. Start with defaults (`5` minute confirmation, quality filters enabled, volume `1.2`, relative strength `0.25`, trend timeframe `5`, lookback `3`).
+2. Run emulation for several recent sessions and watch candidate count, pass/fail behavior, and P/L consistency.
+3. Tighten filters when you see too many weak or whipsaw entries.
+4. Relax filters when you see too few candidates or missed valid breakouts.
+5. Change one setting at a time so you can attribute the impact.
+
+Concrete examples:
+
+1. **Noisy open, too many fake breaks**
+Configuration purpose: make confirmation stricter so brief spikes do not qualify as breakouts.
+Configuration: set Breakout Confirmation Candle to `10` and keep Quality Filters enabled.
+Expected outcome: fewer breakout candidates, later but higher-confidence entries, and reduced churn from quick reversals.
+
+2. **Strong trend day, but valid breakouts are being missed**
+Configuration purpose: allow more momentum names through without fully removing quality checks.
+Configuration: keep confirmation at `5`, lower Min Relative Strength to `0.15`, and lower Min Volume Expansion to `1.1`.
+Expected outcome: more candidates pass during broad directional moves, with a moderate increase in trade frequency and slightly more variance in results.
+
+3. **Choppy session with mixed direction and weak follow-through**
+Configuration purpose: require stronger alignment so only the cleanest breakouts survive.
+Configuration: keep confirmation at `5`, raise Min Volume Expansion to `1.5`, raise Min Relative Strength to `0.35`, set Trend Timeframe to `15`, and Trend Lookback Bars to `4`.
+Expected outcome: candidate list shrinks meaningfully, entries align better with sustained trend context, and whipsaw exposure is reduced at the cost of fewer total trades.
+
+#### Filter Attribution in Reports
+
+Every generated HTML report includes a **Filter Attribution** section that records the per-candidate quality-filter outcome for each symbol that produced a valid breakout bar and a confirmation retest during the session. This section is designed to support ongoing attribution analysis so you can tune filter settings over time with real data instead of intuition alone.
+
+Each row in the table shows:
+
+| Column | Description |
+|---|---|
+| **Symbol** | The evaluated ticker. |
+| **Side** | Breakout direction (`buy` or `sell`). |
+| **Result** | `PASS` if the candidate survived all quality checks; `FAIL` otherwise. |
+| **Vol Expansion** | Measured breakout-candle volume divided by prior confirmation-candle average, alongside the configured minimum. |
+| **VE ✓/✗** | Whether the volume expansion check passed. |
+| **Rel Strength** | Measured close-to-OR-boundary move as a percentage, alongside the configured minimum. |
+| **RS ✓/✗** | Whether the relative strength check passed. |
+| **Trend** | Whether the higher-timeframe close and slope were aligned with the breakout direction. |
+| **TR ✓/✗** | Whether the trend alignment check passed. |
+| **Notes** | Any skip reason or multi-filter fail details. When quality filters are globally disabled the row shows `filters off`. |
+
+When quality filters are disabled (`BREAKOUT_QUALITY_FILTERS_ENABLED=false`), all candidates automatically pass and the individual check columns show `n/a`. The table is still populated so you can see the full breakout universe considered for each session.
+
+Rows are sorted with passing candidates first. The interactive drilldown cards in the dark-mode HTML report also include a **Quality Filters** sub-table showing the same per-filter detail inline with the chart and trade data.
+
+To use this data for attribution analysis:
+
+1. Run emulation across several historical sessions using your current filter settings.
+2. Open the HTML reports and compare the **Filter Attribution** table against the **Breakout Candidates** trade outcomes.
+3. Look for patterns: symbols that failed a specific check but would have been profitable, or symbols that passed all checks but still lost.
+4. Adjust one filter threshold at a time and re-run the same sessions to measure the change in both candidate count and P/L distribution.
+
+#### Trade Monitor
+
+![Trade Monitor](docs/trade-monitor.png)
+
+Live view of all executed entries and closes with:
+
+- **Date/Time**: When the trade entry or close occurred.
+- **Status**: `OPEN` for entries, `CLOSED` for exits.
+- **Symbol, Side, Qty**: Trade details.
+- **Entry, Stop, Target, Close**: Price levels.
+- **P/L**: Profit/loss for closed trades, or "Open" for active positions. Green text for profits, red for losses.
+
+Expand the pane to see more rows at once.
+
+#### Daily Summary
+
+Aggregated profit/loss by trading day. Shows:
+
+- **Date**: Calendar day.
+- **Total P/L**: Sum of all closed-trade P/L for that day. Green for net profit, red for net loss.
+
+Expand the pane to scroll through historical days.
+
+#### Reports
+
+![Reports](docs/reports.png)
+
+- **Select a report**: Choose from generated HTML or PDF reports.
+- **Refresh List**: Fetch latest reports from the `reports/` directory.
+- **Open Report**: Display the selected report in an embedded viewer.
+
+#### Reports Detail
+
+![Reports](docs/reports-detail.png)
+
+The **candlestick chart** plots 1-minute bars for the session with the opening-range window shaded. The legend identifies:
+
+- **OR High/Low** (yellow dashes) — the opening-range boundaries calculated from the first 15 minutes of trading
+- **Stop price** (orange dashes) — the stop-loss level set at the wick of the bar immediately before the breakout
+- **Profit target** (green dashes) — the 4R take-profit level based on the entry-to-stop distance
+- **Close price** (purple dashes) — the exit price of the trade
+- **Entry triangle** (blue) — marks the entry point at the confirmation retest close
+- **Determination line** (vertical blue dashed) — the point at which the breakout retest was confirmed
+
+Below the chart, each detail row lists:
+
+- **Symbol** — the ticker being evaluated
+- **Opening price** — the first traded price of the session
+- **OR High / OR Low** — the highest and lowest prices during the 15-minute opening range
+- **Breakout price / timestamp** — the price and time of the first confirmation-candle close outside the opening range
+- **Confirmation retest price / timestamp** — the price and time of the subsequent bar that traded back to the opening-range boundary and closed beyond it
+- **ATR** — the 14-bar average true range used for evaluating stop-distance viability
+- **Side** — whether the breakout was a buy (long) or sell (short) signal
 
 ## Developer Notes
 
@@ -115,10 +306,6 @@ The list below follows the order the app actually applies rules at runtime.
 1. The candidate universe is the top `QUANTITY_TO_RETRIEVE` most-active symbols from Alpaca. The default is 40 symbols, and the Web UI can override this per run using the "Most active stocks to scan" spinner.
 
 - _Test: `rules.test.ts` (rules 10-16: candidate universe)_
-
-1. Candidate trade type filtering is applied next. If `CANDIDATE_TRADE_TYPE=LONG`, only breakout candidates with side `buy` are kept. If `CANDIDATE_TRADE_TYPE=SHORT`, only candidates with side `sell` are kept. If `CANDIDATE_TRADE_TYPE=LONG_AND_SHORT` (default), all candidates are kept.
-
-- _Test: `rules.test.ts` (rules 17-22b: trade type filter)_
 
 1. Each symbol is evaluated independently. If the account already has an open position in that symbol, the app switches from entry logic to profit-capture management instead of generating a new breakout candidate.
 
@@ -208,7 +395,7 @@ The list below follows the order the app actually applies rules at runtime.
 
 - _Test: `rules.test.ts` (rules 7 and 32: end-of-day report)_
 
-## Logging
+#### Logging
 
 Logs are written to:
 
@@ -225,196 +412,7 @@ Use `.env` to control log verbosity:
 LOG_LEVEL=debug
 ```
 
-## Setup
-
-1. Install dependencies:
-
-```bash
-npm install
-```
-
-1. Create and configure `.env` as described below.
-
-### Configure `.env`
-
-Use [.env.example](.env.example) as the starting template for your local runtime configuration.
-
-Copy the file into `.env`:
-
-```bash
-cp .env.example .env
-```
-
-Then edit `.env` for operational use:
-
-1. Set `APCA_API_KEY_ID` and `APCA_API_SECRET_KEY` to your own Alpaca credentials.
-2. Set `SESSION_MODE` to the mode you intend to run: `EMULATION`, `PAPER`, or `LIVE`. (This value is reset automatically when the UI resets the value.)
-3. Set `SESSION_DATE` to a historical date for historical emulation, or leave it blank for current-day operation. (This value is reset automatically when the UI resets the value.)
-4. Set `ALPACA_DATA_FEED` to `iex` if delayed market data is acceptable, or `sip` if your Alpaca account has the required entitlement for real-time consolidated market data.
-5. Review trading controls such as `MAX_TOTAL_RISK`, `HARD_BASKET_CAP`, `MAX_POSITION_NOTIONAL`, and `MAX_POSITIONS_PER_SIDE` before running. (This value is reset automatically when the UI resets the value.)
-6. If you are operating against live capital, verify `ALPACA_TRADING_BASE_URL`, `SESSION_MODE=LIVE`, and all risk settings before starting the app.
-
-The comments in [.env.example](/home/reselbob/Projects/orbilicious/.env.example) explain the meaning of each variable inline.
-
-1. Run in dev mode:
-
-```bash
-npm run dev
-```
-
-1. Or build and run:
-
-```bash
-npm run build
-npm start
-```
-
-## Web UI Usage
-
-The web client provides a complete control panel to run and monitor the ORB strategy. Start it using:
-
-```bash
-./start.sh
-```
-
-This launches both the trading app and web server on port 8787 (or use `WEB_PORT=XXXX ./start.sh` to override), and opens the browser automatically.
-
-### Runtime Controls
-
-![Runtime Controls](docs/runtime-controls.png)
-
-- **Session mode**: Choose `EMULATION` (Alpaca data, no orders), `PAPER` (paper trading), or `LIVE` (live trading).
-- **Emulation session date**: For `EMULATION` mode, select a past trading day to run a historical backtest from that date forward.
-- **Most active stocks to scan**: Set how many most-active symbols are retrieved before breakout candidate discovery starts (default `40`).
-- **Continuous mode**: Run the strategy continuously (only available in `PAPER` and `LIVE` modes).
-- **Breakout Candidate Trade Type**: Filter which breakout directions are considered. Choose `Long` to accept only bullish breakouts, `Short` to accept only bearish breakouts, or `Both` (default) to accept either direction.
-- **Money in Account**: Total account capital available (default $25,000). Overrides `HARD_BASKET_CAP` env var.
-- **Max Amount to Risk Per Trading Day**: Maximum total stop-loss risk per day (default $1,000). Overrides `MAX_TOTAL_RISK` env var.
-- **Current status**: Real-time execution state (running, stopped, error details).
-- **Backtest progress**: For historical runs, shows current date, total dates, and completion.
-
-### How to use the Breakout Confirmation and Quality Filters
-
-![Breakout Confirmation and Quality Filters](docs/breakout-quality-filter.png)
-
-Use these controls together to reduce false breakouts while keeping enough opportunities for your session goals.
-
-- **Breakout Confirmation Candle (minutes)** controls how long the breakout candle is. The breakout must close outside the opening range on this timeframe.
-- **Breakout Quality Filters** turns quality gating on or off. Quality gating means a breakout must pass all enabled quality checks before it is considered tradeable (volume expansion, relative strength/weakness, and higher-timeframe trend alignment).
-- **Min Volume Expansion** requires breakout-candle volume to exceed recent confirmation-candle volume by a minimum ratio.
-- **Min Relative Strength (%)** requires the breakout close to clear the opening-range boundary by a minimum percentage.
-- **Trend Timeframe (minutes)** and **Trend Lookback Bars** define higher-timeframe trend alignment.
-
-Suggested workflow:
-
-1. Start with defaults (`5` minute confirmation, quality filters enabled, volume `1.2`, relative strength `0.25`, trend timeframe `5`, lookback `3`).
-2. Run emulation for several recent sessions and watch candidate count, pass/fail behavior, and P/L consistency.
-3. Tighten filters when you see too many weak or whipsaw entries.
-4. Relax filters when you see too few candidates or missed valid breakouts.
-5. Change one setting at a time so you can attribute the impact.
-
-Concrete examples:
-
-1. **Noisy open, too many fake breaks**
-Configuration purpose: make confirmation stricter so brief spikes do not qualify as breakouts.
-Configuration: set Breakout Confirmation Candle to `10` and keep Quality Filters enabled.
-Expected outcome: fewer breakout candidates, later but higher-confidence entries, and reduced churn from quick reversals.
-
-2. **Strong trend day, but valid breakouts are being missed**
-Configuration purpose: allow more momentum names through without fully removing quality checks.
-Configuration: keep confirmation at `5`, lower Min Relative Strength to `0.15`, and lower Min Volume Expansion to `1.1`.
-Expected outcome: more candidates pass during broad directional moves, with a moderate increase in trade frequency and slightly more variance in results.
-
-3. **Choppy session with mixed direction and weak follow-through**
-Configuration purpose: require stronger alignment so only the cleanest breakouts survive.
-Configuration: keep confirmation at `5`, raise Min Volume Expansion to `1.5`, raise Min Relative Strength to `0.35`, set Trend Timeframe to `15`, and Trend Lookback Bars to `4`.
-Expected outcome: candidate list shrinks meaningfully, entries align better with sustained trend context, and whipsaw exposure is reduced at the cost of fewer total trades.
-
-### Filter Attribution in Reports
-
-Every generated HTML report includes a **Filter Attribution** section that records the per-candidate quality-filter outcome for each symbol that produced a valid breakout bar and a confirmation retest during the session. This section is designed to support ongoing attribution analysis so you can tune filter settings over time with real data instead of intuition alone.
-
-Each row in the table shows:
-
-| Column | Description |
-|---|---|
-| **Symbol** | The evaluated ticker. |
-| **Side** | Breakout direction (`buy` or `sell`). |
-| **Result** | `PASS` if the candidate survived all quality checks; `FAIL` otherwise. |
-| **Vol Expansion** | Measured breakout-candle volume divided by prior confirmation-candle average, alongside the configured minimum. |
-| **VE ✓/✗** | Whether the volume expansion check passed. |
-| **Rel Strength** | Measured close-to-OR-boundary move as a percentage, alongside the configured minimum. |
-| **RS ✓/✗** | Whether the relative strength check passed. |
-| **Trend** | Whether the higher-timeframe close and slope were aligned with the breakout direction. |
-| **TR ✓/✗** | Whether the trend alignment check passed. |
-| **Notes** | Any skip reason or multi-filter fail details. When quality filters are globally disabled the row shows `filters off`. |
-
-When quality filters are disabled (`BREAKOUT_QUALITY_FILTERS_ENABLED=false`), all candidates automatically pass and the individual check columns show `n/a`. The table is still populated so you can see the full breakout universe considered for each session.
-
-Rows are sorted with passing candidates first. The interactive drilldown cards in the dark-mode HTML report also include a **Quality Filters** sub-table showing the same per-filter detail inline with the chart and trade data.
-
-To use this data for attribution analysis:
-
-1. Run emulation across several historical sessions using your current filter settings.
-2. Open the HTML reports and compare the **Filter Attribution** table against the **Breakout Candidates** trade outcomes.
-3. Look for patterns: symbols that failed a specific check but would have been profitable, or symbols that passed all checks but still lost.
-4. Adjust one filter threshold at a time and re-run the same sessions to measure the change in both candidate count and P/L distribution.
-
-### Trade Monitor
-
-![Trade Monitor](docs/trade-monitor.png)
-
-Live view of all executed entries and closes with:
-
-- **Date/Time**: When the trade entry or close occurred.
-- **Status**: `OPEN` for entries, `CLOSED` for exits.
-- **Symbol, Side, Qty**: Trade details.
-- **Entry, Stop, Target, Close**: Price levels.
-- **P/L**: Profit/loss for closed trades, or "Open" for active positions. Green text for profits, red for losses.
-
-Expand the pane to see more rows at once.
-
-### Daily Summary
-
-Aggregated profit/loss by trading day. Shows:
-
-- **Date**: Calendar day.
-- **Total P/L**: Sum of all closed-trade P/L for that day. Green for net profit, red for net loss.
-
-Expand the pane to scroll through historical days.
-
-### Reports
-
-![Reports](docs/reports.png)
-
-- **Select a report**: Choose from generated HTML or PDF reports.
-- **Refresh List**: Fetch latest reports from the `reports/` directory.
-- **Open Report**: Display the selected report in an embedded viewer.
-
-### Reports Detail
-
-![Reports](docs/reports-detail.png)
-
-The **candlestick chart** plots 1-minute bars for the session with the opening-range window shaded. The legend identifies:
-
-- **OR High/Low** (yellow dashes) — the opening-range boundaries calculated from the first 15 minutes of trading
-- **Stop price** (orange dashes) — the stop-loss level set at the wick of the bar immediately before the breakout
-- **Profit target** (green dashes) — the 4R take-profit level based on the entry-to-stop distance
-- **Close price** (purple dashes) — the exit price of the trade
-- **Entry triangle** (blue) — marks the entry point at the confirmation retest close
-- **Determination line** (vertical blue dashed) — the point at which the breakout retest was confirmed
-
-Below the chart, each detail row lists:
-
-- **Symbol** — the ticker being evaluated
-- **Opening price** — the first traded price of the session
-- **OR High / OR Low** — the highest and lowest prices during the 15-minute opening range
-- **Breakout price / timestamp** — the price and time of the first confirmation-candle close outside the opening range
-- **Confirmation retest price / timestamp** — the price and time of the subsequent bar that traded back to the opening-range boundary and closed beyond it
-- **ATR** — the 14-bar average true range used for evaluating stop-distance viability
-- **Side** — whether the breakout was a buy (long) or sell (short) signal
-
-## Environment variables
+#### Environment variables
 
 The app reads configuration from `.env` (via `dotenv`) and supports the following variables.
 
@@ -461,7 +459,7 @@ Notes:
 - Numeric values must parse as valid numbers or startup will fail fast.
 - `ALPACA_DATA_FEED=iex` still allows the app to run, but prices can lag real-time market websites. Use `ALPACA_DATA_FEED=sip` when you need real-time Alpaca data and your account is entitled to that feed.
 
-## Report modes and scheduling
+### Report modes and scheduling
 
 - **Live end-of-day mode (default):** If `SESSION_DATE` is not set, app runs current-day scheduling, starts trading logic at market open, generates one end-of-day ORB report after market close, then exits.
 - **Live continuous mode:** Start with `--continuous` (or `-c`) to keep the process running across sessions. In this mode, data gathering/trade cycles run while NY markets are open, end-of-day report generation runs once per session, and the app waits for the next session instead of exiting.
@@ -480,7 +478,7 @@ npm run dev -- --continuous
 SESSION_DATE=2026-05-14 npm run dev
 ```
 
-## Tests
+### Tests
 
 This project uses Mocha + Chai for integration tests.
 
@@ -501,7 +499,7 @@ Run tests with:
 npm test
 ```
 
-## Notes
+### Notes
 
 - This project uses direct Alpaca REST calls rather than a separate SDK wrapper.
 - Bracket orders are submitted using Alpaca's `/v2/orders` endpoint.
@@ -509,7 +507,7 @@ npm test
 - Realized losses can still exceed planned stop-loss exposure because of slippage, fast markets, gaps, and execution behavior.
 - This should be tested in Alpaca PAPER mode before any live use.
 
-## Recommended next upgrades
+### Recommended next upgrades
 
 - Check open orders before sizing and execution.
 - Persist daily execution state so restarts do not lose duplicate-entry protection.
