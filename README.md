@@ -14,19 +14,18 @@
 - [Developer Notes](#developer-notes)
   - [Strategy Rules](#strategy-rules)
   - [Operational Rules](#operational-rules)
-- [Logging](#logging)
-- [Environment Variables](#environment-variables)
-- [Report Modes and Scheduling](#report-modes-and-scheduling)
-- [Tests](#tests)
+  - [Logging](#logging)
+  - [Environment Variables](#environment-variables)
+  - [Report Modes and Scheduling](#report-modes-and-scheduling)
+  - [Tests](#tests)
 - [Notes](#notes)
 - [Recommended Next Upgrades](#recommended-next-upgrades)
 
-A complete Node + TypeScript starter project for a 15-minute Opening Range Breakout strategy on 1-minute bars with:
+ORBilicious is a Node + TypeScript project that implements the [Opening Range Breakout strategy](https://www.equiti.com/sc-en/news/trading-ideas/opening-range-breakout-strategy/). The project determines stocks that have a good probability of realizing proft by determining candidates for breakout price action by observicing the price behavior of a predefined number of most active stocks trading at the first minute that the NY Markets are open and then observes those stocks for a 15-minute timespan according to 1-minute candlesticks to determine Breakout Candidates, those stocks which will rise or fall in price and be traded in long or short transactions. The project has the following features:
 
-- Alpaca market-data integration
+- [Alpaca](https://alpaca.markets/) market-data integration
 - Alpaca bracket-order execution
 - Configurable most-active universe scan (default 40)
-- Top-10 long and top-10 short candidate selection
 - Weighted total stop-risk sizing
 - Basket normalization to fit both total planned stop-loss risk and available buying power
 - Winston-based structured logging
