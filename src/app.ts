@@ -21,6 +21,7 @@ interface SimulatedPosition {
     side: 'long' | 'short';
     entryPrice: number;
     stopPrice: number;
+    stopLossPct?: number;
     takeProfitPrice: number;
     qty: number;
 }
@@ -36,6 +37,7 @@ type TradeMonitorEvent = {
     qty: number;
     entryPrice?: number;
     stopPrice?: number;
+    stopLossPct?: number;
     targetPrice?: number;
     closePrice?: number;
     pnl?: number;
@@ -150,6 +152,7 @@ function emitHistoricalTradeMonitorEvents(report: OrbReportResult) {
             qty: trade.qty,
             entryPrice: trade.price,
             stopPrice: trade.stopPrice,
+            stopLossPct: trade.stopLossPct,
             targetPrice: trade.takeProfitPrice,
             reason: 'historical emulation entry',
         });
@@ -821,6 +824,7 @@ export async function executeSizedTrades(
                 qty: trade.qty,
                 entryPrice: trade.price,
                 stopPrice: trade.stopPrice,
+                stopLossPct: trade.stopLossPct,
                 targetPrice: trade.takeProfitPrice,
                 reason: 'dry-run simulated entry',
             });
@@ -829,6 +833,7 @@ export async function executeSizedTrades(
                 side: trade.side === 'buy' ? 'long' : 'short',
                 entryPrice: trade.price,
                 stopPrice: trade.stopPrice,
+                stopLossPct: trade.stopLossPct,
                 takeProfitPrice: trade.takeProfitPrice,
                 qty: trade.qty,
             });
@@ -860,6 +865,7 @@ export async function executeSizedTrades(
             qty: trade.qty,
             entryPrice: trade.price,
             stopPrice: trade.stopPrice,
+            stopLossPct: trade.stopLossPct,
             targetPrice: trade.takeProfitPrice,
             reason: 'bracket order submitted',
         });

@@ -314,6 +314,21 @@ function todayIsoDate() {
     return `${year}-${month}-${day}`;
 }
 
+function isBeforeNyMarketOpen() {
+    const now = new Date();
+    const nyTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const dayOfWeek = nyTime.getDay();
+    // Markets closed on weekends (0 = Sunday, 6 = Saturday)
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+        return false;
+    }
+    const hours = nyTime.getHours();
+    const minutes = nyTime.getMinutes();
+    const currentMinutes = hours * 60 + minutes;
+    const marketOpenMinutes = 9 * 60 + 30;  // 9:30 AM = 570 minutes
+    return currentMinutes < marketOpenMinutes;
+}
+
 function areNYMarketsOpen() {
     const now = new Date();
     const nyTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
@@ -343,7 +358,10 @@ function isLiveEmulation() {
     const emulationDate = emulationDateInput.value;
     if (!emulationDate) return false;
     const today = todayIsoDate();
-    return emulationDate === today;
+    if (emulationDate !== today) return false;
+    // After market close, the backend switches to historical mode
+    if (!areNYMarketsOpen() && !isBeforeNyMarketOpen()) return false;
+    return true;
 }
 
 function syncEmulationControls() {
@@ -739,7 +757,7 @@ function renderDailySummary() {
 
 function renderTrades() {
     if (!tradeEvents.length) {
-        tradeMonitorBody.innerHTML = '<tr><td colspan="10" class="text-muted">No entries or closes have been recorded yet.</td></tr>';
+        tradeMonitorBody.innerHTML = '<tr><td colspan="11" class="text-muted">No entries or closes have been recorded yet.</td></tr>';
         renderDailySummary();
         return;
     }
@@ -761,6 +779,9 @@ function renderTrades() {
                 : '<span class="badge text-bg-primary">LONG</span>';
             const entry = event.eventType === 'open' ? formatPrice(event.entryPrice) : '-';
             const stop = event.eventType === 'open' ? formatPrice(event.stopPrice) : '-';
+            const stopPct = event.eventType === 'open' && typeof event.stopLossPct === 'number'
+                ? (event.stopLossPct * 100).toFixed(2) + '%'
+                : '-';
             const target = event.eventType === 'open' ? formatPrice(event.targetPrice) : '-';
             const close = event.eventType === 'close' ? formatPrice(event.closePrice) : '-';
 
@@ -808,6 +829,7 @@ function renderTrades() {
                     <td class="trade-price">${formatQty(event.qty)}</td>
                     <td class="trade-price">${entry}</td>
                     <td class="trade-price">${stop}</td>
+                    <td class="trade-price">${stopPct}</td>
                     <td class="trade-price">${target}</td>
                     <td class="trade-price">${close}</td>
                     <td class="trade-price ${resultClass}">${pnl}</td>

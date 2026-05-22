@@ -19,6 +19,7 @@ export type SizedTrade = BreakoutCandidate & {
     assignedRiskDollars: number;
     stopPrice: number;
     stopDistancePerShare: number;
+    stopLossPct: number;
     takeProfitPrice: number;
     qty: number;
     plannedRiskDollars: number;
@@ -116,20 +117,26 @@ export function buildWeightedRiskTrades(
             const assignedRiskDollars = maxTotalRisk * (candidate.score / totalScore);
 
             const wickAnchoredStopPrice = candidate.preBreakoutWickPrice;
-            const stopPrice =
-                wickAnchoredStopPrice != null
-                    ? wickAnchoredStopPrice
-                    : candidate.side === 'buy'
-                        ? Math.min(
-                            candidate.openingRangeLow,
-                            candidate.price - (candidate.atr1m ?? 0) * env.atrStopMultiple,
-                            candidate.price - candidate.price * env.minStopPct
-                        )
-                        : Math.max(
-                            candidate.openingRangeHigh,
-                            candidate.price + (candidate.atr1m ?? 0) * env.atrStopMultiple,
-                            candidate.price + candidate.price * env.minStopPct
-                        );
+
+            const minStopBound = candidate.side === 'buy'
+                ? candidate.price - candidate.price * env.minStopPct
+                : candidate.price + candidate.price * env.minStopPct;
+
+            const stopPrice = wickAnchoredStopPrice != null
+                ? candidate.side === 'buy'
+                    ? Math.min(wickAnchoredStopPrice, minStopBound)
+                    : Math.max(wickAnchoredStopPrice, minStopBound)
+                : candidate.side === 'buy'
+                    ? Math.min(
+                        candidate.openingRangeLow,
+                        candidate.price - (candidate.atr1m ?? 0) * env.atrStopMultiple,
+                        minStopBound
+                    )
+                    : Math.max(
+                        candidate.openingRangeHigh,
+                        candidate.price + (candidate.atr1m ?? 0) * env.atrStopMultiple,
+                        minStopBound
+                    );
 
             const stopDistancePerShare =
                 candidate.side === 'buy'
@@ -148,12 +155,14 @@ export function buildWeightedRiskTrades(
 
             const plannedRiskDollars = qty * stopDistancePerShare;
             const estimatedNotional = qty * candidate.price;
+            const stopLossPct = stopDistancePerShare / candidate.price;
 
             return {
                 ...candidate,
                 assignedRiskDollars,
                 stopPrice,
                 stopDistancePerShare,
+                stopLossPct,
                 takeProfitPrice,
                 qty,
                 plannedRiskDollars,
