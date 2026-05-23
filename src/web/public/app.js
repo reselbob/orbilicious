@@ -193,7 +193,7 @@ const fieldHelpContent = {
     continuousMode: {
         title: 'Continuous mode',
         subtitle: 'Keep ORBilicious running between sessions.',
-        text: 'When enabled, ORBilicious stays active and waits for the next market conditions instead of ending immediately after one pass. In emulation it is useful for live-style replay behavior.',
+        text: 'When enabled, ORBilicious stays active and waits for the next market conditions instead of ending immediately after one pass. In emulation it is useful for live-style replay behavior. OFF = selected date only | ON = selected date through today.',
     },
     candidateTradeType: {
         title: 'Breakout Candidate Trade Type',
