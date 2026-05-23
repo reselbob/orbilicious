@@ -118,6 +118,7 @@ const topTabButtons = document.querySelectorAll('[data-tab-target]');
 const topTabPanels = document.querySelectorAll('.top-tab-panel');
 const moneyInAccountSelect = document.getElementById('moneyInAccount');
 const maxRiskPerSessionSelect = document.getElementById('maxRiskPerSession');
+const currentBalanceDisplay = document.getElementById('currentBalanceDisplay');
 const stopProfitRatioSpinner = document.getElementById('stopProfitRatio');
 const breakoutConfirmationCandleMinutesInput = document.getElementById('breakoutConfirmationCandleMinutes');
 const breakoutQualityFiltersEnabledInput = document.getElementById('breakoutQualityFiltersEnabled');
@@ -945,6 +946,11 @@ async function refreshStatus() {
         startBtn.disabled = payload.isRunning === true;
         stopBtn.disabled = payload.isRunning !== true;
         renderBacktestProgress(payload.backtestProgress || null);
+        if (typeof payload.currentBalance === 'number') {
+            currentBalanceDisplay.textContent = `$${payload.currentBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        } else {
+            currentBalanceDisplay.textContent = '--';
+        }
         latestOrbUiMessage = typeof payload.orbUiMessage === 'string' ? payload.orbUiMessage : '';
         latestRuntimeStatus = typeof payload.runtimeStatus === 'string' ? payload.runtimeStatus : '';
         latestIsRunning = payload.isRunning === true;

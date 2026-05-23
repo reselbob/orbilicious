@@ -23,6 +23,7 @@ type AppState = {
     sessionMode: SessionMode;
     emulationSessionDate: string | null;
     moneyInAccount: number | null;
+    currentBalance: number | null;
     maxRiskPerSession: number | null;
     stopProfitRewardPart: number | null;
     mostActiveSymbolLimit: number;
@@ -300,6 +301,7 @@ const appState: AppState = {
     sessionMode: 'EMULATION',
     emulationSessionDate: null,
     moneyInAccount: null,
+    currentBalance: null,
     maxRiskPerSession: null,
     stopProfitRewardPart: null,
     mostActiveSymbolLimit: env.quantityToRetrieve,
@@ -398,6 +400,15 @@ function addTradeEvent(event: Omit<TradeEvent, 'id'>) {
 
     if (tradeEvents.length > MAX_TRADE_EVENTS) {
         tradeEvents = tradeEvents.slice(tradeEvents.length - MAX_TRADE_EVENTS);
+    }
+
+    // Update current balance from realized P&L on trade close
+    if (
+        event.eventType === 'close' &&
+        typeof event.pnl === 'number' &&
+        appState.currentBalance !== null
+    ) {
+        appState.currentBalance += event.pnl;
     }
 
     persistCanonicalDailySession(event.sessionDate);
@@ -704,6 +715,7 @@ function startOrbiliciousProcess(params: {
     appState.sessionMode = sessionMode;
     appState.emulationSessionDate = emulationSessionDate;
     appState.moneyInAccount = hardBasketCap ?? null;
+    appState.currentBalance = hardBasketCap ?? null;
     appState.maxRiskPerSession = maxTotalRisk ?? null;
     appState.stopProfitRewardPart = stopProfitRewardPart ?? null;
     appState.mostActiveSymbolLimit = mostActiveSymbolLimit;
