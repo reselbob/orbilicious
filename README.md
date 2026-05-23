@@ -9,7 +9,8 @@
   - [Trade Monitor](#trade-monitor)
   - [Daily Summary](#daily-summary)
   - [Reports](#reports)
-  - [Reports Detail](#reports-detail)
+  - [Reports Weekly Summary](#reports-daily-summary)
+  - [Reports Daily Detail](#reports-daily-detail)
 - [Developer Notes](#developer-notes)
   - [Strategy Rules](#strategy-rules)
   - [Operational Rules](#operational-rules)
@@ -206,9 +207,13 @@ Expand the pane to scroll through historical days.
 - **Refresh List**: Fetch latest reports from the `reports/` directory.
 - **Open Report**: Display the selected report in an embedded viewer.
 
-#### Reports Detail
+#### Reports Daily Summary
 
-![Reports](docs/reports-detail.png)
+![Reports Weekly Summary](docs/reports-detail.png)
+
+#### Reports Daily Detail
+
+![Reports Daily Detauk](docs/reports-drill-down-detail.png)
 
 The **candlestick chart** plots 1-minute bars for the session with the opening-range window shaded. The legend identifies:
 
