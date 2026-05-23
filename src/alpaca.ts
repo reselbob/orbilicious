@@ -40,6 +40,12 @@ function normalizeSessionDate(sessionDate?: Date | string): string {
     return toNyParts(new Date(), strategyConfig.sessionTimezone).date;
 }
 
+export type MostActiveSymbolDetail = {
+    symbol: string;
+    volume: number;
+    trade_count: number;
+};
+
 export class AlpacaClient {
     public readonly client = this;
 
@@ -107,6 +113,11 @@ export class AlpacaClient {
     }
 
     async getMostActiveSymbols(limit = 40): Promise<string[]> {
+        const details = await this.getMostActiveSymbolDetails(limit);
+        return details.map((d) => d.symbol);
+    }
+
+    async getMostActiveSymbolDetails(limit = 40): Promise<MostActiveSymbolDetail[]> {
         const url =
             `${env.dataBaseUrl}/v1beta1/screener/stocks/most-actives` +
             `?top=${encodeURIComponent(String(limit))}` +
@@ -122,15 +133,21 @@ export class AlpacaClient {
         }
 
         const json = await res.json() as {
-            most_actives?: Array<{ symbol: string }>;
-            data?: Array<{ symbol: string }>;
+            most_actives?: Array<{ symbol: string; volume: number; trade_count: number }>;
+            data?: Array<{ symbol: string; volume: number; trade_count: number }>;
         };
 
         const rows = json.most_actives ?? json.data ?? [];
-        const symbols = rows.map((row) => row.symbol).filter(Boolean);
+        const details = rows
+            .map((row) => ({
+                symbol: row.symbol,
+                volume: row.volume ?? 0,
+                trade_count: row.trade_count ?? 0,
+            }))
+            .filter((d) => d.symbol);
 
-        logger.info('Fetched most active symbols', { count: symbols.length, symbols });
-        return symbols;
+        logger.info('Fetched most active symbols', { count: details.length, symbols: details.map((d) => d.symbol) });
+        return details;
     }
 
     async getIntradayBars(symbol: string, sessionDate: string): Promise<Bar[]> {

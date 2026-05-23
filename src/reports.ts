@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import puppeteer from "puppeteer";
-import { AlpacaClient } from "./alpaca";
+import { AlpacaClient, MostActiveSymbolDetail } from "./alpaca";
 import {
     BreakoutCandidate,
     SizedTrade,
@@ -79,7 +79,7 @@ export type OrbEvaluationRow = {
 
 export type OrbReportResult = {
     sessionDate: string;
-    symbols: string[];
+    symbols: MostActiveSymbolDetail[];
     evaluationRows: OrbEvaluationRow[];
     breakoutCandidates: AtrBreakoutCandidate[];
     emulatedTrades: SizedTrade[];
@@ -143,7 +143,7 @@ type DailySessionRecord = {
         emulatedTrades: number;
         finalOutcomes: number;
     };
-    mostActiveSymbols: string[];
+    mostActiveSymbols: MostActiveSymbolDetail[];
     mostActiveSymbolCount: number;
     insufficientSymbols: string[];
     marketScan: {
@@ -222,7 +222,7 @@ export type RunningSummaryOrbReportResult = {
 
 type OrbReportComputation = {
     sessionDate: string;
-    symbols: string[];
+    symbols: MostActiveSymbolDetail[];
     evaluationRows: OrbEvaluationRow[];
     breakoutCandidates: AtrBreakoutCandidate[];
     emulatedTrades: SizedTrade[];
@@ -655,13 +655,30 @@ export class Reports {
             .slice(0, env.quantityToRetrieve)
             .map(({ symbol, bars }) => ({ symbol, bars }));
 
-        const symbols = barResults.map(({ symbol }) => symbol);
+        const selectedSymbols = barResults.map(({ symbol }) => symbol);
+
+        let symbolDetails: MostActiveSymbolDetail[] = [];
+        try {
+            symbolDetails = await client.getMostActiveSymbolDetails(env.quantityToRetrieve);
+        } catch {
+            logger.warn('Failed to fetch most-active symbol details for report enrichment', { sessionDate });
+        }
+        const detailsBySymbol = new Map(symbolDetails.map((d) => [d.symbol, d]));
+
+        const symbols: MostActiveSymbolDetail[] = selectedSymbols.map((symbol) => {
+            const detail = detailsBySymbol.get(symbol);
+            return {
+                symbol,
+                volume: detail?.volume ?? 0,
+                trade_count: detail?.trade_count ?? 0,
+            };
+        });
 
         logger.info('Selected most active symbols by session historical volume', {
             sessionDate,
             universeSize: universeSymbols.length,
             selectedCount: symbols.length,
-            symbols,
+            symbols: symbols.map((s) => s.symbol),
         });
 
         const sessionBarCounts = barResults.map(

@@ -448,7 +448,7 @@ function makeWeakRelativeStrengthBars(symbol: string, sessionDate: string): Bar[
 function makeHistoricalReport(sessionDate: string): OrbReportResult {
     return {
         sessionDate,
-        symbols: ['SPY'],
+        symbols: [{ symbol: 'SPY', volume: 0, trade_count: 0 }],
         evaluationRows: [{
             symbol: 'SPY',
             openingPrice: 100,

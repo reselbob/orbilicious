@@ -8,7 +8,7 @@ import { logger } from '../logger';
 import { findLiquidityZonesForSymbol } from '../liquidity';
 import { OrbService } from '../services/orb-service';
 import { toNyParts } from '../time';
-import { AlpacaClient } from '../alpaca';
+import { AlpacaClient, MostActiveSymbolDetail } from '../alpaca';
 import type { Bar } from '../types';
 
 type SessionMode = 'EMULATION' | 'PAPER' | 'LIVE';
@@ -245,7 +245,7 @@ type DailySessionRecord = {
         totalAmountOfCashAtStopLossRisk?: number;
         totalProfitLossToDate?: number;
     };
-    mostActiveSymbols?: string[];
+    mostActiveSymbols?: MostActiveSymbolDetail[];
     mostActiveSymbolCount?: number;
     insufficientSymbols?: string[];
     sessionEvents?: Array<{
@@ -884,6 +884,26 @@ function listReports() {
     return files;
 }
 
+function normalizeMostActiveSymbols(
+    symbols: unknown,
+): MostActiveSymbolDetail[] {
+    if (!Array.isArray(symbols)) return [];
+    return symbols.map((s) => {
+        if (typeof s === 'string') {
+            return { symbol: s, volume: 0, trade_count: 0 };
+        }
+        if (typeof s === 'object' && s !== null && typeof (s as Record<string, unknown>).symbol === 'string') {
+            const obj = s as Record<string, unknown>;
+            return {
+                symbol: obj.symbol as string,
+                volume: typeof obj.volume === 'number' ? (obj.volume as number) : 0,
+                trade_count: typeof obj.trade_count === 'number' ? (obj.trade_count as number) : 0,
+            };
+        }
+        return { symbol: String(s), volume: 0, trade_count: 0 };
+    });
+}
+
 function dailySessionJsonPath(sessionDate: string): string {
     return path.join(dailySessionDir, `${sessionDate}.json`);
 }
@@ -895,7 +915,11 @@ function readDailySessionRecord(sessionDate: string): DailySessionRecord | null 
     }
 
     try {
-        return JSON.parse(fs.readFileSync(filePath, 'utf8')) as DailySessionRecord;
+        const record = JSON.parse(fs.readFileSync(filePath, 'utf8')) as DailySessionRecord;
+        if (record.mostActiveSymbols) {
+            record.mostActiveSymbols = normalizeMostActiveSymbols(record.mostActiveSymbols);
+        }
+        return record;
     } catch (error) {
         logger.warn('Failed reading daily session JSON', {
             sessionDate,
@@ -1154,7 +1178,8 @@ function buildLiveSessionRecordFromRuntime(
         }
     }
 
-    const mostActiveSymbols = symbolsFromUi.length ? symbolsFromUi : symbols;
+    const mostActiveSymbols: MostActiveSymbolDetail[] = (symbolsFromUi.length ? symbolsFromUi : symbols)
+        .map((symbol) => ({ symbol, volume: 0, trade_count: 0 }));
     const filtersEnabled = appState.breakoutQualityFiltersEnabled;
 
     return {
@@ -1623,7 +1648,7 @@ async function renderDailySessionView(
             <div class="detail-grid">
                 <div class="detail-panel">
                     <h3>Scanned Symbols</h3>
-                    <ul>${mostActiveSymbols.length ? mostActiveSymbols.map((symbol) => `<li>${escapeHtml(symbol)}</li>`).join('') : '<li>None</li>'}</ul>
+                    <ul>${mostActiveSymbols.length ? mostActiveSymbols.map((s) => `<li>${escapeHtml(s.symbol)}</li>`).join('') : '<li>None</li>'}</ul>
                 </div>
                 <div class="detail-panel">
                     <h3>Insufficient Symbols</h3>
@@ -1678,10 +1703,10 @@ async function renderDailySessionView(
                         </thead>
                         <tbody>
                             ${mostActiveSymbols.length
-            ? mostActiveSymbols.map((symbol, index) => `
+            ? mostActiveSymbols.map((s, index) => `
                             <tr>
                                 <td>${index + 1}</td>
-                                <td>${escapeHtml(symbol)}</td>
+                                <td>${escapeHtml(s.symbol)}</td>
                             </tr>`).join('')
             : '<tr><td colspan="2" class="muted">No scanned symbols recorded for this session.</td></tr>'}
                         </tbody>
@@ -2564,7 +2589,7 @@ function renderDailySessionPdfHtml(record: DailySessionRecord): string {
             Min Rel Strength ${fmt(breakoutFilters.breakoutMinRelativeStrengthPct)}%,
             Trend ${breakoutFilters.breakoutTrendTimeframeMinutes ?? 'n/a'}m x ${breakoutFilters.breakoutTrendLookbackBars ?? 'n/a'} bars
         </p>
-        <p class="pill-list tight"><strong>Scanned Symbols:</strong> ${escapeHtml(mostActiveSymbols.join(', ') || 'None')}</p>
+        <p class="pill-list tight"><strong>Scanned Symbols:</strong> ${escapeHtml(mostActiveSymbols.map((s) => s.symbol).join(', ') || 'None')}</p>
         <p class="pill-list tight"><strong>Insufficient Symbols:</strong> ${escapeHtml(insufficientSymbols.join(', ') || 'None')}</p>
     </section>
     <section class="panel">
