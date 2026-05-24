@@ -69,15 +69,17 @@ export function rankAndSelectCandidates(
     candidates: BreakoutCandidate[],
     maxPositionsPerSide = 10
 ) {
-    const longs = candidates
-        .filter((c) => c.side === 'buy')
-        .sort((a, b) => b.score - a.score)
-        .slice(0, maxPositionsPerSide);
+    const longs: BreakoutCandidate[] = [];
+    const shorts: BreakoutCandidate[] = [];
+    for (const c of candidates) {
+        if (c.side === 'buy') longs.push(c);
+        else if (c.side === 'sell') shorts.push(c);
+    }
 
-    const shorts = candidates
-        .filter((c) => c.side === 'sell')
-        .sort((a, b) => b.score - a.score)
-        .slice(0, maxPositionsPerSide);
+    longs.sort((a, b) => b.score - a.score);
+    longs.splice(maxPositionsPerSide);
+    shorts.sort((a, b) => b.score - a.score);
+    shorts.splice(maxPositionsPerSide);
 
     return { longs, shorts };
 }

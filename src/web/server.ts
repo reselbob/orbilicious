@@ -388,7 +388,7 @@ function addActivityLine(stream: 'stdout' | 'stderr' | 'system', message: string
     });
 
     if (activityLines.length > MAX_ACTIVITY_LINES) {
-        activityLines = activityLines.slice(activityLines.length - MAX_ACTIVITY_LINES);
+        activityLines.splice(0, activityLines.length - MAX_ACTIVITY_LINES);
     }
 }
 
@@ -399,7 +399,7 @@ function addTradeEvent(event: Omit<TradeEvent, 'id'>) {
     });
 
     if (tradeEvents.length > MAX_TRADE_EVENTS) {
-        tradeEvents = tradeEvents.slice(tradeEvents.length - MAX_TRADE_EVENTS);
+        tradeEvents.splice(0, tradeEvents.length - MAX_TRADE_EVENTS);
     }
 
     // Update current balance from realized P&L on trade close

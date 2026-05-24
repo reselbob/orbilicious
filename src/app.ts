@@ -247,14 +247,10 @@ function calculateAtr1m(bars: Bar[], period = 14): number | null {
         return null;
     }
 
-    const sortedBars = [...bars].sort(
-        (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    );
-
     const trueRanges: number[] = [];
-    for (let index = 1; index < sortedBars.length; index++) {
-        const current = sortedBars[index];
-        const previous = sortedBars[index - 1];
+    for (let index = 1; index < bars.length; index++) {
+        const current = bars[index];
+        const previous = bars[index - 1];
         const rangeHighLow = current.high - current.low;
         const rangeHighPrevClose = Math.abs(current.high - previous.close);
         const rangeLowPrevClose = Math.abs(current.low - previous.close);

@@ -48,6 +48,7 @@ export type MostActiveSymbolDetail = {
 
 export class AlpacaClient {
     public readonly client = this;
+    private _sipFeedSupported: boolean | null = null;
 
     async generateWeeklySummaryOrbReports(date: Date): Promise<WeeklySummaryOrbReportResult> {
         const { Reports } = await import('./reports');
@@ -98,6 +99,9 @@ export class AlpacaClient {
     }
 
     async checkSipFeedSupported(): Promise<boolean> {
+        if (this._sipFeedSupported !== null) {
+            return this._sipFeedSupported;
+        }
         // Probe a single known bar with feed=sip to detect whether the account
         // has a subscription plan that permits SIP (real-time) data.
         const url = `${env.dataBaseUrl}/v2/stocks/SPY/bars?timeframe=1Min&start=2024-01-02T14%3A30%3A00Z&end=2024-01-02T14%3A31%3A00Z&limit=1&adjustment=raw&feed=sip`;
@@ -105,10 +109,12 @@ export class AlpacaClient {
         const res = await fetch(url, { headers: headers() });
         if (res.ok) {
             logger.debug('SIP feed supported');
+            this._sipFeedSupported = true;
             return true;
         }
         const body = await res.text();
         logger.debug('SIP feed not supported', { status: res.status, body });
+        this._sipFeedSupported = false;
         return false;
     }
 

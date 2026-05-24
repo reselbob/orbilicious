@@ -4,6 +4,7 @@
 
 - [Setup](#setup)
 - [User Manual](#user-manual)
+  - [System Requirements](#system-requirements)
   - [Runtime Controls](#runtime-controls)
   - [How to use the Breakout Confirmation and Quality Filters](#how-to-use-the-breakout-confirmation-and-quality-filters)
   - [Trade Monitor](#trade-monitor)
@@ -42,6 +43,27 @@ The intended user of this application is a person familiar with the practice of 
 **Be advised:** The creator of this application is NOT a financial adviser in any sense and takes absolutely no responsibility for the performance and behavior of this application. **You are using the application AT YOUR OWN RISK!**
 
 ## User Manual
+
+### System Requirements
+
+#### Hardware
+
+- **Processor:** Multi-core CPU (2+ cores recommended)
+- **Memory:** 4 GB RAM minimum, 8 GB recommended
+- **Disk:** 500 MB free space for application files, logs, and generated reports
+
+#### Software
+
+- **Runtime:** Node.js 20.x or later ( LTS recommended)
+- **Package Manager:** npm (bundled with Node.js)
+- **Operating System:** macOS, Linux, or Windows with WSL
+- **Browser:** Modern browser (Chrome, Firefox, Safari, Edge) for Web UI access
+- **Alpaca Account:** Valid Alpaca API key and secret key for market data and/or trading
+
+#### Network
+
+- **Internet connection:** Required for live trading and real-time market data
+- **Alpaca API access:** Outbound HTTPS (port 443) to `data.alpaca.markets` and `paper-api.alpaca.markets` or `api.alpaca.markets`
 
 ### Setup
 
