@@ -22,7 +22,7 @@
 - [Notes](#notes)
 - [Recommended Next Upgrades](#recommended-next-upgrades)
 
-ORBilicious is a Node + TypeScript project that implements the [Opening Range Breakout strategy](https://www.equiti.com/sc-en/news/trading-ideas/opening-range-breakout-strategy/). The project identifies stocks with a high probability of generating profit by detecting breakout price action. It begins by analyzing a predefined set of the most actively traded stocks during the first minute after the New York market opens. These stocks are then monitored over a 15-minute period using 1-minute candlesticks. Based on this analysis, ORBilicious selects breakout candidates—stocks expected to rise or fall in price—and executes long or short trades accordingly. The project has the following features:
+ORBilicious is a Node + TypeScript project that implements the [Opening Range Breakout strategy](https://www.equiti.com/sc-en/news/trading-ideas/opening-range-breakout-strategy/). The project identifies stocks with a high probability of generating profit by detecting breakout price action. It begins by discovering the most actively traded stocks during the first minute after the New York markets opens. (Discovery occurs on a daily basis.) These stocks are then monitored over a 15-minute period using 1-minute candlesticks. Based on this observation and analysis, ORBilicious selects the daily set of breakout candidates—stocks expected to rise or fall in price—and executes long or short trades accordingly. The project has the following features:
 
 - [Alpaca](https://alpaca.markets/) market-data integration
 - Alpaca bracket-order execution
