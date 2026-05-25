@@ -1,4 +1,5 @@
 {
     "mochaExplorer.files": "test/**/*.test.ts",
-    "mochaExplorer.require": "ts-node/register"
+    "mochaExplorer.require": "ts-node/register",
+    "github.copilot.chat.otel.dbSpanExporter.enabled": true
 }
