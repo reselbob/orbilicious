@@ -111,6 +111,10 @@ export class OrbService {
         private readonly runTradingCycleFn: RunTradingCycleFn = runCycle,
     ) { }
 
+    get alpacaClient(): AlpacaClient {
+        return this.client;
+    }
+
     async runTradingCycle(sessionDate: string, options?: RunTradingCycleOptions): Promise<void> {
         await this.runTradingCycleFn(this.client, sessionDate, options);
     }

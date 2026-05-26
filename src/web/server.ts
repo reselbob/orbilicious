@@ -41,6 +41,7 @@ type AppState = {
     lastError: string | null;
     realtimeDataFeed: boolean;
     realtimeDataFeedError: boolean;
+    initialRealtimeFeedEnabled: boolean;
     candidateTradeType: CandidateTradeType;
     breakoutConfirmationCandleMinutes: number;
     breakoutQualityFiltersEnabled: boolean;
@@ -311,6 +312,7 @@ const appState: AppState = {
     lastError: null,
     realtimeDataFeed: false,
     realtimeDataFeedError: false,
+    initialRealtimeFeedEnabled: env.dataFeed === 'sip',
     candidateTradeType: env.candidateTradeType,
     breakoutConfirmationCandleMinutes: env.breakoutConfirmationCandleMinutes,
     breakoutQualityFiltersEnabled: env.breakoutQualityFiltersEnabled,
@@ -327,6 +329,7 @@ let tradeEvents: TradeEvent[] = [];
 let nextTradeEventId = 1;
 let stopRequested = false;
 const orbService = new OrbService();
+orbService.alpacaClient.useRealtimeFeed = env.dataFeed === 'sip';
 
 function contentTypeFor(filePath: string): string {
     if (filePath.endsWith('.html')) return 'text/html; charset=utf-8';
@@ -3050,7 +3053,22 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
 
     if (req.method === 'GET' && pathname === '/api/orbilicious/status') {
         refreshRuntimeStatusFromClock();
-        sendJson(res, 200, appState);
+        sendJson(res, 200, {
+            ...appState,
+            realtimeFeedEnabled: orbService.alpacaClient.useRealtimeFeed,
+        });
+        return;
+    }
+
+    if (req.method === 'POST' && pathname === '/api/alpaca/set-realtime-feed') {
+        try {
+            const body = await parseJsonBody<{ realtimeFeed: boolean }>(req);
+            const realtimeFeed = body?.realtimeFeed === true;
+            orbService.alpacaClient.useRealtimeFeed = realtimeFeed;
+            sendJson(res, 200, { ok: true, realtimeFeed });
+        } catch (error) {
+            sendJson(res, 400, { ok: false, error: error instanceof Error ? error.message : String(error) });
+        }
         return;
     }
 

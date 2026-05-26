@@ -51,6 +51,16 @@ export class AlpacaClient {
     public readonly client = this;
     private _sipFeedSupported: boolean | null = null;
     private _wsClient: AlpacaWebSocketClient | null = null;
+    private _useRealtimeFeed = false;
+
+    set useRealtimeFeed(value: boolean) {
+        this._useRealtimeFeed = value;
+        logger.info('Realtime feed preference changed', { useRealtimeFeed: value });
+    }
+
+    get useRealtimeFeed(): boolean {
+        return this._useRealtimeFeed;
+    }
 
     async generateWeeklySummaryOrbReports(date: Date): Promise<WeeklySummaryOrbReportResult> {
         const { Reports } = await import('./reports');
@@ -159,8 +169,9 @@ export class AlpacaClient {
     async getIntradayBars(symbol: string, sessionDate: string): Promise<Bar[]> {
         const start = `${sessionDate}T09:30:00-04:00`;
         const end = `${sessionDate}T16:00:00-04:00`;
+        const useRealtime = this._useRealtimeFeed || env.dataFeed === 'sip';
 
-        if (env.dataFeed === 'sip' && isMarketHours()) {
+        if (useRealtime && isMarketHours()) {
             try {
                 const bars = await this.getIntradayBarsViaWebSocket(symbol, sessionDate);
                 if (bars.length > 0) {
@@ -171,7 +182,7 @@ export class AlpacaClient {
             }
         }
 
-        return this.getIntradayBarsViaHttp(symbol, sessionDate, start, end);
+        return this.getIntradayBarsViaHttp(symbol, sessionDate, start, end, useRealtime ? 'sip' : env.dataFeed);
     }
 
     private async getIntradayBarsViaWebSocket(symbol: string, sessionDate: string): Promise<Bar[]> {
@@ -193,10 +204,11 @@ export class AlpacaClient {
         return bars;
     }
 
-    private async getIntradayBarsViaHttp(symbol: string, sessionDate: string, start: string, end: string): Promise<Bar[]> {
-        const url = `${env.dataBaseUrl}/v2/stocks/${encodeURIComponent(symbol)}/bars?timeframe=1Min&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&limit=10000&adjustment=raw&feed=${encodeURIComponent(env.dataFeed)}`;
+    private async getIntradayBarsViaHttp(symbol: string, sessionDate: string, start: string, end: string, feedOverride?: string): Promise<Bar[]> {
+        const feed = feedOverride ?? env.dataFeed;
+        const url = `${env.dataBaseUrl}/v2/stocks/${encodeURIComponent(symbol)}/bars?timeframe=1Min&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&limit=10000&adjustment=raw&feed=${encodeURIComponent(feed)}`;
 
-        logger.debug('Fetching intraday bars via HTTP', { symbol, sessionDate, connectionType: 'HTTP' });
+        logger.debug('Fetching intraday bars via HTTP', { symbol, sessionDate, connectionType: 'HTTP', feed });
 
         const res = await fetch(url, { headers: headers() });
         if (!res.ok) {

@@ -783,6 +783,9 @@ function renderTrades() {
             const stopPct = event.eventType === 'open' && typeof event.stopLossPct === 'number'
                 ? (event.stopLossPct * 100).toFixed(2) + '%'
                 : '-';
+            const riskAmt = event.eventType === 'open' && typeof event.stopLossPct === 'number' && typeof event.entryPrice === 'number' && typeof event.qty === 'number'
+                ? '$' + (event.stopLossPct * event.entryPrice * event.qty).toFixed(2)
+                : '-';
             const target = event.eventType === 'open' ? formatPrice(event.targetPrice) : '-';
             const close = event.eventType === 'close' ? formatPrice(event.closePrice) : '-';
 
@@ -831,6 +834,7 @@ function renderTrades() {
                     <td class="trade-price">${entry}</td>
                     <td class="trade-price">${stop}</td>
                     <td class="trade-price">${stopPct}</td>
+                    <td class="trade-price">${riskAmt}</td>
                     <td class="trade-price">${target}</td>
                     <td class="trade-price">${close}</td>
                     <td class="trade-price ${resultClass}">${pnl}</td>
@@ -958,6 +962,28 @@ async function refreshStatus() {
             realTimeDataFeedError.classList.remove('d-none');
         } else {
             realTimeDataFeedError.classList.add('d-none');
+        }
+        if (payload.realtimeFeedEnabled === true && !realTimeDataFeed.checked) {
+            realTimeDataFeed.checked = true;
+            try {
+                await fetch('/api/alpaca/set-realtime-feed', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ realtimeFeed: true }),
+                });
+            } catch {
+            }
+        }
+        if (payload.initialRealtimeFeedEnabled === true && !realTimeDataFeed.checked) {
+            realTimeDataFeed.checked = true;
+            try {
+                await fetch('/api/alpaca/set-realtime-feed', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ realtimeFeed: true }),
+                });
+            } catch {
+            }
         }
         syncEmulationControls();
 
@@ -1907,26 +1933,40 @@ continuousMode.addEventListener('change', syncEmulationControls);
 breakoutQualityFiltersEnabledInput.addEventListener('change', applyBreakoutQualityInputsEnabled);
 
 realTimeDataFeed.addEventListener('change', async () => {
-    if (!realTimeDataFeed.checked) {
-        sipProbeUnsupported = false;
-        realTimeDataFeedError.classList.add('d-none');
-        return;
-    }
-
-    sipProbeUnsupported = true;
-    realTimeDataFeedError.classList.remove('d-none');
+    const enabled = realTimeDataFeed.checked;
 
     try {
-        const res = await fetch('/api/alpaca/check-sip');
+        const res = await fetch('/api/alpaca/set-realtime-feed', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ realtimeFeed: enabled }),
+        });
         const payload = await res.json();
-        sipProbeUnsupported = payload.supported !== true;
+        if (payload.ok) {
+            if (enabled) {
+                sipProbeUnsupported = true;
+                realTimeDataFeedError.classList.remove('d-none');
+                try {
+                    const sipRes = await fetch('/api/alpaca/check-sip');
+                    const sipPayload = await sipRes.json();
+                    sipProbeUnsupported = sipPayload.supported !== true;
+                } catch {
+                    sipProbeUnsupported = true;
+                }
+                if (sipProbeUnsupported) {
+                    realTimeDataFeedError.classList.remove('d-none');
+                } else {
+                    realTimeDataFeedError.classList.add('d-none');
+                }
+            } else {
+                sipProbeUnsupported = false;
+                realTimeDataFeedError.classList.add('d-none');
+            }
+        }
     } catch {
-        sipProbeUnsupported = true;
-    }
-    if (sipProbeUnsupported) {
-        realTimeDataFeedError.classList.remove('d-none');
-    } else {
-        realTimeDataFeedError.classList.add('d-none');
+        if (enabled) {
+            realTimeDataFeedError.classList.remove('d-none');
+        }
     }
 });
 

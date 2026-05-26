@@ -48,51 +48,77 @@ export class AlpacaWebSocketClient {
         }
 
         this.connecting = true;
-        const wsUrl = 'wss://stream.data.alpaca.markets';
+        const wsUrl = 'wss://stream.data.alpaca.markets/v2/sip';
         logger.debug('Connecting to Alpaca WebSocket', { url: wsUrl });
 
+        this.ws = new WebSocket(wsUrl, {
+            headers: {
+                'APCA-API-KEY-ID': env.apiKey,
+                'APCA-API-SECRET-KEY': env.apiSecret,
+            },
+        });
+        const ws = this.ws;
+
         return new Promise((resolve, reject) => {
-            try {
-                this.ws = new WebSocket(wsUrl);
+            let authTimeout: ReturnType<typeof setTimeout>;
 
-                const connectionTimeout = setTimeout(() => {
-                    if (this.connecting) {
-                        this.ws?.close();
-                        this.connecting = false;
-                        reject(new Error('WebSocket connection timeout'));
-                    }
-                }, 10000);
+            const cleanup = () => {
+                clearTimeout(connectionTimeout);
+                clearTimeout(authTimeout);
+            };
 
-                this.ws.onopen = () => {
-                    clearTimeout(connectionTimeout);
+            const connectionTimeout = setTimeout(() => {
+                if (this.connecting) {
+                    cleanup();
+                    ws.close();
                     this.connecting = false;
-                    logger.debug('Alpaca WebSocket connected');
-                    this.authenticate();
+                    reject(new Error('WebSocket connection timeout - falling back to HTTP'));
+                }
+            }, 15000);
+
+            authTimeout = setTimeout(() => {
+                if (this.connecting) {
+                    cleanup();
+                    ws.close();
+                    this.connecting = false;
+                    reject(new Error('WebSocket authentication timeout - falling back to HTTP'));
+                } else if (!this.authenticated) {
+                    cleanup();
+                    ws.close();
+ reject(new Error('WebSocket authentication failed - falling back to HTTP'));
+                }
+            }, 20000);
+
+            ws.onopen = () => {
+                logger.debug('Alpaca WebSocket connected, authenticating...');
+                this.authenticate();
+            };
+
+            ws.onmessage = (event) => {
+                this.handleMessage(event.data);
+                if (this.authenticated && this.connecting) {
+                    cleanup();
+                    this.connecting = false;
                     resolve();
-                };
+                }
+            };
 
-                this.ws.onmessage = (event) => {
-                    this.handleMessage(event.data);
-                };
-
-                this.ws.onerror = (error) => {
-                    clearTimeout(connectionTimeout);
-                    this.connecting = false;
-                    logger.error('Alpaca WebSocket error', { error });
-                };
-
-                this.ws.onclose = (event) => {
-                    clearTimeout(connectionTimeout);
-                    this.connecting = false;
-                    this.authenticated = false;
-                    logger.debug('Alpaca WebSocket closed', { code: event.code, reason: event.reason });
-                    this.handleReconnect();
-                };
-            } catch (error) {
+            ws.onerror = (error) => {
+                cleanup();
                 this.connecting = false;
-                logger.error('Failed to create WebSocket', { error });
+                logger.error('Alpaca WebSocket error', { error });
                 reject(error);
-            }
+            };
+
+            ws.onclose = (event) => {
+                cleanup();
+                this.connecting = false;
+                this.authenticated = false;
+                logger.debug('Alpaca WebSocket closed', { code: event.code, reason: event.reason });
+                if (this.connecting && this.ws) {
+                    this.handleReconnect();
+                }
+            };
         });
     }
 
