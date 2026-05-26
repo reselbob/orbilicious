@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import puppeteer from "puppeteer";
-import { AlpacaClient, MostActiveSymbolDetail } from "./alpaca";
+import type { OrbReportClient } from "./types";
+import type { MostActiveSymbolDetail } from "./types";
 import {
     BreakoutCandidate,
     SizedTrade,
@@ -15,6 +16,8 @@ import { Bar } from "./types";
 import { toNyParts } from "./time";
 
 export type ExitStatus = "profit" | "loss" | "pending";
+
+// ...existing code...
 
 export type TradeOutcome = {
     symbol: string;
@@ -74,109 +77,7 @@ export type OrbEvaluationRow = {
     atr1m: number | null;
     side: "buy" | "sell" | "none";
     /** Per-candidate quality-filter attribution detail. Null when no breakout was detected. */
-    qualityDetail: BreakoutQualityDetail | null;
-};
-
-export type OrbReportResult = {
-    sessionDate: string;
-    symbols: MostActiveSymbolDetail[];
-    evaluationRows: OrbEvaluationRow[];
-    breakoutCandidates: AtrBreakoutCandidate[];
-    emulatedTrades: SizedTrade[];
-    finalOutcomes: TradeOutcome[];
-    htmlReportPath: string;
-    pdfReportPath: string;
-    maxSessionBars: number;
-    insufficientSymbols: string[];
-    totalCandidatesBoughtAtStart: number;
-    numberOfCandidatesSoldLong: number;
-    numberOfCandidatesBoughtShort: number;
-    totalCostOfBreakoutCandidatePurchases: number;
-    totalAmountOfCashAtStopLossRisk: number;
-    totalProfitLossToDate: number;
-};
-
-type DailySessionRecord = {
-    schemaVersion: 1;
-    sessionDate: string;
-    sessionMode: string;
-    continuous: boolean;
-    status: 'completed';
-    startedAt: string | null;
-    completedAt: string | null;
-    timezone: string;
-    strategy: {
-        referenceSymbol: string;
-        openingRangeMinutes: number;
-        candleMinutes: number;
-        allowLong: boolean;
-        allowShort: boolean;
-        lastEntryTimeHHMM: string;
-        forceExitTimeHHMM: string;
-    };
-    risk: {
-        maxTotalRisk: number;
-        hardBasketCap: number;
-        maxPositionNotional: number;
-        atrStopMultiple: number;
-        minStopPct: number;
-        stopLossProfitRatio: string;
-        takeProfitMultiple: number;
-    };
-    dataSources: {
-        quantityToRetrieve: number;
-        dataFeed: string;
-        usesHistoricData: boolean;
-    };
-    breakoutFilters: {
-        breakoutConfirmationCandleMinutes: number;
-        breakoutQualityFiltersEnabled: boolean;
-        breakoutMinVolumeExpansion: number;
-        breakoutMinRelativeStrengthPct: number;
-        breakoutTrendTimeframeMinutes: number;
-        breakoutTrendLookbackBars: number;
-    };
-    sessionProgress: {
-        maxSessionBars: number;
-        symbolsScanned: number;
-        breakoutCandidates: number;
-        emulatedTrades: number;
-        finalOutcomes: number;
-    };
-    mostActiveSymbols: MostActiveSymbolDetail[];
-    mostActiveSymbolCount: number;
-    insufficientSymbols: string[];
-    marketScan: {
-        maxSessionBars: number;
-        candidateTradeType: string;
-    };
-    evaluationRows: OrbEvaluationRow[];
-    breakoutCandidates: AtrBreakoutCandidate[];
-    emulatedTrades: SizedTrade[];
-    finalOutcomes: TradeOutcome[];
-    candidateTradeActivity: {
-        totalCandidatesBoughtAtStart: number;
-        numberOfCandidatesSoldLong: number;
-        numberOfCandidatesBoughtShort: number;
-        totalCostOfBreakoutCandidatePurchases: number;
-        totalAmountOfCashAtStopLossRisk: number;
-        totalProfitLossToDate: number;
-    };
-    totals: {
-        totalCandidatesBoughtAtStart: number;
-        numberOfCandidatesSoldLong: number;
-        numberOfCandidatesBoughtShort: number;
-        totalCostOfBreakoutCandidatePurchases: number;
-        totalAmountOfCashAtStopLossRisk: number;
-        totalProfitLossToDate: number;
-    };
-    artifacts: {
-        htmlReportPath: string;
-        pdfReportPath: string;
-        htmlRelativePath: string;
-        pdfRelativePath: string;
-    };
-    notes: string[];
+    // qualityDetail?: BreakoutQualityDetail | null;
 };
 
 export type WeeklySummaryDay = {
@@ -212,6 +113,25 @@ export type RunningSummaryOrbReportResult = {
     skippedDates: string[];
     htmlReportPath: string;
     pdfReportPath: string;
+    totalCandidatesBoughtAtStart: number;
+    numberOfCandidatesSoldLong: number;
+    numberOfCandidatesBoughtShort: number;
+    totalCostOfBreakoutCandidatePurchases: number;
+    totalAmountOfCashAtStopLossRisk: number;
+    totalProfitLossToDate: number;
+};
+
+export type OrbReportResult = {
+    sessionDate: string;
+    symbols: MostActiveSymbolDetail[];
+    evaluationRows: OrbEvaluationRow[];
+    breakoutCandidates: AtrBreakoutCandidate[];
+    emulatedTrades: SizedTrade[];
+    finalOutcomes: TradeOutcome[];
+    htmlReportPath: string;
+    pdfReportPath: string;
+    maxSessionBars: number;
+    insufficientSymbols: string[];
     totalCandidatesBoughtAtStart: number;
     numberOfCandidatesSoldLong: number;
     numberOfCandidatesBoughtShort: number;
@@ -256,6 +176,7 @@ function candidateAllowedByTradeType(side: 'buy' | 'sell'): boolean {
     return side === 'sell';
 }
 
+
 function candidateTradeTypeLabel(): string {
     if (env.candidateTradeType === 'LONG') {
         return 'Long';
@@ -273,6 +194,8 @@ export class Reports {
     private static readonly BAR_FETCH_CONCURRENCY = 8;
     private static readonly BAR_FETCH_RETRY_COUNT = 2;
     private static readonly BAR_FETCH_RETRY_DELAY_MS = 350;
+
+    // ...existing code...
 
     private static readPersistedUniverse(): string[] {
         try {
@@ -316,7 +239,7 @@ export class Reports {
         }
     }
 
-    private static async getFixedUniverseSymbols(client: AlpacaClient): Promise<string[]> {
+    private static async getFixedUniverseSymbols(client: OrbReportClient): Promise<string[]> {
         const maxUniverseSize = 120;
         if (Reports.fixedUniverseSymbols && Reports.fixedUniverseSymbols.length) {
             return Reports.fixedUniverseSymbols.slice(0, maxUniverseSize);
@@ -357,7 +280,7 @@ export class Reports {
     }
 
     private static async getIntradayBarsWithRetry(
-        client: AlpacaClient,
+        client: OrbReportClient,
         symbol: string,
         sessionDate: string,
     ): Promise<Bar[]> {
@@ -387,7 +310,7 @@ export class Reports {
     }
 
     private static async loadUniverseBars(
-        client: AlpacaClient,
+        client: OrbReportClient,
         universeSymbols: string[],
         sessionDate: string,
     ): Promise<Array<{ symbol: string; bars: Bar[] }>> {
@@ -620,7 +543,7 @@ export class Reports {
     }
 
     private static async computeOrbReportData(
-        client: AlpacaClient,
+        client: OrbReportClient,
         sessionDate: string,
     ): Promise<OrbReportComputation> {
         const universeSymbols = await Reports.getFixedUniverseSymbols(client);
@@ -969,7 +892,7 @@ export class Reports {
     }
 
     public static async generateRunningSummaryOrbReports(
-        client: AlpacaClient,
+        client: OrbReportClient,
         anchorDate: Date,
     ): Promise<RunningSummaryOrbReportResult> {
         const currentDate = new Date();
@@ -1054,87 +977,139 @@ export class Reports {
             <th>${totals.totalProfitLossToDate.toFixed(2)}</th>
         </tr>`;
 
+
         const html = `<!doctype html>
+
+        // ...existing code for writing reports and logging...
+        Reports.writeHtmlReport(htmlReportPath, html);
+        Reports.writeHtmlReport(pdfSourceHtmlPath, html);
+        await Reports.renderHtmlToPdf(pdfSourceHtmlPath, pdfReportPath);
+        fs.unlinkSync(pdfSourceHtmlPath);
+
+        logger.info("Generated weekly ORB summary reports", {
+            weekStartDate,
+            weekEndDate,
+            htmlReportPath,
+            pdfReportPath,
+        });
+
+        return {
+            weekStartDate,
+            weekEndDate,
+            dailySummaries,
+            htmlReportPath,
+            pdfReportPath,
+            totalCandidatesBoughtAtStart: totals.totalCandidatesBoughtAtStart,
+            numberOfCandidatesSoldLong: totals.numberOfCandidatesSoldLong,
+            numberOfCandidatesBoughtShort: totals.numberOfCandidatesBoughtShort,
+            totalCostOfBreakoutCandidatePurchases:
+                totals.totalCostOfBreakoutCandidatePurchases,
+            totalAmountOfCashAtStopLossRisk: totals.totalAmountOfCashAtStopLossRisk,
+            totalProfitLossToDate: totals.totalProfitLossToDate,
+        };
+    }
 <html lang="en">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ORB Running Summary</title>
     <style>
+        :root {
+            color-scheme: light;
+            --bg: #111827;
+            --ink: #f9fafb;
+            --muted: #cbd5e1;
+            --accent: #34d399;
+            --border: rgba(255,255,255,0.12);
+        }
+        * { box-sizing: border-box; }
         body {
             margin: 0;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            background: #f7f9fc;
-            color: #102a43;
-            padding: 24px;
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: radial-gradient(circle at top, #1f2937, var(--bg) 60%);
+            color: var(--ink);
         }
-        .panel {
-            background: white;
-            border-radius: 16px;
+        .page { max-width: 1280px; margin: 0 auto; padding: 32px 20px 72px; }
+        .hero {
+            background: linear-gradient(135deg, rgba(52,211,153,0.15), rgba(96,165,250,0.12));
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            padding: 28px;
+            box-shadow: 0 24px 60px rgba(0,0,0,0.28);
+        }
+        h1 { margin: 0; font-size: 42px; letter-spacing: -0.03em; }
+        .subtitle { margin: 10px 0 0; color: var(--muted); font-size: 16px; }
+        .section {
+            margin-top: 24px;
+            background: rgba(31,41,55,0.92);
+            border: 1px solid var(--border);
+            border-radius: 22px;
             padding: 20px;
-            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
-            margin-bottom: 18px;
         }
-        h1, h2 {
-            margin: 0 0 10px;
-            color: #0b1f3a;
-        }
-        p {
-            margin: 0;
-            color: #334e68;
-        }
-        table {
+        h2 { margin: 0 0 10px; font-size: 22px; }
+        .summary-table {
             width: 100%;
             border-collapse: collapse;
-            margin-top: 14px;
+        }
+        .summary-table th,
+        .summary-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border);
+            text-align: left;
+            vertical-align: top;
             font-size: 13px;
         }
-        th, td {
-            border-bottom: 1px solid #d9e2ec;
-            padding: 8px;
-            text-align: left;
+        .summary-table th {
+            color: var(--muted);
+            font-weight: 600;
+            width: 55%;
         }
-        thead th {
-            background: #f0f4f8;
-        }
-        tfoot th {
-            background: #d9e2ec;
-        }
-        .note {
-            margin-top: 12px;
-            font-size: 12px;
-        }
+        .summary-table tr:last-child th,
+        .summary-table tr:last-child td { border-bottom: none; }
+        .note { margin-top: 14px; color: var(--muted); font-size: 13px; }
     </style>
 </head>
 <body>
-    <section class="panel">
-        <h1>Running ORB Summary</h1>
-        <p>Date range: ${Reports.escapeHtml(startDate)} through ${Reports.escapeHtml(endDate)}</p>
-        <p>Breakout Candidate Trade Type: ${Reports.escapeHtml(candidateTradeTypeLabel())}</p>
-    </section>
-    <section class="panel">
-        <h2>Daily Summary Metrics</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th>Session Date</th>
-                    <th>Total Number of Candidates Bought at Start</th>
-                    <th>Number of Candidates Sold Long</th>
-                    <th>Number of Candidates Bought Short</th>
-                    <th>Total cost of Breakout Candidate purchases</th>
-                    <th>Total amount of cash at stop loss risk</th>
-                    <th>Total Profit (Loss) to Date</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${dailyRowsHtml}
-            </tbody>
-            <tfoot>
-                ${tableSummaryRowHtml}
-            </tfoot>
-        </table>
-        <p class="note">Included ${dailySummaries.length} NY market-open sessions. Skipped ${skippedDates.length} dates with closed markets or no session bars.</p>
-    </section>
+    <main class="page">
+        <section class="hero">
+            <h1>ORB Running Summary</h1>
+            <div class="subtitle">Date range: ${Reports.escapeHtml(startDate)} through ${Reports.escapeHtml(endDate)}</div>
+            <div class="subtitle">Breakout Candidate Trade Type: ${Reports.escapeHtml(candidateTradeTypeLabel())}</div>
+        </section>
+        <section class="section">
+            <h2>Summary</h2>
+            <table class="summary-table">
+                <tbody>
+                    <tr><th>Total Number of Candidates Bought at Start</th><td>${totals.totalCandidatesBoughtAtStart}</td></tr>
+                    <tr><th>Number of Candidates Sold Long</th><td>${totals.numberOfCandidatesSoldLong}</td></tr>
+                    <tr><th>Number of Candidates Bought Short</th><td>${totals.numberOfCandidatesBoughtShort}</td></tr>
+                    <tr><th>Total cost of Breakout Candidate purchases</th><td>${totals.totalCostOfBreakoutCandidatePurchases.toFixed(2)}</td></tr>
+                    <tr><th>Total amount of cash at stop loss risk</th><td>${totals.totalAmountOfCashAtStopLossRisk.toFixed(2)}</td></tr>
+                    <tr><th>Total Profit (Loss) to Date</th><td>${totals.totalProfitLossToDate.toFixed(2)}</td></tr>
+                </tbody>
+            </table>
+            <div class="note">Included ${dailySummaries.length} NY market-open sessions. Skipped ${skippedDates.length} dates with closed markets or no session bars.</div>
+        </section>
+        <section class="section">
+            <h2>Daily Metrics</h2>
+            <table class="summary-table">
+                <thead>
+                    <tr>
+                        <th>Session Date</th>
+                        <th>Total Candidates Bought</th>
+                        <th>Sold Long</th>
+                        <th>Bought Short</th>
+                        <th>Cost of Purchases</th>
+                        <th>Cash at Stop Loss Risk</th>
+                        <th>Profit (Loss) to Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${dailyRowsHtml}
+                </tbody>
+            </table>
+        </section>
+    </main>
 </body>
 </html>`;
 
@@ -1170,7 +1145,7 @@ export class Reports {
     }
 
     public static async generateWeeklySummaryOrbReports(
-        client: AlpacaClient,
+        client: OrbReportClient,
         date: Date,
     ): Promise<WeeklySummaryOrbReportResult> {
         const sessionDates = Reports.weekDatesMondayToFriday(date);
@@ -1231,81 +1206,105 @@ export class Reports {
         const html = `<!doctype html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ORB Weekly Summary</title>
     <style>
+        :root {
+            color-scheme: light;
+            --bg: #111827;
+            --ink: #f9fafb;
+            --muted: #cbd5e1;
+            --accent: #34d399;
+            --border: rgba(255,255,255,0.12);
+        }
+        * { box-sizing: border-box; }
         body {
             margin: 0;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            background: #f7f9fc;
-            color: #102a43;
-            padding: 24px;
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: radial-gradient(circle at top, #1f2937, var(--bg) 60%);
+            color: var(--ink);
         }
-        .panel {
-            background: white;
-            border-radius: 16px;
+        .page { max-width: 1280px; margin: 0 auto; padding: 32px 20px 72px; }
+        .hero {
+            background: linear-gradient(135deg, rgba(52,211,153,0.15), rgba(96,165,250,0.12));
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            padding: 28px;
+            box-shadow: 0 24px 60px rgba(0,0,0,0.28);
+        }
+        h1 { margin: 0; font-size: 42px; letter-spacing: -0.03em; }
+        .subtitle { margin: 10px 0 0; color: var(--muted); font-size: 16px; }
+        .section {
+            margin-top: 24px;
+            background: rgba(31,41,55,0.92);
+            border: 1px solid var(--border);
+            border-radius: 22px;
             padding: 20px;
-            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
-            margin-bottom: 18px;
         }
-        h1, h2 {
-            margin: 0 0 10px;
-            color: #0b1f3a;
-        }
-        p {
-            margin: 0;
-            color: #334e68;
-        }
-        table {
+        h2 { margin: 0 0 10px; font-size: 22px; }
+        .summary-table {
             width: 100%;
             border-collapse: collapse;
-            margin-top: 14px;
+        }
+        .summary-table th,
+        .summary-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border);
+            text-align: left;
+            vertical-align: top;
             font-size: 13px;
         }
-        th, td {
-            border-bottom: 1px solid #d9e2ec;
-            padding: 8px;
-            text-align: left;
+        .summary-table th {
+            color: var(--muted);
+            font-weight: 600;
+            width: 55%;
         }
-        th {
-            background: #f0f4f8;
-        }
+        .summary-table tr:last-child th,
+        .summary-table tr:last-child td { border-bottom: none; }
+        .note { margin-top: 14px; color: var(--muted); font-size: 13px; }
     </style>
 </head>
 <body>
-    <section class="panel">
-        <h1>Weekly ORB Summary</h1>
-        <p>Week range: ${Reports.escapeHtml(weekStartDate)} to ${Reports.escapeHtml(weekEndDate)}</p>
-        <p>Breakout Candidate Trade Type: ${Reports.escapeHtml(candidateTradeTypeLabel())}</p>
-    </section>
-    <section class="panel">
-        <h2>Daily Summary Metrics</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th>Session Date</th>
-                    <th>Total Number of Candidates Bought at Start</th>
-                    <th>Number of Candidates Sold Long</th>
-                    <th>Number of Candidates Bought Short</th>
-                    <th>Total cost of Breakout Candidate purchases</th>
-                    <th>Total amount of cash at stop loss risk</th>
-                    <th>Total Profit (Loss) to Date</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${dailyRowsHtml}
-            </tbody>
-        </table>
-    </section>
-    <section class="panel">
-        <h2>Week Totals</h2>
-        <table>
-            <tbody>
-                ${totalsRowsHtml}
-            </tbody>
-        </table>
-    </section>
+    <main class="page">
+        <section class="hero">
+            <h1>ORB Weekly Summary</h1>
+            <div class="subtitle">Week range: ${Reports.escapeHtml(weekStartDate)} to ${Reports.escapeHtml(weekEndDate)}</div>
+            <div class="subtitle">Breakout Candidate Trade Type: ${Reports.escapeHtml(candidateTradeTypeLabel())}</div>
+        </section>
+        <section class="section">
+            <h2>Summary</h2>
+            <table class="summary-table">
+                <tbody>
+                    <tr><th>Total Number of Candidates Bought at Start</th><td>${totals.totalCandidatesBoughtAtStart}</td></tr>
+                    <tr><th>Number of Candidates Sold Long</th><td>${totals.numberOfCandidatesSoldLong}</td></tr>
+                    <tr><th>Number of Candidates Bought Short</th><td>${totals.numberOfCandidatesBoughtShort}</td></tr>
+                    <tr><th>Total cost of Breakout Candidate purchases</th><td>${totals.totalCostOfBreakoutCandidatePurchases.toFixed(2)}</td></tr>
+                    <tr><th>Total amount of cash at stop loss risk</th><td>${totals.totalAmountOfCashAtStopLossRisk.toFixed(2)}</td></tr>
+                    <tr><th>Total Profit (Loss) to Date</th><td>${totals.totalProfitLossToDate.toFixed(2)}</td></tr>
+                </tbody>
+            </table>
+        </section>
+        <section class="section">
+            <h2>Daily Metrics</h2>
+            <table class="summary-table">
+                <thead>
+                    <tr>
+                        <th>Session Date</th>
+                        <th>Total Candidates Bought</th>
+                        <th>Sold Long</th>
+                        <th>Bought Short</th>
+                        <th>Cost of Purchases</th>
+                        <th>Cash at Stop Loss Risk</th>
+                        <th>Profit (Loss) to Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${dailyRowsHtml}
+                </tbody>
+            </table>
+        </section>
+    </main>
 </body>
 </html>`;
 
@@ -1428,47 +1427,16 @@ export class Reports {
                 (a, b) =>
                     new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
             );
-
-        for (const bar of sessionBars) {
-            const p = toNyParts(bar.timestamp, strategyConfig.sessionTimezone);
-            const totalMinutes = p.hour * 60 + p.minute;
-            const bucketStartMinutes = Math.floor(totalMinutes / intervalMinutes) * intervalMinutes;
-
-            const existing = grouped.get(bucketStartMinutes);
-            if (!existing) {
-                grouped.set(bucketStartMinutes, {
-                    ...bar,
-                    volume: bar.volume,
-                });
-                continue;
-            }
-
-            grouped.set(bucketStartMinutes, {
-                ...existing,
-                high: Math.max(existing.high, bar.high),
-                low: Math.min(existing.low, bar.low),
-                close: bar.close,
-                volume: existing.volume + bar.volume,
-            });
-        }
-
-        return [...grouped.values()].sort(
-            (a, b) =>
-                new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
-        );
+        return sessionBars;
     }
 
-    private static minutesFromSessionOpen(bar: Bar): number {
-        const p = toNyParts(bar.timestamp, strategyConfig.sessionTimezone);
-        const sessionOpenMinutes =
-            strategyConfig.sessionOpenHour * 60 + strategyConfig.sessionOpenMinute;
-        return p.hour * 60 + p.minute - sessionOpenMinutes;
-    }
 
-    private static evaluateBreakoutQuality(params: {
+
+
+    private static computeBreakoutQualityDetail(params: {
         sessionBars: Bar[];
         sessionDate: string;
-        side: "buy" | "sell";
+        side: string;
         breakoutBar: Bar;
         openingRangeHigh: number;
         openingRangeLow: number;
@@ -1576,13 +1544,6 @@ export class Reports {
             side === "buy"
                 ? breakoutBar.close > trendSma && trendSlope > 0
                 : breakoutBar.close < trendSma && trendSlope < 0;
-        const trendAlignmentPassed = trendAligned;
-
-        const passed = volumeExpansionPassed && relativeStrengthPassed && trendAlignmentPassed;
-        const failReasons: string[] = [];
-        if (!volumeExpansionPassed) failReasons.push(`vol exp ${volumeExpansion.toFixed(2)} < ${env.breakoutMinVolumeExpansion}`);
-        if (!relativeStrengthPassed) failReasons.push(`rel str ${relativeStrengthPct.toFixed(2)}% < ${env.breakoutMinRelativeStrengthPct}%`);
-        if (!trendAlignmentPassed) failReasons.push("trend not aligned");
 
         return {
             ...baseDetail,
@@ -1591,19 +1552,36 @@ export class Reports {
             relativeStrengthPct: Number(relativeStrengthPct.toFixed(4)),
             relativeStrengthPassed,
             trendAligned,
-            trendAlignmentPassed,
-            passed,
-            failReason: failReasons.length > 0 ? failReasons.join("; ") : null,
+            trendAlignmentPassed:
+                trendAligned === null ? false : trendAligned,
+            passed:
+                volumeExpansionPassed &&
+                relativeStrengthPassed &&
+                (trendAligned === null ? false : trendAligned),
+            failReason: null,
         };
     }
 
-    private static formatNyTime(timestamp: string | null): string {
-        if (!timestamp) {
-            return "";
-        }
 
-        return toNyParts(timestamp, strategyConfig.sessionTimezone).hhmm;
-    }
+
+    const totals = Reports.accumulateDailySummaries(dailySummaries);
+
+    const reportDir = path.resolve(process.cwd(), "reports");
+    const htmlReportPath = path.join(
+        reportDir,
+        `summary-for-week-ending-${weekEndDate}.html`,
+    );
+    const pdfSourceHtmlPath = path.join(
+        reportDir,
+        `summary-for-week-ending-${weekEndDate}-pdf-source.html`,
+    );
+    const pdfReportPath = path.join(
+        reportDir,
+        `summary-for-week-ending-${weekEndDate}.pdf`,
+    );
+
+    // --- Main HTML ---
+    const html = `<!doctype html>
 
     private static renderCandidateCandlestickSvg(params: {
         bars: Bar[];
@@ -1687,108 +1665,138 @@ export class Reports {
                 return "";
             }
             const y = yForPrice(price);
-            const dashAttr = dash === "none" ? "" : ` stroke-dasharray="${dash}"`;
-            return `<line x1="${margin.left}" y1="${y}" x2="${margin.left + plotWidth}" y2="${y}" stroke="${color}" stroke-width="1.2"${dashAttr} />`;
+            const dashAttr = dash === "none" ? "" : ` stroke-dasharray='${dash}'`;
+            return `< line x1 = '${margin.left}' y1 = '${y}' x2 = '${margin.left + plotWidth}' y2 = '${y}' stroke = '${color}' stroke - width='1.2'${ dashAttr } />`;
         };
 
-        const postClosePathPoints = chartBars
-            .map((bar, index) => ({
-                index,
-                close: bar.close,
-                time: new Date(bar.timestamp).getTime(),
-            }))
-            .filter((point) => point.time > determinationEndMs)
-            .map((point) => `${xForIndex(point.index)},${yForPrice(point.close)}`)
-            .join(" ");
+const postClosePathPoints = chartBars
+    .map((bar, index) => ({
+        index,
+        close: bar.close,
+        time: new Date(bar.timestamp).getTime(),
+    }))
+    .filter((point) => point.time > determinationEndMs)
+    .map((point) => `${xForIndex(point.index)},${yForPrice(point.close)}`)
+    .join(" ");
 
-        const yTicks = Array.from({ length: 5 }, (_, i) => {
-            const value = yMin + (range * i) / 4;
-            const y = yForPrice(value);
-            return {
-                y,
-                label: value.toFixed(2),
-            };
-        });
+const yTicks = Array.from({ length: 5 }, (_, i) => {
+    const value = yMin + (range * i) / 4;
+    const y = yForPrice(value);
+    return {
+        y,
+        label: value.toFixed(2),
+    };
+});
 
-        const xTickStride = Math.max(1, Math.floor(chartBars.length / 7));
-        const xTicks = chartBars
-            .map((bar, index) => ({ bar, index }))
-            .filter(({ index }) => index % xTickStride === 0 || index === chartBars.length - 1)
-            .map(({ bar, index }) => ({
-                x: xForIndex(index),
-                label: Reports.escapeHtml(Reports.formatNyTime(bar.timestamp)),
-            }));
+const xTickStride = Math.max(1, Math.floor(chartBars.length / 7));
+const xTicks = chartBars
+    .map((bar, index) => ({ bar, index }))
+    .filter(({ index }) => index % xTickStride === 0 || index === chartBars.length - 1)
+    .map(({ bar, index }) => ({
+        x: xForIndex(index),
+        label: Reports.escapeHtml(Reports.formatNyTime(bar.timestamp)),
+    }));
 
-        const candlesSvg = chartBars
-            .map((bar, index) => {
-                const x = xForIndex(index);
-                const openY = yForPrice(bar.open);
-                const closeY = yForPrice(bar.close);
-                const highY = yForPrice(bar.high);
-                const lowY = yForPrice(bar.low);
-                const bodyTop = Math.min(openY, closeY);
-                const bodyHeight = Math.max(1, Math.abs(closeY - openY));
-                const bullish = bar.close >= bar.open;
-                const bodyColor = bullish ? "#22c55e" : "#ef4444";
-                return `<g>
+const candlesSvg = chartBars
+    .map((bar, index) => {
+        const x = xForIndex(index);
+        const openY = yForPrice(bar.open);
+        const closeY = yForPrice(bar.close);
+        const highY = yForPrice(bar.high);
+        const lowY = yForPrice(bar.low);
+        const bodyTop = Math.min(openY, closeY);
+        const bodyHeight = Math.max(1, Math.abs(closeY - openY));
+        const bullish = bar.close >= bar.open;
+        const bodyColor = bullish ? "#22c55e" : "#ef4444";
+        return `<g>
                     <line x1="${x}" y1="${highY}" x2="${x}" y2="${lowY}" stroke="#cbd5e1" stroke-width="1" />
                     <rect x="${x - candleWidth / 2}" y="${bodyTop}" width="${candleWidth}" height="${bodyHeight}" fill="${bodyColor}" opacity="0.95" />
                 </g>`;
-            })
-            .join("");
+    })
+    .join("");
+}
 
-        const xDetermination = determinationCutoffIndex > 0 && determinationCutoffIndex < chartBars.length
-            ? xForIndex(determinationCutoffIndex)
-            : null;
 
-        const exitTimestampMs = finalOutcome?.exitTimestamp != null
-            ? new Date(finalOutcome.exitTimestamp).getTime()
-            : Number.NaN;
-        const hasExitTimestamp = Number.isFinite(exitTimestampMs);
-        const closeIndexInChart = hasExitTimestamp
-            ? chartBars.findIndex((bar) => new Date(bar.timestamp).getTime() >= exitTimestampMs)
-            : -1;
-        const xClose = hasExitTimestamp
-            ? xForIndex(Math.min(Math.max(closeIndexInChart >= 0 ? closeIndexInChart : chartBars.length - 1, 0), chartBars.length - 1))
-            : null;
+const xDetermination = determinationCutoffIndex > 0 && determinationCutoffIndex < chartBars.length
+    ? xForIndex(determinationCutoffIndex)
+    : null;
 
-        const labelBaseY = margin.top + plotHeight + 8;
-        const timeLabelY = margin.top + plotHeight + 20;
-        const legendY = margin.top + plotHeight + 34;
-        const legendStartX = margin.left + 4;
+const exitTimestampMs = finalOutcome?.exitTimestamp != null
+    ? new Date(finalOutcome.exitTimestamp).getTime()
+    : Number.NaN;
+const hasExitTimestamp = Number.isFinite(exitTimestampMs);
+const closeIndexInChart = hasExitTimestamp
+    ? chartBars.findIndex((bar) => new Date(bar.timestamp).getTime() >= exitTimestampMs)
+    : -1;
+const xClose = hasExitTimestamp
+    ? xForIndex(Math.min(Math.max(closeIndexInChart >= 0 ? closeIndexInChart : chartBars.length - 1, 0), chartBars.length - 1))
+    : null;
 
-        const yEntry = trade != null && Number.isFinite(trade.price) ? yForPrice(trade.price) : null;
-        const xEntryForMarker = xDetermination ?? (chartBars.length > 0 ? xForIndex(0) : null);
-        const entryMarkerSvg = xEntryForMarker == null || yEntry == null
-            ? ""
-            : `<polygon points="${xEntryForMarker},${yEntry - 8} ${xEntryForMarker - 6},${yEntry + 4} ${xEntryForMarker + 6},${yEntry + 4}" fill="#38bdf8" stroke="#0ea5e9" stroke-width="1" />`;
+Reports.writeHtmlReport(htmlReportPath, html);
+Reports.writeHtmlReport(pdfSourceHtmlPath, html);
+await Reports.renderHtmlToPdf(pdfSourceHtmlPath, pdfReportPath);
+fs.unlinkSync(pdfSourceHtmlPath);
 
-        const lineLegendItems: ReadonlyArray<{ label: string; color: string; dash: string }> = [
-            { label: "OR High/Low", color: "#facc15", dash: "4 4" },
-            { label: "Stop", color: "#f97316", dash: "6 3" },
-            { label: "Target", color: "#22c55e", dash: "6 3" },
-            ...(finalOutcome?.exitPrice != null
-                ? [{ label: "Close", color: "#a78bfa", dash: "2 3" }]
-                : []),
-        ];
-        const entryLegendX = legendStartX;
-        const lineLegendStartX = legendStartX + 132;
-        const legendSvg = [
-            `<g>
+logger.info("Generated weekly ORB summary reports", {
+    weekStartDate,
+    weekEndDate,
+    htmlReportPath,
+    pdfReportPath,
+});
+
+return {
+    weekStartDate,
+    weekEndDate,
+    dailySummaries,
+    htmlReportPath,
+    pdfReportPath,
+    totalCandidatesBoughtAtStart: totals.totalCandidatesBoughtAtStart,
+    numberOfCandidatesSoldLong: totals.numberOfCandidatesSoldLong,
+    numberOfCandidatesBoughtShort: totals.numberOfCandidatesBoughtShort,
+    totalCostOfBreakoutCandidatePurchases:
+        totals.totalCostOfBreakoutCandidatePurchases,
+    totalAmountOfCashAtStopLossRisk: totals.totalAmountOfCashAtStopLossRisk,
+    totalProfitLossToDate: totals.totalProfitLossToDate,
+};
+    }
+
+const labelBaseY = margin.top + plotHeight + 8;
+const timeLabelY = margin.top + plotHeight + 20;
+const legendY = margin.top + plotHeight + 34;
+const legendStartX = margin.left + 4;
+
+const yEntry = trade != null && Number.isFinite(trade.price) ? yForPrice(trade.price) : null;
+const xEntryForMarker = xDetermination ?? (chartBars.length > 0 ? xForIndex(0) : null);
+const entryMarkerSvg = xEntryForMarker == null || yEntry == null
+    ? ""
+    : `<polygon points="${xEntryForMarker},${yEntry - 8} ${xEntryForMarker - 6},${yEntry + 4} ${xEntryForMarker + 6},${yEntry + 4}" fill="#38bdf8" stroke="#0ea5e9" stroke-width="1" />`;
+
+const lineLegendItems: ReadonlyArray<{ label: string; color: string; dash: string }> = [
+    { label: "OR High/Low", color: "#facc15", dash: "4 4" },
+    { label: "Stop", color: "#f97316", dash: "6 3" },
+    { label: "Target", color: "#22c55e", dash: "6 3" },
+    ...(finalOutcome?.exitPrice != null
+        ? [{ label: "Close", color: "#a78bfa", dash: "2 3" }]
+        : []),
+];
+const entryLegendX = legendStartX;
+const lineLegendStartX = legendStartX + 132;
+const legendSvg = [
+    `<g>
                 <polygon points="${entryLegendX + 10},${legendY - 7} ${entryLegendX + 4},${legendY + 5} ${entryLegendX + 16},${legendY + 5}" fill="#38bdf8" stroke="#0ea5e9" stroke-width="1" />
                 <text x="${entryLegendX + 24}" y="${legendY + 4}" fill="#cbd5e1" font-size="11">Entry triangle</text>
             </g>`,
-            ...lineLegendItems.map((item, index) => {
-                const itemWidth = 126;
-                const x = lineLegendStartX + index * itemWidth;
-                return `<g>
+    ...lineLegendItems.map((item, index) => {
+        const itemWidth = 126;
+        const x = lineLegendStartX + index * itemWidth;
+        return `<g>
                 <line x1="${x}" y1="${legendY}" x2="${x + 22}" y2="${legendY}" stroke="${item.color}" stroke-width="1.8" stroke-dasharray="${item.dash}" />
                 <text x="${x + 28}" y="${legendY + 4}" fill="#cbd5e1" font-size="11">${item.label}</text>
             </g>`;
-            }),
-        ].join("");
+    }),
+].join("");
 
-        return `<svg class="candidate-live-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Candlestick chart with breakout candidate levels">
+return `<svg class="candidate-live-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Candlestick chart with breakout candidate levels">
             <rect x="0" y="0" width="${width}" height="${height}" fill="rgba(15,23,42,0.72)" rx="8" />
             <rect x="${margin.left}" y="${margin.top}" width="${plotWidth}" height="${plotHeight}" fill="rgba(15,23,42,0.48)" />
             <rect x="${xForIndex(openRangeStart)}" y="${margin.top}" width="${openingRangeShadeWidth}" height="${plotHeight}" fill="rgba(14,165,233,0.09)" />
@@ -1814,210 +1822,210 @@ export class Reports {
     }
 
     private static calculateAtr1m(bars: Bar[], period = 14): number | null {
-        if (bars.length < 2) {
-            return null;
-        }
-
-        const sortedBars = [...bars].sort(
-            (a, b) =>
-                new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
-        );
-
-        const trueRanges: number[] = [];
-        for (let index = 1; index < sortedBars.length; index++) {
-            const current = sortedBars[index];
-            const previous = sortedBars[index - 1];
-            const rangeHighLow = current.high - current.low;
-            const rangeHighPrevClose = Math.abs(current.high - previous.close);
-            const rangeLowPrevClose = Math.abs(current.low - previous.close);
-            trueRanges.push(
-                Math.max(rangeHighLow, rangeHighPrevClose, rangeLowPrevClose),
-            );
-        }
-
-        const atrWindow = trueRanges.slice(-period);
-        if (atrWindow.length === 0) {
-            return null;
-        }
-
-        const atr =
-            atrWindow.reduce((sum, value) => sum + value, 0) / atrWindow.length;
-        return atr > 0 ? atr : null;
+    if (bars.length < 2) {
+        return null;
     }
+
+    const sortedBars = [...bars].sort(
+        (a, b) =>
+            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+    );
+
+    const trueRanges: number[] = [];
+    for (let index = 1; index < sortedBars.length; index++) {
+        const current = sortedBars[index];
+        const previous = sortedBars[index - 1];
+        const rangeHighLow = current.high - current.low;
+        const rangeHighPrevClose = Math.abs(current.high - previous.close);
+        const rangeLowPrevClose = Math.abs(current.low - previous.close);
+        trueRanges.push(
+            Math.max(rangeHighLow, rangeHighPrevClose, rangeLowPrevClose),
+        );
+    }
+
+    const atrWindow = trueRanges.slice(-period);
+    if (atrWindow.length === 0) {
+        return null;
+    }
+
+    const atr =
+        atrWindow.reduce((sum, value) => sum + value, 0) / atrWindow.length;
+    return atr > 0 ? atr : null;
+}
 
     private static emulateExit(
-        trade: SizedTrade,
-        barsAfterEntry: Bar[],
-    ): TradeOutcome {
-        for (const bar of barsAfterEntry) {
-            if (trade.side === "buy") {
-                const stopHit = bar.low <= trade.stopPrice;
-                const tpHit = bar.high >= trade.takeProfitPrice;
+    trade: SizedTrade,
+    barsAfterEntry: Bar[],
+): TradeOutcome {
+    for (const bar of barsAfterEntry) {
+        if (trade.side === "buy") {
+            const stopHit = bar.low <= trade.stopPrice;
+            const tpHit = bar.high >= trade.takeProfitPrice;
 
-                if (stopHit) {
-                    return {
-                        symbol: trade.symbol,
-                        side: trade.side,
-                        entryPrice: trade.price,
-                        stopPrice: trade.stopPrice,
-                        takeProfitPrice: trade.takeProfitPrice,
-                        qty: trade.qty,
-                        status: "loss",
-                        exitPrice: trade.stopPrice,
-                        exitTimestamp: bar.timestamp,
-                        pnl: (trade.stopPrice - trade.price) * trade.qty,
-                    };
-                }
+            if (stopHit) {
+                return {
+                    symbol: trade.symbol,
+                    side: trade.side,
+                    entryPrice: trade.price,
+                    stopPrice: trade.stopPrice,
+                    takeProfitPrice: trade.takeProfitPrice,
+                    qty: trade.qty,
+                    status: "loss",
+                    exitPrice: trade.stopPrice,
+                    exitTimestamp: bar.timestamp,
+                    pnl: (trade.stopPrice - trade.price) * trade.qty,
+                };
+            }
 
-                if (tpHit) {
-                    return {
-                        symbol: trade.symbol,
-                        side: trade.side,
-                        entryPrice: trade.price,
-                        stopPrice: trade.stopPrice,
-                        takeProfitPrice: trade.takeProfitPrice,
-                        qty: trade.qty,
-                        status: "profit",
-                        exitPrice: trade.takeProfitPrice,
-                        exitTimestamp: bar.timestamp,
-                        pnl: (trade.takeProfitPrice - trade.price) * trade.qty,
-                    };
-                }
-            } else {
-                const stopHit = bar.high >= trade.stopPrice;
-                const tpHit = bar.low <= trade.takeProfitPrice;
+            if (tpHit) {
+                return {
+                    symbol: trade.symbol,
+                    side: trade.side,
+                    entryPrice: trade.price,
+                    stopPrice: trade.stopPrice,
+                    takeProfitPrice: trade.takeProfitPrice,
+                    qty: trade.qty,
+                    status: "profit",
+                    exitPrice: trade.takeProfitPrice,
+                    exitTimestamp: bar.timestamp,
+                    pnl: (trade.takeProfitPrice - trade.price) * trade.qty,
+                };
+            }
+        } else {
+            const stopHit = bar.high >= trade.stopPrice;
+            const tpHit = bar.low <= trade.takeProfitPrice;
 
-                if (stopHit) {
-                    return {
-                        symbol: trade.symbol,
-                        side: trade.side,
-                        entryPrice: trade.price,
-                        stopPrice: trade.stopPrice,
-                        takeProfitPrice: trade.takeProfitPrice,
-                        qty: trade.qty,
-                        status: "loss",
-                        exitPrice: trade.stopPrice,
-                        exitTimestamp: bar.timestamp,
-                        pnl: (trade.price - trade.stopPrice) * trade.qty,
-                    };
-                }
+            if (stopHit) {
+                return {
+                    symbol: trade.symbol,
+                    side: trade.side,
+                    entryPrice: trade.price,
+                    stopPrice: trade.stopPrice,
+                    takeProfitPrice: trade.takeProfitPrice,
+                    qty: trade.qty,
+                    status: "loss",
+                    exitPrice: trade.stopPrice,
+                    exitTimestamp: bar.timestamp,
+                    pnl: (trade.price - trade.stopPrice) * trade.qty,
+                };
+            }
 
-                if (tpHit) {
-                    return {
-                        symbol: trade.symbol,
-                        side: trade.side,
-                        entryPrice: trade.price,
-                        stopPrice: trade.stopPrice,
-                        takeProfitPrice: trade.takeProfitPrice,
-                        qty: trade.qty,
-                        status: "profit",
-                        exitPrice: trade.takeProfitPrice,
-                        exitTimestamp: bar.timestamp,
-                        pnl: (trade.price - trade.takeProfitPrice) * trade.qty,
-                    };
-                }
+            if (tpHit) {
+                return {
+                    symbol: trade.symbol,
+                    side: trade.side,
+                    entryPrice: trade.price,
+                    stopPrice: trade.stopPrice,
+                    takeProfitPrice: trade.takeProfitPrice,
+                    qty: trade.qty,
+                    status: "profit",
+                    exitPrice: trade.takeProfitPrice,
+                    exitTimestamp: bar.timestamp,
+                    pnl: (trade.price - trade.takeProfitPrice) * trade.qty,
+                };
             }
         }
-
-        return {
-            symbol: trade.symbol,
-            side: trade.side,
-            entryPrice: trade.price,
-            stopPrice: trade.stopPrice,
-            takeProfitPrice: trade.takeProfitPrice,
-            qty: trade.qty,
-            status: "pending",
-            exitPrice: null,
-            exitTimestamp: null,
-            pnl: 0,
-        };
     }
 
+    return {
+        symbol: trade.symbol,
+        side: trade.side,
+        entryPrice: trade.price,
+        stopPrice: trade.stopPrice,
+        takeProfitPrice: trade.takeProfitPrice,
+        qty: trade.qty,
+        status: "pending",
+        exitPrice: null,
+        exitTimestamp: null,
+        pnl: 0,
+    };
+}
+
     public static async generateOrbReport(
-        client: AlpacaClient,
-        sessionDate: string,
-        options?: { usesHistoricData?: boolean; generateArtifacts?: boolean },
-    ): Promise<OrbReportResult> {
-        const reportData = await Reports.computeOrbReportData(client, sessionDate);
-        const {
-            symbols,
-            evaluationRows,
-            breakoutCandidates,
-            emulatedTrades,
-            maxSessionBars,
-            insufficientSymbols,
-            totalCandidatesBoughtAtStart,
-            numberOfCandidatesSoldLong,
-            numberOfCandidatesBoughtShort,
-            totalCostOfBreakoutCandidatePurchases,
-            totalAmountOfCashAtStopLossRisk,
-            totalProfitLossToDate,
-            closedOutcomeBySymbol,
-            finalOutcomeBySymbol,
-            sessionBarsBySymbol,
-        } = reportData;
-        const reportDir = path.resolve(process.cwd(), "reports");
-        const htmlReportDir = path.resolve(reportDir, "html", sessionDate);
-        fs.mkdirSync(reportDir, { recursive: true });
-        const htmlReportPath = path.join(htmlReportDir, `orb-report-${sessionDate}.html`);
-        const pdfSourceHtmlPath = path.join(reportDir, `orb-report-${sessionDate}.html`);
-        const pdfReportPath = path.join(reportDir, `orb-report-${sessionDate}.pdf`);
+    client: OrbReportClient,
+    sessionDate: string,
+    options ?: { usesHistoricData?: boolean; generateArtifacts?: boolean },
+): Promise < OrbReportResult > {
+    const reportData = await Reports.computeOrbReportData(client, sessionDate);
+    const {
+        symbols,
+        evaluationRows,
+        breakoutCandidates,
+        emulatedTrades,
+        maxSessionBars,
+        insufficientSymbols,
+        totalCandidatesBoughtAtStart,
+        numberOfCandidatesSoldLong,
+        numberOfCandidatesBoughtShort,
+        totalCostOfBreakoutCandidatePurchases,
+        totalAmountOfCashAtStopLossRisk,
+        totalProfitLossToDate,
+        closedOutcomeBySymbol,
+        finalOutcomeBySymbol,
+        sessionBarsBySymbol,
+    } = reportData;
+    const reportDir = path.resolve(process.cwd(), "reports");
+    const htmlReportDir = path.resolve(reportDir, "html", sessionDate);
+    fs.mkdirSync(reportDir, { recursive: true });
+    const htmlReportPath = path.join(htmlReportDir, `orb-report-${sessionDate}.html`);
+    const pdfSourceHtmlPath = path.join(reportDir, `orb-report-${sessionDate}.html`);
+    const pdfReportPath = path.join(reportDir, `orb-report-${sessionDate}.pdf`);
 
-        logger.info("Generating ORB report", {
-            sessionDate,
-            symbolCount: symbols.length,
-        });
+    logger.info("Generating ORB report", {
+        sessionDate,
+        symbolCount: symbols.length,
+    });
 
-        const openingPriceRowsHtml = evaluationRows
-            .map(
-                (row) => `
+    const openingPriceRowsHtml = evaluationRows
+        .map(
+            (row) => `
                 <tr>
                     <td>${Reports.escapeHtml(row.symbol)}</td>
                     <td>${row.openingPrice.toFixed(2)}</td>
                     <td>${row.openingRangeHigh.toFixed(2)}</td>
                     <td>${row.openingRangeLow.toFixed(2)}</td>
                 </tr>`,
-            )
-            .join("");
+        )
+        .join("");
 
-        // Rows for every symbol that reached breakout+retest evaluation (side !== "none"
-        // and a breakout bar was found), sorted: passed first, then failed/skipped.
-        const filterAttributionRows = evaluationRows
-            .filter((row) => row.qualityDetail !== null)
-            .sort((a, b) => {
-                const ap = a.qualityDetail!.passed ? 0 : 1;
-                const bp = b.qualityDetail!.passed ? 0 : 1;
-                return ap - bp;
-            });
+    // Rows for every symbol that reached breakout+retest evaluation (side !== "none"
+    // and a breakout bar was found), sorted: passed first, then failed/skipped.
+    const filterAttributionRows = evaluationRows
+        .filter((row) => row.qualityDetail !== null)
+        .sort((a, b) => {
+            const ap = a.qualityDetail!.passed ? 0 : 1;
+            const bp = b.qualityDetail!.passed ? 0 : 1;
+            return ap - bp;
+        });
 
-        const passIcon = "&#10003;"; // ✓
-        const failIcon = "&#10007;"; // ✗
-        const naLabel = "n/a";
+    const passIcon = "&#10003;"; // ✓
+    const failIcon = "&#10007;"; // ✗
+    const naLabel = "n/a";
 
-        const filterAttributionRowsHtml = filterAttributionRows
-            .map((row) => {
-                const d = row.qualityDetail!;
-                const rowClass = d.passed ? "filter-pass" : "filter-fail";
-                const filtersNote = !d.filtersEnabled ? "<em>filters off</em>" : (d.failReason ?? "");
-                const volCell = d.volumeExpansion !== null
-                    ? `${d.volumeExpansion.toFixed(2)} (min ${d.minVolumeExpansion})`
-                    : naLabel;
-                const volPass = d.filtersEnabled
-                    ? (d.volumeExpansionPassed ? passIcon : failIcon)
-                    : naLabel;
-                const rsCell = d.relativeStrengthPct !== null
-                    ? `${d.relativeStrengthPct.toFixed(2)}% (min ${d.minRelativeStrengthPct}%)`
-                    : naLabel;
-                const rsPass = d.filtersEnabled
-                    ? (d.relativeStrengthPassed ? passIcon : failIcon)
-                    : naLabel;
-                const trendCell = d.trendAligned !== null
-                    ? (d.trendAligned ? "aligned" : "diverged")
-                    : naLabel;
-                const trendPass = d.filtersEnabled
-                    ? (d.trendAlignmentPassed ? passIcon : failIcon)
-                    : naLabel;
-                return `
+    const filterAttributionRowsHtml = filterAttributionRows
+        .map((row) => {
+            const d = row.qualityDetail!;
+            const rowClass = d.passed ? "filter-pass" : "filter-fail";
+            const filtersNote = !d.filtersEnabled ? "<em>filters off</em>" : (d.failReason ?? "");
+            const volCell = d.volumeExpansion !== null
+                ? `${d.volumeExpansion.toFixed(2)} (min ${d.minVolumeExpansion})`
+                : naLabel;
+            const volPass = d.filtersEnabled
+                ? (d.volumeExpansionPassed ? passIcon : failIcon)
+                : naLabel;
+            const rsCell = d.relativeStrengthPct !== null
+                ? `${d.relativeStrengthPct.toFixed(2)}% (min ${d.minRelativeStrengthPct}%)`
+                : naLabel;
+            const rsPass = d.filtersEnabled
+                ? (d.relativeStrengthPassed ? passIcon : failIcon)
+                : naLabel;
+            const trendCell = d.trendAligned !== null
+                ? (d.trendAligned ? "aligned" : "diverged")
+                : naLabel;
+            const trendPass = d.filtersEnabled
+                ? (d.trendAlignmentPassed ? passIcon : failIcon)
+                : naLabel;
+            return `
                 <tr class="${rowClass}">
                     <td>${Reports.escapeHtml(row.symbol)}</td>
                     <td>${Reports.escapeHtml(row.side)}</td>
@@ -2030,48 +2038,48 @@ export class Reports {
                     <td>${trendPass}</td>
                     <td>${Reports.escapeHtml(filtersNote)}</td>
                 </tr>`;
-            })
-            .join("");
+        })
+        .join("");
 
-        const emulatedTradeBySymbol = new Map(
-            emulatedTrades.map((trade) => [trade.symbol, trade]),
-        );
-        const evaluationRowBySymbol = new Map(
-            evaluationRows.map((row) => [row.symbol, row]),
-        );
+    const emulatedTradeBySymbol = new Map(
+        emulatedTrades.map((trade) => [trade.symbol, trade]),
+    );
+    const evaluationRowBySymbol = new Map(
+        evaluationRows.map((row) => [row.symbol, row]),
+    );
 
-        const confirmedTradeRowsHtml = breakoutCandidates
-            .map((candidate, index) => {
-                const trade = emulatedTradeBySymbol.get(candidate.symbol);
-                const row = evaluationRowBySymbol.get(candidate.symbol);
-                const closedOutcome = closedOutcomeBySymbol.get(candidate.symbol);
-                const finalOutcome = finalOutcomeBySymbol.get(candidate.symbol);
-                const closedProfitLoss = finalOutcome
-                    ? finalOutcome.pnl.toFixed(2)
+    const confirmedTradeRowsHtml = breakoutCandidates
+        .map((candidate, index) => {
+            const trade = emulatedTradeBySymbol.get(candidate.symbol);
+            const row = evaluationRowBySymbol.get(candidate.symbol);
+            const closedOutcome = closedOutcomeBySymbol.get(candidate.symbol);
+            const finalOutcome = finalOutcomeBySymbol.get(candidate.symbol);
+            const closedProfitLoss = finalOutcome
+                ? finalOutcome.pnl.toFixed(2)
+                : "Open";
+            const exitPrice =
+                finalOutcome?.exitPrice != null
+                    ? finalOutcome.exitPrice.toFixed(2)
+                    : "n/a";
+            const exitType = closedOutcome
+                ? "Stop/Target"
+                : finalOutcome
+                    ? "Market Close"
                     : "Open";
-                const exitPrice =
-                    finalOutcome?.exitPrice != null
-                        ? finalOutcome.exitPrice.toFixed(2)
-                        : "n/a";
-                const exitType = closedOutcome
-                    ? "Stop/Target"
-                    : finalOutcome
-                        ? "Market Close"
-                        : "Open";
-                const stopDistance = trade
-                    ? (trade.side === "buy"
-                        ? trade.price - trade.stopPrice
-                        : trade.stopPrice - trade.price)
-                    : 0;
-                const targetDistance = trade
-                    ? (trade.side === "buy"
-                        ? trade.takeProfitPrice - trade.price
-                        : trade.price - trade.takeProfitPrice)
-                    : 0;
-                const riskMultiple =
-                    stopDistance > 0 ? `${(targetDistance / stopDistance).toFixed(2)}R` : "n/a";
+            const stopDistance = trade
+                ? (trade.side === "buy"
+                    ? trade.price - trade.stopPrice
+                    : trade.stopPrice - trade.price)
+                : 0;
+            const targetDistance = trade
+                ? (trade.side === "buy"
+                    ? trade.takeProfitPrice - trade.price
+                    : trade.price - trade.takeProfitPrice)
+                : 0;
+            const riskMultiple =
+                stopDistance > 0 ? `${(targetDistance / stopDistance).toFixed(2)}R` : "n/a";
 
-                return `
+            return `
                 <tr>
                     <td>${index + 1}</td>
                     <td>${Reports.escapeHtml(candidate.symbol)}</td>
@@ -2090,35 +2098,35 @@ export class Reports {
                     <td>${closedProfitLoss}</td>
                     <td>${exitType}</td>
                 </tr>`;
-            })
-            .join("");
+        })
+        .join("");
 
-        const interactiveCandidateCardsHtml = breakoutCandidates
-            .map((candidate) => {
-                const trade = emulatedTradeBySymbol.get(candidate.symbol);
-                const row = evaluationRowBySymbol.get(candidate.symbol);
-                const closedOutcome = closedOutcomeBySymbol.get(candidate.symbol);
-                const finalOutcome = finalOutcomeBySymbol.get(candidate.symbol);
-                const symbolSessionBars = sessionBarsBySymbol.get(candidate.symbol) ?? [];
-                const exitPrice =
-                    finalOutcome?.exitPrice != null
-                        ? finalOutcome.exitPrice.toFixed(2)
-                        : "n/a";
-                const exitType = closedOutcome
-                    ? "Stop/Target"
-                    : finalOutcome
-                        ? "Market Close"
-                        : "Open";
-                const chartSvg = Reports.renderCandidateCandlestickSvg({
-                    bars: symbolSessionBars,
-                    row,
-                    trade,
-                    finalOutcome,
-                    openingRangeMinutes: strategyConfig.openingRangeMinutes,
-                    maxBarsAfterDetermination: 30,
-                });
+    const interactiveCandidateCardsHtml = breakoutCandidates
+        .map((candidate) => {
+            const trade = emulatedTradeBySymbol.get(candidate.symbol);
+            const row = evaluationRowBySymbol.get(candidate.symbol);
+            const closedOutcome = closedOutcomeBySymbol.get(candidate.symbol);
+            const finalOutcome = finalOutcomeBySymbol.get(candidate.symbol);
+            const symbolSessionBars = sessionBarsBySymbol.get(candidate.symbol) ?? [];
+            const exitPrice =
+                finalOutcome?.exitPrice != null
+                    ? finalOutcome.exitPrice.toFixed(2)
+                    : "n/a";
+            const exitType = closedOutcome
+                ? "Stop/Target"
+                : finalOutcome
+                    ? "Market Close"
+                    : "Open";
+            const chartSvg = Reports.renderCandidateCandlestickSvg({
+                bars: symbolSessionBars,
+                row,
+                trade,
+                finalOutcome,
+                openingRangeMinutes: strategyConfig.openingRangeMinutes,
+                maxBarsAfterDetermination: 30,
+            });
 
-                return `
+            return `
                 <details class="candidate-card" id="candidate-${Reports.escapeHtml(candidate.symbol)}">
                     <summary class="candidate-summary">
                         <span class="candidate-symbol">${Reports.escapeHtml(candidate.symbol)}</span>
@@ -2144,27 +2152,27 @@ export class Reports {
                                 <tr><th>Exit Price</th><td>${exitPrice}</td></tr>
                                 <tr><th>Exit Type</th><td>${Reports.escapeHtml(exitType)}</td></tr>
                                 ${(() => {
-                        const d = row?.qualityDetail;
-                        if (!d) return "";
-                        const p = (v: boolean | null, skip: boolean) =>
-                            skip ? "n/a" : (v ? "&#10003;" : "&#10007;");
-                        const skipped = !d.filtersEnabled;
-                        return `
+                    const d = row?.qualityDetail;
+                    if (!d) return "";
+                    const p = (v: boolean | null, skip: boolean) =>
+                        skip ? "n/a" : (v ? "&#10003;" : "&#10007;");
+                    const skipped = !d.filtersEnabled;
+                    return `
                                 <tr><th colspan="2" style="padding-top:10px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.6">Quality Filters</th></tr>
                                 <tr><th>Filters Enabled</th><td>${d.filtersEnabled ? "Yes" : "No"}</td></tr>
                                 <tr><th>Vol Expansion</th><td>${d.volumeExpansion !== null ? d.volumeExpansion.toFixed(2) : "n/a"} (min ${d.minVolumeExpansion}) ${p(d.volumeExpansionPassed, skipped)}</td></tr>
                                 <tr><th>Rel Strength</th><td>${d.relativeStrengthPct !== null ? d.relativeStrengthPct.toFixed(2) + "%" : "n/a"} (min ${d.minRelativeStrengthPct}%) ${p(d.relativeStrengthPassed, skipped)}</td></tr>
                                 <tr><th>Trend Alignment</th><td>${d.trendAligned !== null ? (d.trendAligned ? "aligned" : "diverged") : "n/a"} ${p(d.trendAlignmentPassed, skipped)}</td></tr>
                                 ${d.failReason ? `<tr><th>Fail Reason</th><td>${Reports.escapeHtml(d.failReason)}</td></tr>` : ""}`;
-                    })()}
+                })()}
                             </tbody>
                         </table>
                     </div>
                 </details>`;
-            })
-            .join("");
+        })
+        .join("");
 
-        const htmlDrilldownReport = `<!DOCTYPE html>
+    const htmlDrilldownReport = `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8" />
@@ -2325,7 +2333,7 @@ export class Reports {
 </body>
 </html>`;
 
-        const htmlReport = `<!DOCTYPE html>
+    const htmlReport = `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8" />
@@ -2575,40 +2583,40 @@ export class Reports {
 </body>
 </html>`;
 
-        const generateArtifacts = options?.generateArtifacts !== false;
-        if (generateArtifacts) {
-            Reports.writeHtmlReport(htmlReportPath, htmlDrilldownReport);
-            Reports.writeHtmlReport(pdfSourceHtmlPath, htmlReport);
-            await Reports.renderHtmlToPdf(pdfSourceHtmlPath, pdfReportPath);
-            fs.unlinkSync(pdfSourceHtmlPath);
-            logger.info("PDF report written", { sessionDate, pdfReportPath });
-        }
+    const generateArtifacts = options?.generateArtifacts !== false;
+    if(generateArtifacts) {
+        Reports.writeHtmlReport(htmlReportPath, htmlDrilldownReport);
+        Reports.writeHtmlReport(pdfSourceHtmlPath, htmlReport);
+        await Reports.renderHtmlToPdf(pdfSourceHtmlPath, pdfReportPath);
+        fs.unlinkSync(pdfSourceHtmlPath);
+        logger.info("PDF report written", { sessionDate, pdfReportPath });
+    }
 
-        if (maxSessionBars < 30) {
-            throw new Error(
-                `Session ${sessionDate} has fewer than 30 session bars. Highest session bar count found: ${maxSessionBars}`,
-            );
-        }
+        if(maxSessionBars < 30) {
+        throw new Error(
+            `Session ${sessionDate} has fewer than 30 session bars. Highest session bar count found: ${maxSessionBars}`,
+        );
+    }
 
         Reports.writeDailySessionRecord(reportData, htmlReportPath, pdfReportPath);
 
-        return {
-            sessionDate,
-            symbols,
-            evaluationRows,
-            breakoutCandidates,
-            emulatedTrades,
-            finalOutcomes: [...finalOutcomeBySymbol.values()],
-            htmlReportPath,
-            pdfReportPath,
-            maxSessionBars,
-            insufficientSymbols,
-            totalCandidatesBoughtAtStart,
-            numberOfCandidatesSoldLong,
-            numberOfCandidatesBoughtShort,
-            totalCostOfBreakoutCandidatePurchases,
-            totalAmountOfCashAtStopLossRisk,
-            totalProfitLossToDate,
-        };
-    }
+    return {
+        sessionDate,
+        symbols,
+        evaluationRows,
+        breakoutCandidates,
+        emulatedTrades,
+        finalOutcomes: [...finalOutcomeBySymbol.values()],
+        htmlReportPath,
+        pdfReportPath,
+        maxSessionBars,
+        insufficientSymbols,
+        totalCandidatesBoughtAtStart,
+        numberOfCandidatesSoldLong,
+        numberOfCandidatesBoughtShort,
+        totalCostOfBreakoutCandidatePurchases,
+        totalAmountOfCashAtStopLossRisk,
+        totalProfitLossToDate,
+    };
+}
 }
