@@ -2157,6 +2157,11 @@ async function renderHtmlToPdf(htmlPath: string, pdfPath: string) {
     }
 }
 
+type DailySessionWithCharts = {
+    record: DailySessionRecord;
+    chartSnapshots: Map<string, DailySymbolSnapshot>;
+};
+
 type WeeklyTradingActivityReport = {
     title: string;
     weekStartDate: string;
@@ -2169,7 +2174,7 @@ type WeeklyTradingActivityReport = {
         longs: number;
         shorts: number;
         pnl: number;
-        detailLink: string;
+        dailyWithCharts: DailySessionWithCharts;
     }>;
 };
 
@@ -2205,7 +2210,7 @@ async function buildWeeklyTradingActivityReport(anchorDate: Date): Promise<Weekl
         longs: number;
         shorts: number;
         pnl: number;
-        detailLink: string;
+        dailyWithCharts: DailySessionWithCharts;
     }> = [];
 
     for (const current = new Date(weekStart); isoDateUTC(current) <= effectiveEndDate; current.setUTCDate(current.getUTCDate() + 1)) {
@@ -2221,12 +2226,27 @@ async function buildWeeklyTradingActivityReport(anchorDate: Date): Promise<Weekl
             if (!daily) {
                 continue;
             }
+
+            const candidates = daily.breakoutCandidates ?? daily.evaluationRows
+                ?.filter((row) => (row.side && row.side !== 'none') || row.breakoutPrice != null)
+                .map((row) => ({
+                    symbol: row.symbol,
+                    side: row.side === 'sell' ? 'sell' : row.side === 'buy' ? 'buy' : undefined,
+                    price: row.breakoutPrice ?? undefined,
+                })) ?? [];
+            const symbols = candidates.map((c) => c.symbol);
+
+            const chartSnapshots = await buildDailySymbolCharts(daily, symbols);
+
             dailyRowsData.push({
                 sessionDate,
                 longs: daily.totals?.numberOfCandidatesSoldLong ?? 0,
                 shorts: daily.totals?.numberOfCandidatesBoughtShort ?? 0,
                 pnl: daily.totals?.totalProfitLossToDate ?? 0,
-                detailLink: `/api/reports/render?type=today&anchorDate=${encodeURIComponent(sessionDate)}`,
+                dailyWithCharts: {
+                    record: daily,
+                    chartSnapshots,
+                },
             });
         } catch {
             // Skip unavailable sessions (future/holiday/no data) instead of failing entire weekly report.
@@ -2248,21 +2268,144 @@ async function buildWeeklyTradingActivityReport(anchorDate: Date): Promise<Weekl
     };
 }
 
+function renderEmbeddedDailyDetail(dailyWithCharts: DailySessionWithCharts, sessionDate: string): string {
+    const record = dailyWithCharts.record;
+    const chartSnapshots = dailyWithCharts.chartSnapshots;
+
+    const candidateTradeActivityValue = record.candidateTradeActivity;
+    const candidateTradeActivitySummary = (
+        candidateTradeActivityValue
+        && !Array.isArray(candidateTradeActivityValue)
+    ) ? candidateTradeActivityValue : {};
+    const totals = record.totals ?? candidateTradeActivitySummary;
+    const mostActiveSymbols = record.mostActiveSymbols ?? [];
+    const insufficientSymbols = record.insufficientSymbols ?? [];
+    const evaluationRows = record.evaluationRows ?? [];
+    const breakoutCandidates = record.breakoutCandidates ?? [];
+    const emulatedTrades = record.emulatedTrades ?? [];
+    const finalOutcomes = record.finalOutcomes ?? [];
+
+    const fmt = (value: number | null | undefined, digits = 2) => (
+        typeof value === 'number' && Number.isFinite(value) ? value.toFixed(digits) : 'n/a'
+    );
+
+    const rowBySymbol = new Map(evaluationRows.map((row) => [row.symbol, row]));
+    const emulatedBySymbol = new Map(emulatedTrades.map((row) => [row.symbol, row]));
+    const outcomeBySymbol = new Map(finalOutcomes.map((row) => [row.symbol, row]));
+
+    const candidateRows = breakoutCandidates.length
+        ? breakoutCandidates.map((candidate) => {
+            const row = rowBySymbol.get(candidate.symbol);
+            const trade = emulatedBySymbol.get(candidate.symbol);
+            const outcome = outcomeBySymbol.get(candidate.symbol);
+            const symbolId = `sym-${sessionDate}-${candidate.symbol}`;
+            const snapshot = chartSnapshots.get(candidate.symbol);
+            const chartContent = snapshot?.chartSvg
+                ? `<div class="symbol-chart-container">${snapshot.chartSvg}</div>`
+                : '<p class="no-chart">Chart not available.</p>';
+            return `
+            <tr class="symbol-row" onclick="toggleSymbolDetail('${symbolId}', this)">
+                <td>${escapeHtml(candidate.symbol)}</td>
+                <td>${escapeHtml((candidate.side ?? 'n/a').toUpperCase())}</td>
+                <td>${fmt(trade?.price ?? candidate.price)}</td>
+                <td>${fmt(trade?.qty, 4)}</td>
+                <td>${fmt(outcome?.exitPrice)}</td>
+                <td class="${pnlClass(outcome?.pnl ?? 0)}">${fmt(outcome?.pnl)}</td>
+                <td>${escapeHtml((outcome?.status ?? 'n/a').toUpperCase())}</td>
+            </tr>
+            <tr class="symbol-detail-row" id="${symbolId}" style="display:none">
+                <td colspan="7">
+                    <div class="symbol-detail-inner">
+                        <div class="symbol-detail-section">
+                            <strong>Symbol Details:</strong> ${escapeHtml(candidate.symbol)} |
+                            Entry: ${fmt(trade?.price ?? candidate.price)} |
+                            Qty: ${fmt(trade?.qty, 4)} |
+                            Exit: ${fmt(outcome?.exitPrice)} |
+                            P/L: <span class="${pnlClass(outcome?.pnl ?? 0)}">${fmt(outcome?.pnl)}</span> |
+                            Status: ${escapeHtml((outcome?.status ?? 'n/a').toUpperCase())}
+                        </div>
+                        <div class="symbol-chart-wrapper">${chartContent}</div>
+                    </div>
+                </td>
+            </tr>`;
+        }).join('')
+        : '<tr><td colspan="7">No breakout candidates for this session.</td></tr>';
+
+    const referenceSymbol = record.strategy?.referenceSymbol ?? record.strategy?.symbol ?? 'n/a';
+    const qualityFiltersEnabled = record.breakoutFilters?.breakoutQualityFiltersEnabled
+        ?? record.breakoutFilters?.enabled;
+    const confirmationMinutes = record.breakoutFilters?.breakoutConfirmationCandleMinutes
+        ?? record.breakoutFilters?.confirmationCandleMinutes;
+    const minVolumeExpansion = record.breakoutFilters?.breakoutMinVolumeExpansion
+        ?? record.breakoutFilters?.minVolumeExpansion;
+    const minRelativeStrengthPct = record.breakoutFilters?.breakoutMinRelativeStrengthPct
+        ?? record.breakoutFilters?.minRelativeStrengthPct;
+
+    return `
+    <div class="day-detail-inner">
+        <div class="day-summary-grid">
+            <div class="day-metric"><span class="day-metric-label">Candidates</span><span class="day-metric-value">${totals.totalCandidatesBoughtAtStart ?? 0}</span></div>
+            <div class="day-metric"><span class="day-metric-label">Sold Long</span><span class="day-metric-value">${totals.numberOfCandidatesSoldLong ?? 0}</span></div>
+            <div class="day-metric"><span class="day-metric-label">Bought Short</span><span class="day-metric-value">${totals.numberOfCandidatesBoughtShort ?? 0}</span></div>
+            <div class="day-metric"><span class="day-metric-label">P/L</span><span class="day-metric-value ${pnlClass(totals.totalProfitLossToDate ?? 0)}">${fmt(totals.totalProfitLossToDate)}</span></div>
+        </div>
+        <div class="day-section">
+            <strong>Market Scan:</strong>
+            Max Bars: ${record.marketScan?.maxSessionBars ?? 0} |
+            Scanned: ${record.mostActiveSymbolCount ?? mostActiveSymbols.length} |
+            Insufficient: ${insufficientSymbols.length} |
+            Type: ${escapeHtml(record.marketScan?.candidateTradeType ?? 'n/a')}
+        </div>
+        <div class="day-section">
+            <strong>Breakout Filters:</strong>
+            ${qualityFiltersEnabled == null ? 'n/a' : (qualityFiltersEnabled ? 'Enabled' : 'Disabled')} |
+            Confirm: ${confirmationMinutes ?? 'n/a'}m |
+            Min Vol Exp: ${fmt(minVolumeExpansion)} |
+            Min RS: ${fmt(minRelativeStrengthPct)}%
+        </div>
+        <div class="day-section">
+            <strong>Breakout Candidates</strong> (click a row to view chart)
+            <table class="day-candidates-table">
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Side</th>
+                        <th>Entry</th>
+                        <th>Qty</th>
+                        <th>Exit</th>
+                        <th>P/L</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${candidateRows}
+                </tbody>
+            </table>
+        </div>
+    </div>`;
+}
+
 function renderWeeklyTradingActivityHtml(weeklyReport: WeeklyTradingActivityReport): string {
     const dailyRows = weeklyReport.dailyRowsData.length
-        ? weeklyReport.dailyRowsData.map((day) => `
-        <tr>
-            <td>${escapeHtml(day.sessionDate)}</td>
-            <td>${day.longs}</td>
-            <td>${day.shorts}</td>
-            <td class="${pnlClass(day.pnl)}">${day.pnl.toFixed(2)}</td>
-            <td><a href="${day.detailLink}" target="_self">View Day Details</a></td>
-        </tr>`)
-        : [
-            `<tr>
-                <td colspan="5">No reportable trading sessions available yet for this week.</td>
-            </tr>`,
-        ];
+        ? weeklyReport.dailyRowsData.map((day) => {
+            const dayDetail = renderEmbeddedDailyDetail(day.dailyWithCharts, day.sessionDate);
+            return `
+            <tr>
+                <td>${escapeHtml(day.sessionDate)}</td>
+                <td>${day.longs}</td>
+                <td>${day.shorts}</td>
+                <td class="${pnlClass(day.pnl)}">${day.pnl.toFixed(2)}</td>
+                <td><button class="day-detail-toggle" onclick="toggleDayDetail('day-${escapeHtml(day.sessionDate)}', this)">Show Details</button></td>
+            </tr>
+            <tr class="day-detail-row" id="day-${escapeHtml(day.sessionDate)}" style="display:none">
+                <td colspan="5">
+                    ${dayDetail}
+                </td>
+            </tr>`;
+        }).join('')
+        : `<tr>
+            <td colspan="5">No reportable trading sessions available yet for this week.</td>
+        </tr>`;
 
     return `<!doctype html>
 <html lang="en">
@@ -2283,9 +2426,51 @@ function renderWeeklyTradingActivityHtml(weeklyReport: WeeklyTradingActivityRepo
         .pnl-profit { color: #198754; font-weight: 700; }
         .pnl-loss { color: #dc3545; font-weight: 700; }
         .pnl-flat { color: #6c757d; font-weight: 700; }
-        a { color: #0d6efd; text-decoration: none; }
-        a:hover { text-decoration: underline; }
+        button { color: #0d6efd; background: none; border: 1px solid #0d6efd; border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 12px; }
+        button:hover { background: #e7f1ff; }
+        .day-detail-row td { padding: 0; background: #f8fafc; }
+        .day-detail-inner { padding: 16px; }
+        .day-summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 16px; }
+        .day-metric { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; }
+        .day-metric-label { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: #64748b; display: block; }
+        .day-metric-value { font-size: 18px; font-weight: 700; display: block; margin-top: 4px; }
+        .day-candidates-table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+        .day-candidates-table th, .day-candidates-table td { border: 1px solid #d9e2ec; padding: 6px 8px; text-align: left; font-size: 12px; }
+        .day-candidates-table th { background: #edf3fb; text-transform: uppercase; font-size: 10px; }
+        .day-detail-note { font-size: 11px; color: #64748b; margin-top: 8px; }
+        .day-section { margin-bottom: 16px; }
+        .day-section:last-child { margin-bottom: 0; }
+        .symbol-row { cursor: pointer; }
+        .symbol-row:hover { background: #f1f5f9; }
+        .symbol-detail-row { background: #f8fafc; }
+        .symbol-detail-inner { padding: 12px; }
+        .symbol-detail-section { font-size: 12px; margin-bottom: 8px; }
+        .symbol-chart-wrapper { margin-top: 8px; }
+        .symbol-chart-wrapper svg { max-width: 100%; height: auto; }
+        .no-chart { font-size: 11px; color: #64748b; font-style: italic; }
     </style>
+    <script>
+        function toggleDayDetail(id, btn) {
+            var row = document.getElementById(id);
+            if (row.style.display === 'none') {
+                row.style.display = 'table-row';
+                btn.textContent = 'Hide Details';
+            } else {
+                row.style.display = 'none';
+                btn.textContent = 'Show Details';
+            }
+        }
+        function toggleSymbolDetail(id, row) {
+            var detailRow = document.getElementById(id);
+            if (detailRow.style.display === 'none') {
+                detailRow.style.display = 'table-row';
+                row.style.background = '#e2e8f0';
+            } else {
+                detailRow.style.display = 'none';
+                row.style.background = '';
+            }
+        }
+    </script>
 </head>
 <body>
     <section class="panel">
@@ -2306,7 +2491,7 @@ function renderWeeklyTradingActivityHtml(weeklyReport: WeeklyTradingActivityRepo
                 </tr>
             </thead>
             <tbody>
-                ${dailyRows.join('\n')}
+                ${dailyRows}
             </tbody>
         </table>
     </section>
