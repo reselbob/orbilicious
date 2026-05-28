@@ -83,6 +83,15 @@ run_project() {
   local app_pid
   local web_pid
 
+  # Kill any process still holding the web port from a prior session
+  local old_pid
+  old_pid="$(lsof -ti "tcp:${web_port}" 2>/dev/null || true)"
+  if [[ -n "${old_pid}" ]]; then
+    log "Killing existing process ${old_pid} on port ${web_port}"
+    kill "${old_pid}" 2>/dev/null || true
+    sleep 1
+  fi
+
   cleanup() {
     local code=$?
 

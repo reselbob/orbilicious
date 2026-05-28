@@ -13,6 +13,7 @@ import {
 } from './basket';
 import { Bar } from './types';
 import type { OrbReportResult } from './reports';
+import { logBreakoutHigh, logBreakoutLow, logTradeOpen, logTradeClose } from './trade-logger';
 
 const executedToday = new Set<string>();
 const reportedDates = new Set<string>();
@@ -20,6 +21,7 @@ const reportedDates = new Set<string>();
 interface SimulatedPosition {
     side: 'long' | 'short';
     entryPrice: number;
+    entryTime: string;
     stopPrice: number;
     stopLossPct?: number;
     takeProfitPrice: number;
@@ -157,6 +159,8 @@ function emitHistoricalTradeMonitorEvents(report: OrbReportResult) {
             reason: 'historical emulation entry',
         });
 
+        logTradeOpen(trade.symbol, trade.price, entryTimestamp);
+
         const outcome = outcomeBySymbol.get(trade.symbol);
         if (!outcome || outcome.exitPrice == null) {
             continue;
@@ -176,6 +180,8 @@ function emitHistoricalTradeMonitorEvents(report: OrbReportResult) {
             pnl: outcome.pnl,
             reason: `historical emulation ${outcome.status} close`,
         });
+
+        logTradeClose(trade.symbol, outcome.exitPrice, outcome.exitTimestamp ?? entryTimestamp);
     }
 }
 
@@ -558,7 +564,10 @@ export async function evaluateSymbol(
             // Scan all session bars (not just latestBar) so a target/stop hit on any
             // bar since entry is caught — even if the latest bar no longer shows the hit.
             if (env.dryRun && rawSim) {
-                const hitBar = sessionBars.find(bar => {
+                const postEntryBars = sessionBars.filter(
+                    (bar) => new Date(bar.timestamp).getTime() >= new Date(rawSim.entryTime).getTime()
+                );
+                const hitBar = postEntryBars.find(bar => {
                     if (rawSim.side === 'long') {
                         return bar.low <= rawSim.stopPrice || bar.high >= rawSim.takeProfitPrice;
                     } else {
@@ -603,6 +612,7 @@ export async function evaluateSymbol(
                         pnl,
                         reason: exitReason,
                     });
+                    logTradeClose(symbol, exitPrice, hitBar.timestamp);
                     return null;
                 }
 
@@ -634,6 +644,7 @@ export async function evaluateSymbol(
                         pnl,
                         reason: 'profit-capture close',
                     });
+                    logTradeClose(symbol, exitPrice, latestBar.timestamp);
                     return null;
                 }
 
@@ -703,6 +714,7 @@ export async function evaluateSymbol(
                     pnl: closePnl,
                     reason: 'profit-capture close',
                 });
+                logTradeClose(symbol, latestBar.close, latestBar.timestamp);
             } else {
                 logger.debug('Keeping open position; close is not yet favorable for profit capture', {
                     symbol,
@@ -756,6 +768,12 @@ export async function findBreakoutCandidates(
 
     const candidates = results.filter((x): x is BreakoutCandidate => x !== null);
     const filteredCandidates = candidates.filter((candidate) => candidateAllowedByTradeType(candidate.side));
+
+    const now = new Date().toISOString();
+    for (const c of filteredCandidates) {
+        logBreakoutHigh(c.symbol, c.openingRangeHigh, now);
+        logBreakoutLow(c.symbol, c.openingRangeLow, now);
+    }
 
     logger.info('Finished candidate scan', {
         sessionDate,
@@ -828,11 +846,14 @@ export async function executeSizedTrades(
             simulatedPositions.set(trade.symbol, {
                 side: trade.side === 'buy' ? 'long' : 'short',
                 entryPrice: trade.price,
+                entryTime: new Date().toISOString(),
                 stopPrice: trade.stopPrice,
                 stopLossPct: trade.stopLossPct,
                 takeProfitPrice: trade.takeProfitPrice,
                 qty: trade.qty,
             });
+
+            logTradeOpen(trade.symbol, trade.price, new Date().toISOString());
         }
 
         return;
@@ -865,6 +886,8 @@ export async function executeSizedTrades(
             targetPrice: trade.takeProfitPrice,
             reason: 'bracket order submitted',
         });
+
+        logTradeOpen(trade.symbol, trade.price, new Date().toISOString());
     }
 
     logger.info('Submitted bracket orders', {

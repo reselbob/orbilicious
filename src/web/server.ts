@@ -350,7 +350,11 @@ function sendJson(res: ServerResponse, statusCode: number, payload: unknown) {
         'Content-Length': Buffer.byteLength(body),
         'Cache-Control': 'no-store',
     });
-    res.end(body);
+    try {
+        res.end(body);
+    } catch {
+        // Client may have disconnected
+    }
 }
 
 function sendFile(res: ServerResponse, filePath: string, options?: { downloadName?: string }) {
@@ -788,6 +792,7 @@ function startOrbiliciousProcess(params: {
         appState.pid = null;
         appState.runtimeStatus = 'Stopped';
         appState.orbUiMessage = null;
+        appState.emulationSessionDate = null;
         persistCanonicalDailySession();
 
         if (wasStopRequested || signal === 'SIGTERM') {
@@ -3656,6 +3661,14 @@ export function startWebServer(port = DEFAULT_PORT) {
 
     return server;
 }
+
+process.on('unhandledRejection', (reason, promise) => {
+    logger.error('Unhandled promise rejection', { reason: String(reason), promise: String(promise) });
+});
+
+process.on('uncaughtException', (error) => {
+    logger.error('Uncaught exception', { error: error.message, stack: error.stack });
+});
 
 if (require.main === module) {
     const rawPort = process.env.WEB_PORT;
