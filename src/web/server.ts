@@ -3670,6 +3670,18 @@ process.on('uncaughtException', (error) => {
     logger.error('Uncaught exception', { error: error.message, stack: error.stack });
 });
 
+function shutdown(signal: string) {
+    logger.info('Shutting down', { signal });
+    if (appProcess) {
+        logger.info('Killing child process', { pid: appProcess.pid });
+        appProcess.kill('SIGTERM');
+    }
+    process.exit(0);
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
 if (require.main === module) {
     const rawPort = process.env.WEB_PORT;
     const parsed = rawPort ? Number(rawPort) : DEFAULT_PORT;
