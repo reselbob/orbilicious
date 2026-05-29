@@ -42,7 +42,7 @@ export class AlpacaWebSocketClient {
         this.shouldReconnect = true;
         this.connecting = true;
         const feed = env.dataFeed === 'sip' ? 'sip' : 'iex';
-        const wsUrl = `wss://stream.data.alpaca.markets/v2/${feed}`;
+        const wsUrl = `${env.wsBaseUrl}/v2/${feed}`;
         logger.debug('Connecting to Alpaca WebSocket', { url: wsUrl });
 
         this.ws = new WebSocket(wsUrl, {

@@ -127,4 +127,24 @@ describe('config integration', () => {
         expect(mod.env.breakoutTrendTimeframeMinutes).to.equal(15);
         expect(mod.env.breakoutTrendLookbackBars).to.equal(4);
     });
+
+    it('defaults ALPACA_WS_BASE_URL to wss://stream.data.alpaca.markets', () => {
+        withBaseConfigEnv();
+        delete process.env.ALPACA_WS_BASE_URL;
+
+        clearConfigModuleCache();
+        const mod = require('../src/config');
+
+        expect(mod.env.wsBaseUrl).to.equal('wss://stream.data.alpaca.markets');
+    });
+
+    it('loads ALPACA_WS_BASE_URL override from environment', () => {
+        withBaseConfigEnv();
+        process.env.ALPACA_WS_BASE_URL = 'wss://custom-ws.example.com';
+
+        clearConfigModuleCache();
+        const mod = require('../src/config');
+
+        expect(mod.env.wsBaseUrl).to.equal('wss://custom-ws.example.com');
+    });
 });

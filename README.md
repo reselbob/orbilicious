@@ -504,6 +504,7 @@ The app reads configuration from `.env` (via `dotenv`) and supports the followin
 | `ALPACA_DATA_BASE_URL` | No | `https://data.alpaca.markets` | Base URL for market data endpoints. |
 | `CANDIDATE_TRADE_TYPE` | No | `LONG_AND_SHORT` | Filter breakout candidates by direction. Use `LONG` to accept only bullish breakouts, `SHORT` to accept only bearish breakouts, or `LONG_AND_SHORT` (default) to accept either direction. |
 | `ALPACA_DATA_FEED` | No | `iex` | Alpaca market data feed selector. Use `iex` for the default feed, which may be delayed, or `sip` for real-time consolidated data if your Alpaca subscription supports it. |
+| `ALPACA_WS_BASE_URL` | No | `wss://stream.data.alpaca.markets` | Base URL for Alpaca WebSocket streaming endpoint. The feed (`iex` / `sip`) is appended as `/v2/{feed}`. Override for custom proxy or alternate endpoints. |
 | `ALPACA_TRADING_BASE_URL` | No | Mode-dependent (`https://paper-api.alpaca.markets` for `EMULATION`/`PAPER`, `https://api.alpaca.markets` for `LIVE`) | Optional override for trading/account endpoint base URL. |
 | `APCA_API_KEY_ID` | Yes | None | Alpaca API key ID. Required for all Alpaca data/account/order API calls. |
 | `APCA_API_SECRET_KEY` | Yes | None | Alpaca API secret key paired with `APCA_API_KEY_ID`. |

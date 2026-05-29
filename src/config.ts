@@ -115,6 +115,7 @@ export const env = {
     paper: configuredSessionMode !== 'LIVE',
     tradingBaseUrl: process.env.ALPACA_TRADING_BASE_URL || defaultTradingBaseUrlByMode,
     dataBaseUrl: process.env.ALPACA_DATA_BASE_URL || 'https://data.alpaca.markets',
+    wsBaseUrl: process.env.ALPACA_WS_BASE_URL || 'wss://stream.data.alpaca.markets',
     dataFeed: process.env.ALPACA_DATA_FEED || 'iex',
     sessionDate: dateStr('SESSION_DATE', ''),
     candidateTradeType: configuredCandidateTradeType,
