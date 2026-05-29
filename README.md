@@ -15,7 +15,10 @@
 - [Developer Notes](#developer-notes)
   - [Strategy Rules](#strategy-rules)
   - [Operational Rules](#operational-rules)
+  - [Resilience and Stability](#resilience-and-stability)
   - [Logging](#logging)
+    - [General Description](#general-description)
+    - [Trade Log Format](#trade-log-format)
   - [Environment Variables](#environment-variables)
   - [Report Modes and Scheduling](#report-modes-and-scheduling)
   - [Tests](#tests)
@@ -422,14 +425,47 @@ The list below follows the order the app actually applies rules at runtime.
 
 - _Test: `rules.test.ts` — `it('rules 7 and 32: current-day scheduling waits before open and exits after generating one end-of-day report')`_
 
+### Resilience and Stability
+
+The following improvements address reliability and crash safety in the web application:
+
+- **WebSocket URL correction**: The Alpaca SIP streaming endpoint was changed from `wss://stream.data.alpaca.markets` (which returns only HTTP) to `wss://stream.data.alpaca.markets/v2/sip` for correct real-time bar delivery. API credentials are passed as WebSocket headers (`APCA-API-KEY-ID`, `APCA-API-SECRET-KEY`).
+- **Stale session date on process exit**: When a child trading process stops, `emulationSessionDate` is cleared to `null` so the UI defaults to today's date instead of showing the previous session's date.
+- **EPIPE crash prevention**: `sendJson()` wraps `res.end()` in a try/catch to prevent crashes when a client disconnects mid-response.
+- **Unhandled rejection and exception logging**: Global `process.on('unhandledRejection')` and `process.on('uncaughtException')` handlers log error details to the structured logger.
+- **Duplicate route removal**: The `/api/alpaca/set-realtime-feed` endpoint existed twice in the route handler chain. The duplicate was removed.
+- **Realtime feed state sync**: `initialRealtimeFeedEnabled` is read from the `ALPACA_DATA_FEED` environment variable at startup and sent to the UI via status endpoint. The "Run in real time" checkbox automatically syncs to this value.
+- **Orphan process cleanup**: SIGTERM and SIGINT handlers kill the spawned child trading process before the server exits, preventing orphaned workers.
+- **Trade log date isolation**: Trade log files (`logs/trades/trades-YYYY-MM-DD.log`) are keyed by the entry or exit timestamp date rather than the system clock, so historical backtest trades write to the correct date file.
+
 ### Logging
+
+#### General Description
 
 Logs are written to:
 
-- `logs/combined.log`
-- `logs/errors.log`
-- `logs/exceptions.log`
-- `logs/rejections.log`
+- `logs/combined.log` — all log levels
+- `logs/errors.log` — error-level messages only
+- `logs/exceptions.log` — uncaught exceptions
+- `logs/rejections.log` — unhandled promise rejections
+- `logs/trades/trades-YYYY-MM-DD.log` — trade event log (one JSON line per event)
+
+#### Trade Log Format
+
+Each line in `logs/trades/trades-YYYY-MM-DD.log` is a JSON object describing a single trade event. The file date component is derived from the event's own timestamp, not the system clock. Event types:
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | `BREAKOUT_HIGH`, `BREAKOUT_LOW`, `TRADE_OPEN`, or `TRADE_CLOSE` |
+| `symbol` | string | The ticker symbol |
+| `timestamp` | string | ISO-8601 timestamp of the event |
+| Additional fields | varies | `highPrice`/`lowPrice` for breakout events, `entryPrice`/`entryTime` for open events, `exitPrice`/`exitTime`/`pnl` for close events |
+
+Example trade open entry:
+
+```json
+{"type":"TRADE_OPEN","symbol":"SPY","entryPrice":101.5,"entryTime":"2026-05-14T13:46:00Z"}
+```
 
 Console output is also enabled.
 
