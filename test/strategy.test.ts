@@ -159,6 +159,14 @@ class WickStopDeterministicClient extends AlpacaClient {
     async getIntradayBars(symbol: string, _sessionDate: string): Promise<Bar[]> {
         return this.barsBySymbol[symbol] ?? [];
     }
+
+    async getIntradayBarsBatch(symbols: string[], _sessionDate: string): Promise<Map<string, Bar[]>> {
+        const map = new Map<string, Bar[]>();
+        for (const symbol of symbols) {
+            map.set(symbol, this.barsBySymbol[symbol] ?? []);
+        }
+        return map;
+    }
 }
 
 describe('strategy integration', () => {
@@ -400,6 +408,13 @@ describe('strategy integration', () => {
                 });
                 return bars;
             }
+            async getIntradayBarsBatch(symbols: string[], _sessionDate: string): Promise<Map<string, Bar[]>> {
+                const map = new Map<string, Bar[]>();
+                for (const symbol of symbols) {
+                    map.set(symbol, await this.getIntradayBars(symbol, _sessionDate));
+                }
+                return map;
+            }
         }
         const client = new TestClient(mostActiveSymbols, sessionDate);
 
@@ -576,6 +591,7 @@ describe('strategy integration', () => {
                 entryPrice,
                 stopPrice,
                 takeProfitPrice,
+                entryTime: '2026-05-21T13:31:30.000Z',
                 qty: 10,
             });
 
@@ -589,6 +605,54 @@ describe('strategy integration', () => {
                 { symbol, timestamp: '2026-05-21T13:32:00Z', open: 108, high: 112, low: 107, close: 111, volume: 1000 },
                 // Pullback bar — high < takeProfitPrice, becomes latestBar
                 { symbol, timestamp: '2026-05-21T13:33:00Z', open: 109, high: 109.5, low: 108, close: 109, volume: 1000 },
+            ];
+
+            class TestClient extends AlpacaClient {
+                async getMostActiveSymbols() { return [symbol]; }
+                async getOpenPosition() { return null; }
+                async getIntradayBars() { return bars; }
+            }
+            const client = new TestClient();
+
+            await evaluateSymbol(client, symbol, sessionDate);
+
+            expect(simulatedPositions.has(symbol)).to.be.false;
+        } finally {
+            env.dryRun = originalDryRun;
+        }
+    });
+
+    it('closes position when target is hit on the same-minute bar as entry', async () => {
+        const symbol = 'SAMEMIN';
+        const sessionDate = '2026-05-21';
+        const originalDryRun = env.dryRun;
+
+        env.dryRun = true;
+
+        try {
+            const { simulatedPositions } = require('../src/app');
+            const entryPrice = 100;
+            const stopPrice = 95;
+            const takeProfitPrice = 110;
+
+            // Entry time is mid-bar (13:32:15), so the 13:32:00 bar's timestamp
+            // is BEFORE entryTime.  The old filter (bar.timestamp >= entryTime)
+            // would exclude this bar, missing the target hit.
+            simulatedPositions.set(symbol, {
+                side: 'long',
+                entryPrice,
+                stopPrice,
+                takeProfitPrice,
+                entryTime: '2026-05-21T13:32:15.000Z',
+                qty: 10,
+            });
+
+            const bars: Bar[] = [
+                { symbol, timestamp: '2026-05-21T13:30:00Z', open: 100, high: 101, low: 99, close: 100, volume: 1000 },
+                { symbol, timestamp: '2026-05-21T13:31:00Z', open: 100, high: 101, low: 99, close: 100, volume: 1000 },
+                // Same-minute bar: starts at 13:32:00, entry is at 13:32:15,
+                // target hit (high 112) is later in the same minute (13:32:30).
+                { symbol, timestamp: '2026-05-21T13:32:00Z', open: 108, high: 112, low: 107, close: 111, volume: 1000 },
             ];
 
             class TestClient extends AlpacaClient {

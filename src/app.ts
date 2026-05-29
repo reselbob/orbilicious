@@ -525,7 +525,8 @@ function buildConfirmedBreakoutCandidate(
 export async function evaluateSymbol(
     client: AlpacaClient,
     symbol: string,
-    sessionDate: string
+    sessionDate: string,
+    barsMap?: Map<string, Bar[]>
 ): Promise<BreakoutCandidate | null> {
     try {
         // In dryRun mode use the in-memory simulated position table; live modes query Alpaca.
@@ -565,7 +566,7 @@ export async function evaluateSymbol(
             // bar since entry is caught — even if the latest bar no longer shows the hit.
             if (env.dryRun && rawSim) {
                 const postEntryBars = sessionBars.filter(
-                    (bar) => new Date(bar.timestamp).getTime() >= new Date(rawSim.entryTime).getTime()
+                    (bar) => new Date(bar.timestamp).getTime() > new Date(rawSim.entryTime).getTime() - 60000
                 );
                 const hitBar = postEntryBars.find(bar => {
                     if (rawSim.side === 'long') {
@@ -732,7 +733,7 @@ export async function evaluateSymbol(
             return null;
         }
 
-        const bars = await client.getIntradayBars(symbol, sessionDate);
+        const bars = barsMap?.get(symbol) ?? await client.getIntradayBars(symbol, sessionDate);
         if (!bars.length) {
             logger.debug('Skipping symbol with no bars', { symbol, sessionDate });
             return null;
@@ -762,8 +763,10 @@ export async function findBreakoutCandidates(
         symbols,
     });
 
+    const barsMap = await client.getIntradayBarsBatch(symbols, sessionDate);
+
     const results = await Promise.all(
-        symbols.map((symbol) => evaluateSymbol(client, symbol, sessionDate))
+        symbols.map((symbol) => evaluateSymbol(client, symbol, sessionDate, barsMap))
     );
 
     const candidates = results.filter((x): x is BreakoutCandidate => x !== null);

@@ -81,7 +81,7 @@ describe('Alpaca WebSocket client connection type', () => {
             expect(details[0].symbol).to.equal('AAPL');
         });
 
-        it('getIntradayBars logs connection type HTTP when feed is iex', async () => {
+        it('getIntradayBars fetches bars via HTTP directly', async () => {
             const client = new AlpacaClient();
             const bars = await client.getIntradayBars('AAPL', '2026-05-13');
             expect(bars).to.have.length(2);
@@ -89,38 +89,148 @@ describe('Alpaca WebSocket client connection type', () => {
         });
     });
 
-    describe('WebSocket fallback behavior', () => {
+    describe('getIntradayBarsBatch (HTTP batch)', () => {
         let restoreFetch: (() => void) | null = null;
-        const originalDataFeed = process.env.ALPACA_DATA_FEED;
 
-        afterEach(() => {
-            process.env.ALPACA_DATA_FEED = originalDataFeed ?? '';
-            if (restoreFetch) {
-                restoreFetch();
-                restoreFetch = null;
-            }
-        });
-
-        it('falls back to HTTP when WebSocket receives no bars', async () => {
+        beforeEach(() => {
             restoreFetch = installMockFetch([
                 (url: string) => {
-                    if (url.includes('/v2/stocks/SPY/bars')) {
+                    if (url.includes('/v2/stocks/AAPL/bars')) {
                         return {
                             status: 200,
                             json: {
-                                bars: [{ t: '2026-05-13T13:30:00Z', o: 100, h: 101, l: 99, c: 100.5, v: 1000 }],
+                                bars: [
+                                    { t: '2026-05-13T13:30:00Z', o: 100, h: 101, l: 99, c: 100.5, v: 1000 },
+                                ],
+                            },
+                        };
+                    }
+                    if (url.includes('/v2/stocks/MSFT/bars')) {
+                        return {
+                            status: 200,
+                            json: {
+                                bars: [
+                                    { t: '2026-05-13T13:30:00Z', o: 200, h: 201, l: 199, c: 200.5, v: 2000 },
+                                ],
                             },
                         };
                     }
                     return null;
                 },
             ]);
+        });
 
-            process.env.ALPACA_DATA_FEED = 'sip';
+        afterEach(() => {
+            if (restoreFetch) {
+                restoreFetch();
+                restoreFetch = null;
+            }
+        });
 
+        it('fetches bars for all symbols via concurrent HTTP calls', async () => {
             const client = new AlpacaClient();
-            const bars = await client.getIntradayBars('SPY', '2026-05-13');
-            expect(bars.length).to.be.greaterThan(0);
+            const map = await client.getIntradayBarsBatch(['AAPL', 'MSFT'], '2026-05-13');
+            expect(map.size).to.equal(2);
+            expect(map.get('AAPL')).to.have.length(1);
+            expect(map.get('MSFT')).to.have.length(1);
+            expect(map.get('AAPL')![0].symbol).to.equal('AAPL');
+            expect(map.get('MSFT')![0].symbol).to.equal('MSFT');
+        });
+
+        it('returns map with empty arrays for symbols with no bars', async () => {
+            restoreFetch = installMockFetch([
+                (_url: string) => ({
+                    status: 200,
+                    json: { bars: [] },
+                }),
+            ]);
+            const client = new AlpacaClient();
+            const map = await client.getIntradayBarsBatch(['NODATA'], '2026-05-13');
+            expect(map.get('NODATA')).to.have.length(0);
+        });
+    });
+
+    describe('handleMessage (v2 streaming format)', () => {
+        it('parses array-wrapped auth success and sets authenticated', () => {
+            const client = new AlpacaWebSocketClient();
+            const data = JSON.stringify([{ T: 'success', msg: 'authenticated' }]);
+            (client as any).handleMessage(data);
+            expect((client as any).authenticated).to.equal(true);
+        });
+
+        it('parses single-object auth success (backward compat)', () => {
+            const client = new AlpacaWebSocketClient();
+            const data = JSON.stringify({ T: 'success', msg: 'authenticated' });
+            (client as any).handleMessage(data);
+            expect((client as any).authenticated).to.equal(true);
+        });
+
+        it('parses error code 406 and disables reconnect', () => {
+            const client = new AlpacaWebSocketClient();
+            (client as any).shouldReconnect = true;
+            (client as any).connecting = true;
+            const data = JSON.stringify([{ T: 'error', code: 406, msg: 'connection limit exceeded' }]);
+            (client as any).handleMessage(data);
+            expect((client as any).shouldReconnect).to.equal(false);
+        });
+
+        it('parses bar message with v2 field names (S for symbol, flat fields)', () => {
+            const client = new AlpacaWebSocketClient();
+            const data = JSON.stringify([{
+                T: 'b',
+                S: 'SPY',
+                o: 100.5,
+                h: 101.0,
+                l: 99.5,
+                c: 100.75,
+                v: 10000,
+                t: '2024-01-02T14:30:00Z',
+            }]);
+            (client as any).handleMessage(data);
+            const bars = (client as any).collectedBars.get('SPY');
+            expect(bars).to.have.length(1);
+            expect(bars[0].symbol).to.equal('SPY');
+            expect(bars[0].open).to.equal(100.5);
+            expect(bars[0].high).to.equal(101.0);
+            expect(bars[0].low).to.equal(99.5);
+            expect(bars[0].close).to.equal(100.75);
+            expect(bars[0].volume).to.equal(10000);
+            expect(bars[0].timestamp).to.equal('2024-01-02T14:30:00Z');
+        });
+
+        it('collects multiple bars for the same symbol', () => {
+            const client = new AlpacaWebSocketClient();
+            const data = JSON.stringify([
+                { T: 'b', S: 'SPY', o: 100, h: 101, l: 99, c: 100, v: 1000, t: '2024-01-02T14:30:00Z' },
+                { T: 'b', S: 'SPY', o: 101, h: 102, l: 100, c: 101, v: 1100, t: '2024-01-02T14:31:00Z' },
+            ]);
+            (client as any).handleMessage(data);
+            const bars = (client as any).collectedBars.get('SPY');
+            expect(bars).to.have.length(2);
+        });
+
+        it('sends bars to pending subscription handler', () => {
+            const client = new AlpacaWebSocketClient();
+            let handled = 0;
+            (client as any).pendingSubscriptions.set('SPY', () => { handled++; });
+            const data = JSON.stringify([{ T: 'b', S: 'SPY', o: 100, h: 101, l: 99, c: 100, v: 1000, t: '2024-01-02T14:30:00Z' }]);
+            (client as any).handleMessage(data);
+            expect(handled).to.equal(1);
+        });
+
+        it('ignores non-message data silently (no throw)', () => {
+            const client = new AlpacaWebSocketClient();
+            expect(() => (client as any).handleMessage('not json')).to.not.throw();
+            expect(() => (client as any).handleMessage('')).to.not.throw();
+        });
+    });
+
+    describe('unsubscribeAll', () => {
+        it('clears pending subscriptions', () => {
+            const client = new AlpacaWebSocketClient();
+            (client as any).pendingSubscriptions.set('SPY', () => {});
+            client.unsubscribeAll();
+            expect((client as any).pendingSubscriptions.size).to.equal(0);
         });
     });
 

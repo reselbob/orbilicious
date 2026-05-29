@@ -2,7 +2,7 @@ import { env, strategyConfig } from './config';
 import { logger } from './logger';
 import { toNyParts } from './time';
 import { Bar, Position } from './types';
-import { AlpacaWebSocketClient, isMarketHours, type ConnectionType } from './alpaca-ws';
+import { AlpacaWebSocketClient } from './alpaca-ws';
 import type {
     OrbReportResult,
     RunningSummaryOrbReportResult,
@@ -169,39 +169,27 @@ export class AlpacaClient {
     async getIntradayBars(symbol: string, sessionDate: string): Promise<Bar[]> {
         const start = `${sessionDate}T09:30:00-04:00`;
         const end = `${sessionDate}T16:00:00-04:00`;
-        const useRealtime = this._useRealtimeFeed || env.dataFeed === 'sip';
+        const feed = this._useRealtimeFeed || env.dataFeed === 'sip' ? 'sip' : env.dataFeed;
 
-        if (useRealtime && isMarketHours()) {
-            try {
-                const bars = await this.getIntradayBarsViaWebSocket(symbol, sessionDate);
-                if (bars.length > 0) {
-                    return bars;
-                }
-            } catch (error) {
-                logger.warn('WebSocket bars fetch failed, falling back to HTTP', { symbol, sessionDate, error });
-            }
-        }
-
-        return this.getIntradayBarsViaHttp(symbol, sessionDate, start, end, useRealtime ? 'sip' : env.dataFeed);
+        return this.getIntradayBarsViaHttp(symbol, sessionDate, start, end, feed);
     }
 
-    private async getIntradayBarsViaWebSocket(symbol: string, sessionDate: string): Promise<Bar[]> {
-        const wsClient = this.getWsClient();
-        const connectionType: ConnectionType = wsClient.connection;
+    async getIntradayBarsBatch(symbols: string[], sessionDate: string): Promise<Map<string, Bar[]>> {
+        const start = `${sessionDate}T09:30:00-04:00`;
+        const end = `${sessionDate}T16:00:00-04:00`;
+        const feed = this._useRealtimeFeed || env.dataFeed === 'sip' ? 'sip' : env.dataFeed;
 
-        logger.debug('Fetching intraday bars via WebSocket', { symbol, sessionDate, connectionType });
-
-        const barsMap = await wsClient.getBarsForSymbols([symbol]);
-        const bars = barsMap.get(symbol) ?? [];
-
-        logger.info('Fetched intraday bars via WebSocket', {
-            symbol,
-            sessionDate,
-            connectionType,
-            count: bars.length
-        });
-
-        return bars;
+        const results = await Promise.all(
+            symbols.map((symbol) =>
+                this.getIntradayBarsViaHttp(symbol, sessionDate, start, end, feed)
+                    .then((bars) => ({ symbol, bars }))
+            )
+        );
+        const map = new Map<string, Bar[]>();
+        for (const { symbol, bars } of results) {
+            map.set(symbol, bars);
+        }
+        return map;
     }
 
     private async getIntradayBarsViaHttp(symbol: string, sessionDate: string, start: string, end: string, feedOverride?: string): Promise<Bar[]> {

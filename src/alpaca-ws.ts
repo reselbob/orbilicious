@@ -5,22 +5,14 @@ import { Bar } from './types';
 export type ConnectionType = 'WSS' | 'HTTP';
 
 interface AlpacaBarMessage {
-    type: 'b';
-    symbol: string;
-    bar: {
-        t: string;
-        o: number;
-        h: number;
-        l: number;
-        c: number;
-        v: number;
-    };
-}
-
-interface AlpacaAuthResponse {
-    action: 'auth';
-    status: 'authenticated' | 'unauthorized';
-    message?: string;
+    T: 'b';
+    S: string;
+    o: number;
+    h: number;
+    l: number;
+    c: number;
+    v: number;
+    t: string;
 }
 
 type BarHandler = (bar: Bar) => void;
@@ -47,8 +39,10 @@ export class AlpacaWebSocketClient {
             return;
         }
 
+        this.shouldReconnect = true;
         this.connecting = true;
-        const wsUrl = 'wss://stream.data.alpaca.markets/v2/sip';
+        const feed = env.dataFeed === 'sip' ? 'sip' : 'iex';
+        const wsUrl = `wss://stream.data.alpaca.markets/v2/${feed}`;
         logger.debug('Connecting to Alpaca WebSocket', { url: wsUrl });
 
         this.ws = new WebSocket(wsUrl, {
@@ -74,7 +68,7 @@ export class AlpacaWebSocketClient {
                     this.connecting = false;
                     reject(new Error('WebSocket connection timeout - falling back to HTTP'));
                 }
-            }, 15000);
+            }, 10000);
 
             authTimeout = setTimeout(() => {
                 if (this.connecting) {
@@ -85,87 +79,83 @@ export class AlpacaWebSocketClient {
                 } else if (!this.authenticated) {
                     cleanup();
                     ws.close();
- reject(new Error('WebSocket authentication failed - falling back to HTTP'));
+                    reject(new Error('WebSocket authentication failed - falling back to HTTP'));
                 }
-            }, 20000);
+            }, 10000);
 
-            ws.onopen = () => {
-                logger.debug('Alpaca WebSocket connected, authenticating...');
-                this.authenticate();
-            };
+            (ws as any).addEventListener('open', () => {
+                logger.debug('Alpaca WebSocket connected, header auth sent');
+            });
 
-            ws.onmessage = (event) => {
-                this.handleMessage(event.data);
+            (ws as any).addEventListener('message', (event: any) => {
+                this.handleMessage(event.data as string);
                 if (this.authenticated && this.connecting) {
                     cleanup();
                     this.connecting = false;
                     resolve();
                 }
-            };
+            });
 
-            ws.onerror = (error) => {
+            (ws as any).addEventListener('error', (event: any) => {
                 cleanup();
                 this.connecting = false;
-                logger.error('Alpaca WebSocket error', { error });
-                reject(error);
-            };
+                logger.error('Alpaca WebSocket error', { error: event });
+                reject(new Error('WebSocket error - falling back to HTTP'));
+            });
 
-            ws.onclose = (event) => {
+            (ws as any).addEventListener('close', (event: any) => {
                 cleanup();
-                this.connecting = false;
                 this.authenticated = false;
                 logger.debug('Alpaca WebSocket closed', { code: event.code, reason: event.reason });
-                if (this.connecting && this.ws) {
+                if (this.shouldReconnect) {
                     this.handleReconnect();
+                } else if (this.connecting) {
+                    this.connecting = false;
+                    reject(new Error('WebSocket closed - falling back to HTTP'));
+                    return;
                 }
-            };
+                this.connecting = false;
+            });
         });
-    }
-
-    private authenticate(): void {
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-            return;
-        }
-
-        logger.debug('Authenticating Alpaca WebSocket');
-        this.ws.send(JSON.stringify({
-            action: 'auth',
-            key: env.apiKey,
-            secret: env.apiSecret,
-        }));
     }
 
     private handleMessage(data: string): void {
         try {
-            const message = JSON.parse(data);
+            const parsed = JSON.parse(data);
+            const messages = Array.isArray(parsed) ? parsed : [parsed];
 
-            if (message.action === 'auth') {
-                const authResponse = message as AlpacaAuthResponse;
-                if (authResponse.status === 'authenticated') {
+            for (const message of messages) {
+                if (message.T === 'success' && message.msg === 'authenticated') {
                     this.authenticated = true;
                     logger.info('Alpaca WebSocket authenticated', { connectionType: this.connectionType });
                     this.resubscribePending();
-                } else {
-                    logger.error('Alpaca WebSocket authentication failed', { message: authResponse.message });
-                    this.authenticated = false;
+                } else if (message.T === 'error') {
+                    logger.error('Alpaca WebSocket error message', { code: message.code, msg: message.msg });
+                    if (message.code === 406) {
+                        logger.warn('Connection limit exceeded, stopping reconnect');
+                        this.shouldReconnect = false;
+                    }
+                    if (this.connecting && this.ws) {
+                        this.ws.close();
+                    }
+                } else if (message.T === 'b') {
+                    const barMessage = message as AlpacaBarMessage;
+                    const bar: Bar = {
+                        symbol: barMessage.S,
+                        timestamp: barMessage.t,
+                        open: barMessage.o,
+                        high: barMessage.h,
+                        low: barMessage.l,
+                        close: barMessage.c,
+                        volume: barMessage.v,
+                    };
+
+                    this.pendingSubscriptions.get(barMessage.S)?.(bar);
+
+                    const existing = this.collectedBars.get(barMessage.S) ?? [];
+                    existing.push(bar);
+                    this.collectedBars.set(barMessage.S, existing);
                 }
-            } else if (message.type === 'b') {
-                const barMessage = message as AlpacaBarMessage;
-                const bar: Bar = {
-                    symbol: barMessage.symbol,
-                    timestamp: barMessage.bar.t,
-                    open: barMessage.bar.o,
-                    high: barMessage.bar.h,
-                    low: barMessage.bar.l,
-                    close: barMessage.bar.c,
-                    volume: barMessage.bar.v,
-                };
-
-                this.pendingSubscriptions.get(barMessage.symbol)?.(bar);
-
-                const existing = this.collectedBars.get(barMessage.symbol) ?? [];
-                existing.push(bar);
-                this.collectedBars.set(barMessage.symbol, existing);
             }
         } catch {
             logger.warn('Failed to parse WebSocket message', { data });
@@ -257,12 +247,17 @@ export class AlpacaWebSocketClient {
         }
 
         this.collectedBars.clear();
+        this.pendingSubscriptions.clear();
 
         for (const symbol of symbols) {
             this.collectedBars.set(symbol, []);
         }
 
-        return this.subscribeForBars(symbols, () => {});
+        const result = await this.subscribeForBars(symbols, () => {});
+
+        this.unsubscribeAll();
+
+        return result;
     }
 
     unsubscribeAll(): void {
