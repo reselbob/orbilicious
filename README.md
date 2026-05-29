@@ -265,6 +265,8 @@ Below the chart, each detail row lists:
 
 - Target profit-taking (all-bars scan): Every session bar is scanned for stop/target hits, not just the latest bar. If any bar since entry touched the take-profit price, the trade is closed immediately even if the latest bar has pulled back below target. This ensures profits are captured even when a spike hits the target and then reverses.
   - _Test: `strategy.test.ts` `it('closes position when target was hit on an earlier bar but latest bar is below target')`_
+- Same-minute target/stop detection: The post-entry bar filter includes the bar whose 1-minute window contains the entry time. This ensures a target or stop hit that occurs on the same minute bar as the entry is still detected, even though the bar's timestamp (start of minute) is before the entry time.
+  - _Test: `strategy.test.ts` `it('closes position when target is hit on the same-minute bar as entry')`_
 - Pre-retest target profit-taking: If the stock price reaches the target price before a retest event occurs, the trade is immediately closed and profit is taken. This ensures that profits are captured if the target is achieved before a retest, regardless of further price action.
   - _Test: `strategy.profit-before-retest.test.ts` `it('closes the position and takes profit if target is hit before retest')`_
 - Selection: Breakout candidates for long and short trades determined by breakout score. Breakout direction is determined by the confirmation-candle close relative to the opening-range high/low. Candidate symbols are sourced from the most-active universe returned by Alpaca.
@@ -425,11 +427,27 @@ The list below follows the order the app actually applies rules at runtime.
 
 - _Test: `rules.test.ts` — `it('rules 7 and 32: current-day scheduling waits before open and exits after generating one end-of-day report')`_
 
+35. Intraday bar data for breakout candidate evaluation is always fetched via HTTP REST calls. The `getIntradayBars` method makes a direct request to Alpaca's `/v2/stocks/{symbol}/bars` endpoint with `timeframe=1Min` and the full session window (`09:30–16:00 ET`). No WebSocket connection is attempted for the initial bar fetch, eliminating the latency and reliability issues previously caused by WebSocket connection timeouts and authentication handshakes.
+
+- _Test: `connections.test.ts` — `it('getIntradayBars fetches bars via HTTP directly')`_
+
+36. For batch evaluation of multiple symbols during breakout candidate scanning, bars are fetched concurrently using `Promise.all` over individual HTTP requests per symbol via `getIntradayBarsBatch`. This avoids sequential overhead while keeping the implementation simpler and more reliable than WebSocket batching.
+
+- _Test: `connections.test.ts` — `it('fetches bars for all symbols via concurrent HTTP calls')` / `it('returns map with empty arrays for symbols with no bars')`_
+
+37. The WebSocket client infrastructure (`AlpacaWebSocketClient`, header-based auth, v2 streaming format parsing, array-wrapped response handling, unsubscribe-after-batch, rate-limit handling, and fast rejection on close/error) is fully implemented and unit-tested, but reserved for future real-time streaming between polling cycles. It is not used during the initial bar fetch.
+
+- _Test: `connections.test.ts` — all `handleMessage (v2 streaming format)` tests_
+
+38. Same-minute target/stop hit detection: When scanning post-entry bars for stop-loss and take-profit hits, the filter includes the bar whose 1-minute window overlaps the entry time. A target or stop hit occurring on the same bar as the entry (e.g., entry at `14:30:15`, target hit at `14:30:30` on the `14:30:00` bar) is detected, rather than being excluded because the bar timestamp (start of minute) precedes the entry time.
+
+- _Test: `strategy.test.ts` — `it('closes position when target is hit on the same-minute bar as entry')`_
+
 ### Resilience and Stability
 
 The following improvements address reliability and crash safety in the web application:
 
-- **WebSocket URL correction**: The Alpaca SIP streaming endpoint was changed from `wss://stream.data.alpaca.markets` (which returns only HTTP) to `wss://stream.data.alpaca.markets/v2/sip` for correct real-time bar delivery. API credentials are passed as WebSocket headers (`APCA-API-KEY-ID`, `APCA-API-SECRET-KEY`).
+- **WebSocket client preserved but unused for bar fetch**: The `AlpacaWebSocketClient` is fully implemented (header-based auth, v2 streaming format, array-wrapped response parsing, rate-limit handling) and unit-tested, but initial bar data is always fetched via HTTP. WebSocket streaming is reserved for future real-time inter-cycle updates.
 - **Stale session date on process exit**: When a child trading process stops, `emulationSessionDate` is cleared to `null` so the UI defaults to today's date instead of showing the previous session's date.
 - **EPIPE crash prevention**: `sendJson()` wraps `res.end()` in a try/catch to prevent crashes when a client disconnects mid-response.
 - **Unhandled rejection and exception logging**: Global `process.on('unhandledRejection')` and `process.on('uncaughtException')` handlers log error details to the structured logger.

@@ -14,7 +14,7 @@
     "start": "node dist/main.js",
     "start:web": "node dist/web/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "clean": "rm -rf logs/orbilicious-*.log logs/trades"
+    "clean": "rm -rf logs/orbilicious-*.log logs/trades logs/*.gz"
   },
   "repository": {
     "type": "git",
