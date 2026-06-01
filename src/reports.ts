@@ -336,7 +336,7 @@ export class Reports {
         const minimumUniverse = Math.max(env.quantityToRetrieve, 40);
         const desiredUniverse = Math.max(env.quantityToRetrieve * 2, minimumUniverse);
         const cappedUniverse = Math.min(desiredUniverse, maxUniverseSize);
-        const symbols = await client.getMostActiveSymbols(cappedUniverse);
+        const symbols = await client.getMostActiveSymbolsFiltered(cappedUniverse);
 
         if (!symbols.length) {
             throw new Error('Most active universe is empty; unable to build session ranking.');

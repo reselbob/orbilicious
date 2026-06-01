@@ -755,7 +755,7 @@ export async function findBreakoutCandidates(
     const quantityToRetrieve = Number.isFinite(configuredLimit)
         ? Math.floor(Math.max(1, configuredLimit as number))
         : env.quantityToRetrieve;
-    const symbols = await client.getMostActiveSymbols(quantityToRetrieve);
+    const symbols = await client.getMostActiveSymbolsFiltered(quantityToRetrieve);
     logger.info('Evaluating most active symbols', {
         sessionDate,
         quantityToRetrieve,

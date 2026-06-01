@@ -759,6 +759,22 @@ describe('Operational Rules support', () => {
                 return makeConfirmedLongCandidateBars(symbol, sessionDate);
             }
 
+            async getIntradayBarsBatch(symbols: string[], sessionDate: string) {
+                const map = new Map<string, Bar[]>();
+                for (const symbol of symbols) {
+                    map.set(symbol, await this.getIntradayBars(symbol, sessionDate));
+                }
+                return map;
+            }
+
+            async getLatestPrices(symbols: string[]) {
+                const map = new Map<string, number>();
+                for (const symbol of symbols) {
+                    map.set(symbol, 10);
+                }
+                return map;
+            }
+
             async closePosition(symbol: string) {
                 this.closedSymbols.push(symbol);
                 return { symbol, status: 'closed' };
@@ -777,7 +793,8 @@ describe('Operational Rules support', () => {
         const client = new EvaluationClient();
         const firstPass = await findBreakoutCandidates(client, '2026-05-18');
 
-        expect(client.requestedLimit).to.equal(env.quantityToRetrieve);
+        // getMostActiveSymbolsFiltered internally fetches 4x the desired count, capped at 100
+        expect(client.requestedLimit).to.equal(Math.min(env.quantityToRetrieve * 4, 100));
         expect(firstPass.map((candidate) => candidate.symbol)).to.deep.equal(['READY']);
         expect(client.closedSymbols).to.deep.equal(['HAS_POSITION']);
         expect(writes.join('')).to.include('__UI_STATUS__Closing HAS_POSITION for a profit of $2.00.');
@@ -796,7 +813,8 @@ describe('Operational Rules support', () => {
     it('rules 17-22: builds only confirmed breakout candidates with wick anchors, ATR, and positive scores', async () => {
         class CandidateClient extends AlpacaClient {
             async getMostActiveSymbols(limit = 40) {
-                expect(limit).to.equal(env.quantityToRetrieve);
+                // getMostActiveSymbolsFiltered internally fetches 4x the desired count, capped at 100
+                expect(limit).to.equal(Math.min(env.quantityToRetrieve * 4, 100));
                 return ['LONG_OK', 'SHORT_OK', 'NO_RETEST', 'LATE_BREAKOUT'];
             }
 
@@ -809,6 +827,22 @@ describe('Operational Rules support', () => {
                 if (symbol === 'SHORT_OK') return makeConfirmedShortCandidateBars(symbol, sessionDate);
                 if (symbol === 'NO_RETEST') return makeNoRetestBars(symbol, sessionDate);
                 return makeLateBreakoutBars(symbol, sessionDate);
+            }
+
+            async getIntradayBarsBatch(symbols: string[], sessionDate: string) {
+                const map = new Map<string, Bar[]>();
+                for (const symbol of symbols) {
+                    map.set(symbol, await this.getIntradayBars(symbol, sessionDate));
+                }
+                return map;
+            }
+
+            async getLatestPrices(symbols: string[]) {
+                const map = new Map<string, number>();
+                for (const symbol of symbols) {
+                    map.set(symbol, 10);
+                }
+                return map;
             }
         }
 
@@ -844,6 +878,22 @@ describe('Operational Rules support', () => {
                     return makeConfirmedShortCandidateBars(symbol, sessionDate);
                 }
                 return makeConfirmedLongCandidateBars(symbol, sessionDate);
+            }
+
+            async getIntradayBarsBatch(symbols: string[], sessionDate: string) {
+                const map = new Map<string, Bar[]>();
+                for (const symbol of symbols) {
+                    map.set(symbol, await this.getIntradayBars(symbol, sessionDate));
+                }
+                return map;
+            }
+
+            async getLatestPrices(symbols: string[]) {
+                const map = new Map<string, number>();
+                for (const symbol of symbols) {
+                    map.set(symbol, 10);
+                }
+                return map;
             }
         }
 
@@ -883,6 +933,22 @@ describe('Operational Rules support', () => {
                     return makeWeakRelativeStrengthBars(symbol, sessionDate);
                 }
                 return makeConfirmedLongCandidateBars(symbol, sessionDate);
+            }
+
+            async getIntradayBarsBatch(symbols: string[], sessionDate: string) {
+                const map = new Map<string, Bar[]>();
+                for (const symbol of symbols) {
+                    map.set(symbol, await this.getIntradayBars(symbol, sessionDate));
+                }
+                return map;
+            }
+
+            async getLatestPrices(symbols: string[]) {
+                const map = new Map<string, number>();
+                for (const symbol of symbols) {
+                    map.set(symbol, 10);
+                }
+                return map;
             }
         }
 

@@ -15,6 +15,8 @@ type AlpacaOrderResponse = {
     [key: string]: unknown;
 };
 
+const MAX_MOST_ACTIVE_FETCH_COUNT = 100;
+
 function headers() {
     return {
         'APCA-API-KEY-ID': env.apiKey,
@@ -131,6 +133,88 @@ export class AlpacaClient {
     async getMostActiveSymbols(limit = 40): Promise<string[]> {
         const details = await this.getMostActiveSymbolDetails(limit);
         return details.map((d) => d.symbol);
+    }
+
+    async getMostActiveSymbolsFiltered(desiredCount: number): Promise<string[]> {
+        const requestedFetchCount = Math.max(desiredCount, Math.round(desiredCount * 4));
+        const fetchCount = Math.min(requestedFetchCount, MAX_MOST_ACTIVE_FETCH_COUNT);
+        const allSymbols = await this.getMostActiveSymbols(fetchCount);
+        if (allSymbols.length === 0) return [];
+
+        try {
+            const prices = await this.getLatestPrices(allSymbols);
+            const overOneDollar = allSymbols.filter((s) => {
+                const price = prices.get(s);
+                return price !== undefined && price > 1;
+            });
+
+            if (overOneDollar.length >= desiredCount) {
+                logger.info('Price-filtered most active symbols', {
+                    desiredCount,
+                    requestedFetchCount,
+                    fetchCount,
+                    overOneDollarCount: overOneDollar.length,
+                    droppedCount: allSymbols.length - overOneDollar.length,
+                });
+                return overOneDollar.slice(0, desiredCount);
+            }
+
+            logger.warn('Not enough symbols priced over $1; falling back to unfiltered', {
+                desiredCount,
+                requestedFetchCount,
+                fetchCount,
+                overOneDollarCount: overOneDollar.length,
+                totalCount: allSymbols.length,
+            });
+            return allSymbols.slice(0, desiredCount);
+        } catch (error) {
+            logger.warn('Price fetch failed; returning unfiltered most active symbols', { error });
+            return allSymbols.slice(0, desiredCount);
+        }
+    }
+
+    async getLatestPrices(symbols: string[]): Promise<Map<string, number>> {
+        if (symbols.length === 0) return new Map();
+
+        const feed = this._useRealtimeFeed || env.dataFeed === 'sip' ? 'sip' : env.dataFeed;
+        const chunked: string[] = [];
+        for (let i = 0; i < symbols.length; i += 200) {
+            chunked.push(symbols.slice(i, i + 200).join(','));
+        }
+
+        const prices = new Map<string, number>();
+
+        for (const chunk of chunked) {
+            const url = `${env.dataBaseUrl}/v2/stocks/snapshots?symbols=${encodeURIComponent(chunk)}&feed=${encodeURIComponent(feed)}`;
+            logger.debug('Fetching latest prices via snapshots', {
+                symbolCount: chunk.split(',').length,
+                connectionType: 'HTTP',
+            });
+
+            const res = await fetch(url, { headers: headers() });
+            if (!res.ok) {
+                logger.error('Snapshots request failed', { status: res.status, connectionType: 'HTTP' });
+                continue;
+            }
+
+            const json = await res.json() as Record<string, {
+                latestTrade?: { p: number };
+                minuteBar?: { c: number };
+            }>;
+
+            for (const symbol of chunk.split(',')) {
+                const entry = json[symbol];
+                if (entry) {
+                    const price = entry.latestTrade?.p ?? entry.minuteBar?.c;
+                    if (price !== undefined && price !== null) {
+                        prices.set(symbol, price);
+                    }
+                }
+            }
+        }
+
+        logger.info('Fetched latest prices', { count: prices.size, totalRequested: symbols.length, connectionType: 'HTTP' });
+        return prices;
     }
 
     async getMostActiveSymbolDetails(limit = 40): Promise<MostActiveSymbolDetail[]> {

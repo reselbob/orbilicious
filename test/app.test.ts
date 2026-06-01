@@ -2,7 +2,7 @@ import { expect } from 'chai';
 import { describe, it } from 'mocha';
 import { AlpacaClient } from '../src/alpaca';
 import { buildWeightedRiskTrades, normalizeTradesToConstraints } from '../src/basket';
-import { env } from '../src/config';
+import { env, strategyConfig } from '../src/config';
 import { executeSizedTrades, findBreakoutCandidates } from '../src/app';
 import { logger } from '../src/logger';
 import { Bar, Position } from '../src/types';
@@ -78,6 +78,14 @@ class CapturingAlpacaClient extends AlpacaClient {
         return makeBreakoutBars(symbol, this.sessionDate);
     }
 
+    async getIntradayBarsBatch(symbols: string[]): Promise<Map<string, Bar[]>> {
+        const map = new Map<string, Bar[]>();
+        for (const symbol of symbols) {
+            map.set(symbol, await this.getIntradayBars(symbol));
+        }
+        return map;
+    }
+
     async submitBracketOrder(_params: BracketOrderParams): Promise<{ id: string; status: string }> {
         this.submitBracketOrderCallCount += 1;
         throw new Error('submitBracketOrder must not be called in dry-run mode');
@@ -106,6 +114,14 @@ class PositionManagementAlpacaClient extends AlpacaClient {
         return this.barsBySymbol[symbol] ?? [];
     }
 
+    async getIntradayBarsBatch(symbols: string[]): Promise<Map<string, Bar[]>> {
+        const map = new Map<string, Bar[]>();
+        for (const symbol of symbols) {
+            map.set(symbol, this.barsBySymbol[symbol] ?? []);
+        }
+        return map;
+    }
+
     async closePosition(symbol: string): Promise<unknown> {
         this.closedSymbols.push(symbol);
         return { symbol, status: 'closed' };
@@ -115,6 +131,16 @@ class PositionManagementAlpacaClient extends AlpacaClient {
 describe('app trade execution', () => {
     it('retrieves active symbols using configured quantity and logs dry-run executions for breakout candidates', async () => {
         const sessionDate = '2099-05-13';
+        const previousDryRun = env.dryRun;
+        const previousQualityFiltersEnabled = env.breakoutQualityFiltersEnabled;
+        const previousConfirmationMinutes = env.breakoutConfirmationCandleMinutes;
+        const previousCandidateTradeType = env.candidateTradeType;
+        const previousOpeningRangeMinutes = strategyConfig.openingRangeMinutes;
+        env.dryRun = true;
+        env.candidateTradeType = 'LONG_AND_SHORT';
+        env.breakoutQualityFiltersEnabled = false;
+        env.breakoutConfirmationCandleMinutes = 5;
+        strategyConfig.openingRangeMinutes = 15;
         // Provide bars that guarantee breakout for all symbols
         const activeSymbols = ['AAPL', 'TSLA', 'NVDA'];
         class TestClient extends CapturingAlpacaClient {
@@ -158,43 +184,51 @@ describe('app trade execution', () => {
                     timestamp: `2099-05-13T13:47:00Z`,
                     open: 102.8,
                     high: 103.2,
-                    low: 103.0, // touches opening range high
+                    low: 101.0, // touches opening range high
                     close: 103.1, // closes above opening range high
                     volume: 4200,
                 });
                 return bars;
             }
         }
-        const client = new TestClient(activeSymbols, sessionDate);
+        try {
+            const client = new TestClient(activeSymbols, sessionDate);
 
-        const candidates = await findBreakoutCandidates(client, sessionDate);
-        const trades = normalizeTradesToConstraints(
-            buildWeightedRiskTrades(candidates, 1000),
-            1000,
-            1_000_000
-        );
+            const candidates = await findBreakoutCandidates(client, sessionDate);
+            const trades = normalizeTradesToConstraints(
+                buildWeightedRiskTrades(candidates, 1000),
+                1000,
+                1_000_000
+            );
 
-        await executeSizedTrades(client, sessionDate, trades);
+            await executeSizedTrades(client, sessionDate, trades);
 
-        const candidateSymbols = candidates.map((candidate) => candidate.symbol);
-        const dryRunTradeSymbols = trades.map((trade) => trade.symbol);
+            const candidateSymbols = candidates.map((candidate) => candidate.symbol);
+            const dryRunTradeSymbols = trades.map((trade) => trade.symbol);
 
-        logger.info(
-            `submitted symbols ${dryRunTradeSymbols.length}, candidate symbols ${candidateSymbols.length}, all active symbols retrieved ${activeSymbols.length}`,
-            {
-                dryRunTradeSymbols: dryRunTradeSymbols.length,
-                candidateSymbols: candidateSymbols.length,
-                allActiveSymbolsRetrieved: activeSymbols.length,
-            }
-        );
+            logger.info(
+                `submitted symbols ${dryRunTradeSymbols.length}, candidate symbols ${candidateSymbols.length}, all active symbols retrieved ${activeSymbols.length}`,
+                {
+                    dryRunTradeSymbols: dryRunTradeSymbols.length,
+                    candidateSymbols: candidateSymbols.length,
+                    allActiveSymbolsRetrieved: activeSymbols.length,
+                }
+            );
 
-        expect(client.requestedMostActiveLimit).to.equal(env.quantityToRetrieve);
-        expect(candidateSymbols.sort()).to.deep.equal(activeSymbols.sort());
-        expect(dryRunTradeSymbols.sort()).to.deep.equal(activeSymbols.sort());
-        expect(client.submitBracketOrderCallCount).to.equal(0);
-        expect(trades).to.have.length(candidates.length);
-        expect(trades.every((trade) => trade.takeProfitPrice > 0)).to.equal(true);
-        expect(trades.every((trade) => trade.stopPrice > 0)).to.equal(true);
+            expect(client.requestedMostActiveLimit).to.equal(Math.min(env.quantityToRetrieve * 4, 100));
+            expect(candidateSymbols.sort()).to.deep.equal(activeSymbols.sort());
+            expect(dryRunTradeSymbols.sort()).to.deep.equal(activeSymbols.sort());
+            expect(client.submitBracketOrderCallCount).to.equal(0);
+            expect(trades).to.have.length(candidates.length);
+            expect(trades.every((trade) => trade.takeProfitPrice > 0)).to.equal(true);
+            expect(trades.every((trade) => trade.stopPrice > 0)).to.equal(true);
+        } finally {
+            env.dryRun = previousDryRun;
+            env.candidateTradeType = previousCandidateTradeType;
+            env.breakoutQualityFiltersEnabled = previousQualityFiltersEnabled;
+            env.breakoutConfirmationCandleMinutes = previousConfirmationMinutes;
+            strategyConfig.openingRangeMinutes = previousOpeningRangeMinutes;
+        }
     });
 
     it('captures profit from force-exit window to close', async () => {

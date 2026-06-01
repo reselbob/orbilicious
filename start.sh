@@ -80,7 +80,6 @@ compile_project() {
 run_project() {
   local web_port="${WEB_PORT_OVERRIDE:-${WEB_PORT:-8787}}"
   local entry_url="http://localhost:${web_port}"
-  local app_pid
   local web_pid
 
   # Kill any process still holding the web port from a prior session
@@ -95,10 +94,6 @@ run_project() {
   cleanup() {
     local code=$?
 
-    if [[ -n "${app_pid:-}" ]] && kill -0 "$app_pid" >/dev/null 2>&1; then
-      kill "$app_pid" >/dev/null 2>&1 || true
-    fi
-
     if [[ -n "${web_pid:-}" ]] && kill -0 "$web_pid" >/dev/null 2>&1; then
       kill "$web_pid" >/dev/null 2>&1 || true
     fi
@@ -108,10 +103,6 @@ run_project() {
   }
 
   trap cleanup INT TERM EXIT
-
-  log "Starting compiled application service"
-  npm start -- "$@" &
-  app_pid=$!
 
   log "Starting compiled web server on port ${web_port}"
   WEB_PORT="$web_port" npm run start:web &
@@ -126,8 +117,9 @@ run_project() {
     log "Open this URL in your browser: ${entry_url}"
   fi
 
-  log "Orbilicious service PID ${app_pid}; web server PID ${web_pid}"
-  log "Press Ctrl+C to stop both processes"
+  log "Web server PID ${web_pid}"
+  log "Use the web UI Start button to launch ORBilicious so Trade Monitor stays in sync"
+  log "Press Ctrl+C to stop the web server"
 
   wait "$web_pid"
 }
@@ -166,7 +158,7 @@ Options:
   --web-port, -p Web server port (default: WEB_PORT env var or 8787).
   --help, -h     Show this help message.
 
-Any remaining arguments are forwarded to: npm start -- <args>
+Any remaining arguments are ignored by start.sh.
 EOF
         exit 0
         ;;
@@ -176,6 +168,11 @@ EOF
     esac
     shift
   done
+
+  if ((${#APP_ARGS[@]} > 0)); then
+    log "Ignoring app arguments: ${APP_ARGS[*]}"
+    log "Start the app from the web UI to keep monitor events connected"
+  fi
 }
 
 main() {

@@ -434,7 +434,8 @@ describe('strategy integration', () => {
             breakoutCandidates: candidates.map((c) => ({ symbol: c.symbol, side: c.side, price: c.price })),
         });
 
-        expect(client.requestedMostActiveLimit).to.equal(env.quantityToRetrieve);
+        // getMostActiveSymbolsFiltered internally fetches 4x the desired count, capped at 100
+        expect(client.requestedMostActiveLimit).to.equal(Math.min(env.quantityToRetrieve * 4, 100));
         expect(retrievedSymbols).to.deep.equal(mostActiveSymbols);
         expect(candidates).to.be.an('array');
         expect(candidates.map((candidate) => candidate.symbol)).to.deep.equal(mostActiveSymbols);
