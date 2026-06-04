@@ -179,7 +179,7 @@ const fieldHelpContent = {
     sessionMode: {
         title: 'Session mode',
         subtitle: 'Choose how ORBilicious should run.',
-        text: 'EMULATION replays historical market data without placing live orders. PAPER submits orders to your Alpaca paper account. LIVE uses your live Alpaca account and real orders.',
+        text: 'EMULATION runs dry-run strategy logic (historical or live-style, depending on date/time) without placing real orders. REPLAY runs a historical replay for the selected session date. PAPER submits orders to your Alpaca paper account. LIVE uses your live Alpaca account and real orders.',
     },
     emulationDate: {
         title: 'Emulation session date',
@@ -354,6 +354,14 @@ function isEmulationMode() {
     return sessionMode.value === 'EMULATION';
 }
 
+function isReplayMode() {
+    return sessionMode.value === 'REPLAY';
+}
+
+function isDateBasedHistoricalMode() {
+    return isEmulationMode() || isReplayMode();
+}
+
 function isLiveEmulation() {
     if (!isEmulationMode()) return false;
     const emulationDate = emulationDateInput.value;
@@ -366,21 +374,24 @@ function isLiveEmulation() {
 }
 
 function syncEmulationControls() {
-    const isEmulation = isEmulationMode();
-    emulationDateGroup.classList.toggle('d-none', !isEmulation);
+    const isHistoricalMode = isDateBasedHistoricalMode();
+    emulationDateGroup.classList.toggle('d-none', !isHistoricalMode);
 
+    const isReplay = isReplayMode();
     const isLiveEmu = isLiveEmulation();
-    const isHistoricalEmu = isEmulation && !isLiveEmu;
+    const isHistoricalEmu = isHistoricalMode && !isReplay && !isLiveEmu;
     const isRunningHistorical = isHistoricalEmu && latestIsRunning;
     const isContinuous = continuousMode.checked;
     const hasOrbUiMessage = typeof latestOrbUiMessage === 'string' && latestOrbUiMessage.trim() !== '';
     const isWaitingForMarketOpen = latestRuntimeStatus === 'Waiting for market open';
-    const shouldShowWarning = isLiveEmu || isRunningHistorical || (isEmulation && hasOrbUiMessage) || isWaitingForMarketOpen;
+    const shouldShowWarning = isReplay || isLiveEmu || isRunningHistorical || (isHistoricalMode && hasOrbUiMessage) || isWaitingForMarketOpen;
     liveEmulationWarning.classList.toggle('d-none', !shouldShowWarning);
 
-    if (isWaitingForMarketOpen) {
+    if (isReplay) {
+        liveEmulationWarningText.textContent = 'Replay mode runs a historical session replay for the selected date.';
+    } else if (isWaitingForMarketOpen) {
         liveEmulationWarningText.textContent = 'Waiting for markets to open.';
-    } else if (isEmulation && hasOrbUiMessage) {
+    } else if (isHistoricalMode && hasOrbUiMessage) {
         liveEmulationWarningText.textContent = latestOrbUiMessage;
     } else if (isRunningHistorical) {
         liveEmulationWarningText.textContent = 'Running against historic data.';
@@ -403,7 +414,10 @@ function syncEmulationControls() {
         }
     }
 
-    continuousMode.disabled = false;
+    continuousMode.disabled = isReplay;
+    if (isReplay) {
+        continuousMode.checked = false;
+    }
 }
 
 function formatPrice(value) {
@@ -414,7 +428,7 @@ function formatPrice(value) {
 }
 
 function formatQty(value) {
-    if (typeof value !== 'number' || Number.isNaN(value)) {
+    if (typeof value !== 'number' || Number.isNaN(value) || value <= 0) {
         return '-';
     }
     return value.toFixed(4);
@@ -496,6 +510,35 @@ function chartSourceEvent(events, rowIndex) {
     }
 
     return null;
+}
+
+function resolveClosedTradePnl(rowEvent, sourceEvent) {
+    if (!rowEvent || rowEvent.eventType !== 'close') {
+        return null;
+    }
+
+    if (typeof rowEvent.pnl === 'number' && Number.isFinite(rowEvent.pnl)) {
+        return rowEvent.pnl;
+    }
+
+    const entryPrice = typeof rowEvent.entryPrice === 'number'
+        ? rowEvent.entryPrice
+        : (sourceEvent && typeof sourceEvent.entryPrice === 'number' ? sourceEvent.entryPrice : null);
+    const closePrice = typeof rowEvent.closePrice === 'number'
+        ? rowEvent.closePrice
+        : null;
+    if (entryPrice === null || closePrice === null) {
+        return null;
+    }
+
+    const qty = typeof rowEvent.qty === 'number' && Number.isFinite(rowEvent.qty) && rowEvent.qty > 0
+        ? rowEvent.qty
+        : (sourceEvent && typeof sourceEvent.qty === 'number' && sourceEvent.qty > 0 ? sourceEvent.qty : 1);
+    const position = rowEvent.position || (sourceEvent && sourceEvent.position) || 'long';
+
+    return position === 'short'
+        ? (entryPrice - closePrice) * qty
+        : (closePrice - entryPrice) * qty;
 }
 
 function chartButtonMarkup(rowEvent, sourceEvent) {
@@ -686,18 +729,35 @@ function weekdayRangeInclusive(startIso, endIso) {
 
 function renderDailySummary() {
     const dailyTotals = new Map();
+    const openEventsByKey = new Map();
+    const isReplay = isReplayMode();
 
     for (const event of tradeEvents) {
-        if (event.eventType !== 'close') {
+        const sessionDate = eventSessionDate(event);
+        if (!sessionDate || !event.symbol) {
+            continue;
+        }
+
+        const key = `${sessionDate}|${event.symbol}`;
+
+        if (event.eventType === 'open') {
+            openEventsByKey.set(key, event);
+            continue;
+        }
+
+        if (isReplay) {
+            const sourceEvent = openEventsByKey.get(key) || null;
+            const pnlValue = resolveClosedTradePnl(event, sourceEvent);
+            if (typeof pnlValue !== 'number' || Number.isNaN(pnlValue)) {
+                continue;
+            }
+
+            const previous = dailyTotals.get(sessionDate) || 0;
+            dailyTotals.set(sessionDate, previous + pnlValue);
             continue;
         }
 
         if (typeof event.pnl !== 'number' || Number.isNaN(event.pnl)) {
-            continue;
-        }
-
-        const sessionDate = eventSessionDate(event);
-        if (!sessionDate) {
             continue;
         }
 
@@ -763,6 +823,7 @@ function renderTrades() {
         return;
     }
 
+    const isReplay = isReplayMode();
     const sortedEvents = tradeEvents
         .slice()
         .sort((a, b) => (a.id || 0) - (b.id || 0));
@@ -815,8 +876,15 @@ function renderTrades() {
                 : resultState === 'loss'
                     ? 'result-loss'
                     : 'result-open';
-            const pnl = event.eventType === 'close' ? formatPnl(event.pnl) : 'Open';
             const sourceEvent = chartSourceEvent(sortedEvents, index);
+            const pnl = event.eventType === 'close'
+                ? (isReplay
+                    ? (() => {
+                        const pnlValue = resolveClosedTradePnl(event, sourceEvent);
+                        return typeof pnlValue === 'number' ? formatPnl(pnlValue) : 'Open';
+                    })()
+                    : formatPnl(event.pnl))
+                : 'Open';
             const chartButton = chartButtonMarkup(event, sourceEvent);
 
             return `
@@ -895,8 +963,8 @@ function formatCurrency(value) {
 
 function showStartConfirmationPane() {
     const session = sessionMode.value || '-';
-    const isEmulation = session === 'EMULATION';
-    const emulationDate = isEmulation && emulationDateInput.value ? emulationDateInput.value : 'N/A';
+    const isHistoricalMode = session === 'EMULATION' || session === 'REPLAY';
+    const emulationDate = isHistoricalMode && emulationDateInput.value ? emulationDateInput.value : 'N/A';
     const continuous = continuousMode.checked ? 'Enabled' : 'Disabled';
     const candidateTradeTypeLabel = candidateTradeType.value === 'LONG'
         ? 'Long'
@@ -1071,7 +1139,7 @@ async function submitStartOrbilicious() {
                 continuous: continuousMode.checked,
                 realTimeData: realTimeDataFeed.checked,
                 sessionMode: sessionMode.value,
-                emulationSessionDate: isEmulationMode() ? emulationDateInput.value : undefined,
+                emulationSessionDate: isDateBasedHistoricalMode() ? emulationDateInput.value : undefined,
                 mostActiveSymbolLimit: getMostActiveSymbolLimit(),
                 candidateTradeType: candidateTradeType.value,
                 moneyInAccount: getMoneyInAccount(),
@@ -1092,6 +1160,10 @@ async function submitStartOrbilicious() {
             alert(payload.message || 'Failed to start ORBilicious');
             return;
         }
+
+        tradeCursor = 0;
+        tradeEvents = [];
+        renderTrades();
 
         const statusPayload = await refreshStatus();
         syncDropdownsFromServer(statusPayload);

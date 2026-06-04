@@ -905,10 +905,10 @@ export class Reports {
             if (!trade || !row.confirmationRetestTimestamp) return;
 
             const sessionBars = sessionBarsBySymbol.get(row.symbol) ?? [];
+            const entryTimeMs = new Date(row.confirmationRetestTimestamp!).getTime();
             const barsAfterEntry = sessionBars.filter(
                 (bar) =>
-                    new Date(bar.timestamp).getTime() >
-                    new Date(row.confirmationRetestTimestamp!).getTime(),
+                    new Date(bar.timestamp).getTime() > entryTimeMs - 60000,
             );
 
             const outcome = Reports.emulateExit(trade, barsAfterEntry);

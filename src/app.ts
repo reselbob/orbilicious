@@ -318,6 +318,43 @@ function minutesFromSessionOpen(bar: Bar): number {
     return p.hour * 60 + p.minute - sessionOpenMinutes;
 }
 
+function isRetestFreshForEntry(params: {
+    retestTimestamp: string;
+    sessionDate: string;
+}): boolean {
+    const { retestTimestamp, sessionDate } = params;
+    const maxAgeMinutes = Math.max(0, Math.floor(env.breakoutRetestMaxAgeMinutes));
+    if (maxAgeMinutes === 0) {
+        return true;
+    }
+
+    if (env.sessionMode === 'EMULATION') {
+        return true;
+    }
+
+    // Only apply staleness checks to the active NY session; historical/report paths keep full-session behavior.
+    const nyToday = toNyParts(new Date(), strategyConfig.sessionTimezone).date;
+    if (sessionDate !== nyToday) {
+        return true;
+    }
+
+    const retestMs = new Date(retestTimestamp).getTime();
+    if (!Number.isFinite(retestMs)) {
+        return false;
+    }
+
+    const ageMinutes = (Date.now() - retestMs) / 60000;
+    if (!Number.isFinite(ageMinutes)) {
+        return false;
+    }
+
+    if (ageMinutes < 0) {
+        return true;
+    }
+
+    return ageMinutes <= maxAgeMinutes;
+}
+
 function passesBreakoutQualityFilters(params: {
     sessionBars: Bar[];
     sessionDate: string;
@@ -491,6 +528,19 @@ function buildConfirmedBreakoutCandidate(
         return null;
     }
 
+    if (!isRetestFreshForEntry({
+        retestTimestamp: confirmationRetestBar.timestamp,
+        sessionDate,
+    })) {
+        logger.debug('Skipping stale breakout retest candidate', {
+            symbol,
+            sessionDate,
+            retestTimestamp: confirmationRetestBar.timestamp,
+            breakoutRetestMaxAgeMinutes: env.breakoutRetestMaxAgeMinutes,
+        });
+        return null;
+    }
+
     const atrSourceBars = sessionBars.filter(
         (bar) => new Date(bar.timestamp).getTime() <= new Date(confirmationRetestBar.timestamp).getTime()
     );
@@ -577,6 +627,7 @@ export async function evaluateSymbol(
                 });
 
                 if (hitBar) {
+                    const closeEventTimestamp = new Date().toISOString();
                     const stopHit = rawSim.side === 'long'
                         ? hitBar.low <= rawSim.stopPrice
                         : hitBar.high >= rawSim.stopPrice;
@@ -584,8 +635,8 @@ export async function evaluateSymbol(
                         ? rawSim.stopPrice
                         : rawSim.takeProfitPrice;
                     const exitReason = stopHit
-                        ? 'stop-loss hit'
-                        : 'take-profit hit (pre-retest)';
+                        ? `stop-loss hit (bar ${hitBar.timestamp})`
+                        : `take-profit hit (pre-retest, bar ${hitBar.timestamp})`;
                     const pnl = rawSim.side === 'long'
                         ? (exitPrice - rawSim.entryPrice) * rawSim.qty
                         : (rawSim.entryPrice - exitPrice) * rawSim.qty;
@@ -603,7 +654,7 @@ export async function evaluateSymbol(
                     emitTradeMonitorEvent({
                         eventType: 'close',
                         sessionDate,
-                        timestamp: hitBar.timestamp,
+                        timestamp: closeEventTimestamp,
                         symbol,
                         side: rawSim.side === 'long' ? 'sell' : 'buy',
                         position: rawSim.side,
@@ -613,12 +664,13 @@ export async function evaluateSymbol(
                         pnl,
                         reason: exitReason,
                     });
-                    logTradeClose(symbol, exitPrice, hitBar.timestamp);
+                    logTradeClose(symbol, exitPrice, closeEventTimestamp);
                     return null;
                 }
 
                 // If not stopped or target hit, check for end-of-day profit capture
                 if (isInProfitCaptureWindow(latestBar)) {
+                    const closeEventTimestamp = new Date().toISOString();
                     const exitPrice = latestBar.close;
                     const pnl = rawSim.side === 'long'
                         ? (exitPrice - rawSim.entryPrice) * rawSim.qty
@@ -635,7 +687,7 @@ export async function evaluateSymbol(
                     emitTradeMonitorEvent({
                         eventType: 'close',
                         sessionDate,
-                        timestamp: latestBar.timestamp,
+                        timestamp: closeEventTimestamp,
                         symbol,
                         side: rawSim.side === 'long' ? 'sell' : 'buy',
                         position: rawSim.side,
@@ -643,9 +695,9 @@ export async function evaluateSymbol(
                         entryPrice: rawSim.entryPrice,
                         closePrice: exitPrice,
                         pnl,
-                        reason: 'profit-capture close',
+                        reason: `profit-capture close (bar ${latestBar.timestamp})`,
                     });
-                    logTradeClose(symbol, exitPrice, latestBar.timestamp);
+                    logTradeClose(symbol, exitPrice, closeEventTimestamp);
                     return null;
                 }
 
@@ -681,6 +733,7 @@ export async function evaluateSymbol(
             });
 
             if (shouldClose) {
+                const closeEventTimestamp = new Date().toISOString();
                 if (env.dryRun) {
                     logger.info('Dry-run: profit-capture rule would close open position', {
                         symbol,
@@ -705,7 +758,7 @@ export async function evaluateSymbol(
                 emitTradeMonitorEvent({
                     eventType: 'close',
                     sessionDate,
-                    timestamp: latestBar.timestamp,
+                    timestamp: closeEventTimestamp,
                     symbol,
                     side: position.side === 'long' ? 'sell' : 'buy',
                     position: position.side,
@@ -713,9 +766,9 @@ export async function evaluateSymbol(
                     entryPrice: position.entryPrice,
                     closePrice: latestBar.close,
                     pnl: closePnl,
-                    reason: 'profit-capture close',
+                    reason: `profit-capture close (bar ${latestBar.timestamp})`,
                 });
-                logTradeClose(symbol, latestBar.close, latestBar.timestamp);
+                logTradeClose(symbol, latestBar.close, closeEventTimestamp);
             } else {
                 logger.debug('Keeping open position; close is not yet favorable for profit capture', {
                     symbol,
@@ -820,6 +873,7 @@ export async function executeSizedTrades(
 
     if (env.dryRun) {
         for (const trade of tradesToExecute) {
+            const openEventTimestamp = new Date().toISOString();
             logger.info('Trade executed in dry-run mode; no Alpaca bracket order submitted', {
                 symbol: trade.symbol,
                 side: trade.side,
@@ -834,7 +888,7 @@ export async function executeSizedTrades(
             emitTradeMonitorEvent({
                 eventType: 'open',
                 sessionDate,
-                timestamp: new Date().toISOString(),
+                timestamp: openEventTimestamp,
                 symbol: trade.symbol,
                 side: trade.side,
                 position: trade.side === 'buy' ? 'long' : 'short',
@@ -849,14 +903,14 @@ export async function executeSizedTrades(
             simulatedPositions.set(trade.symbol, {
                 side: trade.side === 'buy' ? 'long' : 'short',
                 entryPrice: trade.price,
-                entryTime: new Date().toISOString(),
+                entryTime: openEventTimestamp,
                 stopPrice: trade.stopPrice,
                 stopLossPct: trade.stopLossPct,
                 takeProfitPrice: trade.takeProfitPrice,
                 qty: trade.qty,
             });
 
-            logTradeOpen(trade.symbol, trade.price, new Date().toISOString());
+            logTradeOpen(trade.symbol, trade.price, openEventTimestamp);
         }
 
         return;
@@ -875,10 +929,11 @@ export async function executeSizedTrades(
     );
 
     for (const trade of tradesToExecute) {
+        const openEventTimestamp = new Date().toISOString();
         emitTradeMonitorEvent({
             eventType: 'open',
             sessionDate,
-            timestamp: new Date().toISOString(),
+            timestamp: openEventTimestamp,
             symbol: trade.symbol,
             side: trade.side,
             position: trade.side === 'buy' ? 'long' : 'short',
@@ -890,7 +945,7 @@ export async function executeSizedTrades(
             reason: 'bracket order submitted',
         });
 
-        logTradeOpen(trade.symbol, trade.price, new Date().toISOString());
+        logTradeOpen(trade.symbol, trade.price, openEventTimestamp);
     }
 
     logger.info('Submitted bracket orders', {
@@ -919,14 +974,28 @@ export async function runCycle(
     const selected = [...longs, ...shorts];
     const effectiveBuyingPower = Math.min(account.buyingPower, env.hardBasketCap);
 
+    const usedRisk = Array.from(simulatedPositions.values()).reduce((sum, pos) => {
+        const perShare = pos.side === 'long'
+            ? pos.entryPrice - pos.stopPrice
+            : pos.stopPrice - pos.entryPrice;
+        return sum + Math.max(0, perShare) * pos.qty;
+    }, 0);
+    const remainingRisk = Math.max(0, env.maxTotalRisk - usedRisk);
+
+    if (remainingRisk <= 0) {
+        logger.info('Cumulative risk budget exhausted', { usedRisk, maxTotalRisk: env.maxTotalRisk, selectedCount: selected.length });
+        return;
+    }
+
     const weightedTrades = buildWeightedRiskTrades(
         selected,
-        env.maxTotalRisk,
+        remainingRisk,
         env.takeProfitMultiple
     );
+
     const normalizedTrades = normalizeTradesToConstraints(
         weightedTrades,
-        env.maxTotalRisk,
+        remainingRisk,
         effectiveBuyingPower,
         env.maxPositionNotional
     );
@@ -936,6 +1005,9 @@ export async function runCycle(
         accountBuyingPower: account.buyingPower,
         effectiveBuyingPower,
         hardBasketCap: env.hardBasketCap,
+        maxTotalRisk: env.maxTotalRisk,
+        usedRisk,
+        remainingRisk,
         candidateCount: candidates.length,
         selectedCount: selected.length,
         weightedTradeCount: weightedTrades.length,

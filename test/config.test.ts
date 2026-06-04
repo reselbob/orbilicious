@@ -91,6 +91,7 @@ describe('config integration', () => {
     it('loads breakout confirmation and quality filter defaults', () => {
         withBaseConfigEnv();
         delete process.env.BREAKOUT_CONFIRMATION_CANDLE_MINUTES;
+        delete process.env.BREAKOUT_RETEST_MAX_AGE_MINUTES;
         delete process.env.BREAKOUT_QUALITY_FILTERS_ENABLED;
         delete process.env.BREAKOUT_MIN_VOLUME_EXPANSION;
         delete process.env.BREAKOUT_MIN_RELATIVE_STRENGTH_PCT;
@@ -101,6 +102,7 @@ describe('config integration', () => {
         const mod = require('../src/config');
 
         expect(mod.env.breakoutConfirmationCandleMinutes).to.equal(5);
+        expect(mod.env.breakoutRetestMaxAgeMinutes).to.equal(1);
         expect(mod.env.breakoutQualityFiltersEnabled).to.equal(false);
         expect(mod.env.breakoutMinVolumeExpansion).to.equal(1.2);
         expect(mod.env.breakoutMinRelativeStrengthPct).to.equal(0.25);
@@ -111,6 +113,7 @@ describe('config integration', () => {
     it('loads breakout confirmation and quality filter overrides', () => {
         withBaseConfigEnv();
         process.env.BREAKOUT_CONFIRMATION_CANDLE_MINUTES = '1';
+        process.env.BREAKOUT_RETEST_MAX_AGE_MINUTES = '2';
         process.env.BREAKOUT_QUALITY_FILTERS_ENABLED = 'false';
         process.env.BREAKOUT_MIN_VOLUME_EXPANSION = '1.5';
         process.env.BREAKOUT_MIN_RELATIVE_STRENGTH_PCT = '0.4';
@@ -121,6 +124,7 @@ describe('config integration', () => {
         const mod = require('../src/config');
 
         expect(mod.env.breakoutConfirmationCandleMinutes).to.equal(1);
+        expect(mod.env.breakoutRetestMaxAgeMinutes).to.equal(2);
         expect(mod.env.breakoutQualityFiltersEnabled).to.equal(false);
         expect(mod.env.breakoutMinVolumeExpansion).to.equal(1.5);
         expect(mod.env.breakoutMinRelativeStrengthPct).to.equal(0.4);

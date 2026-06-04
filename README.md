@@ -95,7 +95,7 @@ Then edit `.env` for operational use:
 5. Review trading controls such as `MAX_TOTAL_RISK`, `HARD_BASKET_CAP`, `MAX_POSITION_NOTIONAL`, and `MAX_POSITIONS_PER_SIDE` before running. (This value is reset automatically when the UI resets the value.)
 6. If you are operating against live capital, verify `ALPACA_TRADING_BASE_URL`, `SESSION_MODE=LIVE`, and all risk settings before starting the app.
 
-The comments in [.env.example](/home/reselbob/Projects/orbilicious/.env.example) explain the meaning of each variable inline.
+The comments in [.env.example](.env.example) explain the meaning of each variable inline.
 
 Run in dev mode:
 
@@ -166,9 +166,13 @@ Use these controls together to reduce false breakouts while keeping enough oppor
 - **Min Relative Strength (%)** requires the breakout close to clear the opening-range boundary by a minimum percentage.
 - **Trend Timeframe (minutes)** and **Trend Lookback Bars** define higher-timeframe trend alignment.
 
+Retest freshness is also enforced by environment setting: `BREAKOUT_RETEST_MAX_AGE_MINUTES` (default `1`). In the current NY session, entries are skipped when the confirmation retest is older than this threshold. Set it to `0` to disable staleness filtering.
+
+`BREAKOUT_QUALITY_FILTERS_ENABLED` is the single source of truth for both the Web UI's initial checkbox state and the runtime strategy behavior.
+
 Suggested workflow:
 
-1. Start with defaults (`5` minute confirmation, quality filters enabled, volume `1.2`, relative strength `0.25`, trend timeframe `5`, lookback `3`).
+1. Start with defaults (`5` minute confirmation, quality filters off, volume `1.2`, relative strength `0.25`, trend timeframe `5`, lookback `3`).
 2. Run emulation for several recent sessions and watch candidate count, pass/fail behavior, and P/L consistency.
 3. Tighten filters when you see too many weak or whipsaw entries.
 4. Relax filters when you see too few candidates or missed valid breakouts.
@@ -198,7 +202,7 @@ Every generated HTML report includes a **Filter Attribution** section that recor
 Each row in the table shows:
 
 | Column | Description |
-|---|---|
+| --- | --- |
 | **Symbol** | The evaluated ticker. |
 | **Side** | Breakout direction (`buy` or `sell`). |
 | **Result** | `PASS` if the candidate survived all quality checks; `FAIL` otherwise. |
@@ -258,7 +262,7 @@ Expand the pane to scroll through historical days.
 
 #### Reports Daily Detail
 
-![Reports Daily Detauk](docs/reports-drill-down-detail.png)
+![Reports Daily Detail](docs/reports-drill-down-detail.png)
 
 The **candlestick chart** plots 1-minute bars for the session with the opening-range window shaded. The legend identifies:
 
@@ -290,180 +294,188 @@ Below the chart, each detail row lists:
 - Pre-retest target profit-taking: If the stock price reaches the target price before a retest event occurs, the trade is immediately closed and profit is taken. This ensures that profits are captured if the target is achieved before a retest, regardless of further price action.
   - _Test: `strategy.profit-before-retest.test.ts` `it('closes the position and takes profit if target is hit before retest')`_
 - Exclude most active stocks trading under $1: To avoid penny-stock noise, the app first retrieves `max(QUANTITY_TO_RETRIEVE, 4 x QUANTITY_TO_RETRIEVE)` most-active symbols from Alpaca, capped at 100 symbols, then fetches the latest trade price for each via the snapshots endpoint. Only symbols priced above $1 survive the filter, and the top `QUANTITY_TO_RETRIEVE` are kept for candidate evaluation. If fewer than `QUANTITY_TO_RETRIEVE` symbols pass the price filter, the unfiltered list is used as a fallback.
-  - _Tests: `alpaca.ts` `getMostActiveSymbolsFiltered()` / `getLatestPrices()`, `strategy.test.ts` `it('gets most active stocks and determines breakout candidates deterministically')`_
+  - _References: `alpaca.ts` `getMostActiveSymbolsFiltered()` / `getLatestPrices()`; Test: `strategy.test.ts` `it('gets most active stocks and determines breakout candidates deterministically')`_
 - Selection: Breakout candidates for long and short trades determined by breakout score. Breakout direction is determined by the confirmation-candle close relative to the opening-range high/low. Candidate symbols are sourced from the most-active universe returned by Alpaca.
   - _Tests: `basket.test.ts` `it('computes breakout score using relative breakout percent and log-volume')`, `strategy.test.ts` `it('returns BUY when candle closes above the opening range high')` / `it('returns SELL when candle closes below the opening range low')` / `it('gets most active stocks and determines breakout candidates deterministically')`_
 - Stop loss:
   - Long: The stop loss for a long trade is primarily anchored to the low of the opening range. If a breakout wick anchor exists (the bar immediately before the breakout), its high is used as the stop price for additional conservatism. If not, the stop price defaults to the most conservative value among the opening-range low, an ATR-based stop (using a 14-bar average true range up to the confirmation retest), and the minimum stop-percent rule. The stop is only valid if the distance from entry to stop is positive and not equal at two-decimal precision. If these conditions are not met, the trade is rejected.
-    - _Tests: `basket.test.ts` `it('uses the widest of opening-range, ATR, and minimum-stop distances when sizing')`, `rules.test.ts` `it('rules 17-22: builds only confirmed breakout candidates with wick anchors, ATR, and positive scores')`_
+    - _Tests: `basket.test.ts` `it('uses the widest of opening-range, ATR, and minimum-stop distances when sizing')`, `rules.test.ts` `it('rules 18-19 and 21-24: builds only confirmed breakout candidates with wick anchors, ATR, and positive scores')`_
   - Short: same logic mirrored around opening-range high.
-    - _Tests: `basket.test.ts` `it('uses the widest of opening-range, ATR, and minimum-stop distances when sizing')`, `rules.test.ts` `it('rules 17-22: builds only confirmed breakout candidates with wick anchors, ATR, and positive scores')`_
-- Profit target: 4R, where R is the entry-to-stop distance. by default (1:4), or the ratio declared in the environment variable `STOP_LOSS_PROFIT_RATIO`. **If the price reaches the profit target before a retest confirmation occurs, the trade is closed immediately and profit is taken, regardless of retest status.**
-  - _Tests: `basket.test.ts` `it('builds weighted-risk trades and sets 4R profit targets')` / `it('applies configured STOP_LOSS_PROFIT_RATIO (1:2) so take-profit distance equals 2x stop distance')`, `rules.test.ts` `it('rules 23-28: ranks candidates, assigns weighted risk, derives stops and 4R targets, and normalizes to constraints')`_
+    - _Tests: `basket.test.ts` `it('uses the widest of opening-range, ATR, and minimum-stop distances when sizing')`, `rules.test.ts` `it('rules 18-19 and 21-24: builds only confirmed breakout candidates with wick anchors, ATR, and positive scores')`_
+- Profit target: 4R, where R is the entry-to-stop distance by default (`1:4`), or the ratio declared in the environment variable `STOP_LOSS_PROFIT_RATIO`. **If the price reaches the profit target before a retest confirmation occurs, the trade is closed immediately and profit is taken, regardless of retest status.**
+  - _Tests: `basket.test.ts` `it('builds weighted-risk trades and sets 4R profit targets')` / `it('applies configured STOP_LOSS_PROFIT_RATIO (1:2) so take-profit distance equals 2x stop distance')`, `rules.test.ts` `it('rules 25-30: ranks candidates, assigns weighted risk, derives stops and 4R targets, and normalizes to constraints')`_
 - Risk budget: total planned stop-loss exposure across the full basket defaults to $1000. Risk dollars are assigned proportionally by score.
   - _Test: `basket.test.ts` `it('selects and sizes all QUANTITY_TO_RETRIEVE candidate trades with weighted risk so total stop loss never exceeds MAX_TOTAL_RISK')`_
 - Basket normalization: trade sizes are scaled so the full basket fits both:
   - configured total stop-loss risk cap
   - Alpaca account buying power
-  - _Test: `basket.test.ts` `it('normalizes the basket so risk and notional fit constraints simultaneously')` / `it('never rounds scaled qty up past the basket cap')`_
+  - _Tests: `basket.test.ts` `it('normalizes the basket so risk and notional fit constraints simultaneously')` / `it('never rounds scaled qty up past the basket cap')`_
 - Dynamic Maximize Profit Probability: The Maximize Profit Probability button uses a data-driven backend analysis. When clicked, it fetches recent historical price data for the selected symbol and session, analyzes volume expansion, relative strength, and trend, and automatically sets the breakout confirmation and quality filter values to optimize for current market conditions. This enables adaptive, context-aware filter settings for each run.
-  - _(No direct test; may be covered by integration/UI tests)_
+  - _Test coverage: no direct automated test; may be covered by integration/UI tests._
 
 ### Operational Rules
 
 The list below follows the order the app actually applies rules at runtime.
 
+<!-- markdownlint-disable MD029 -->
+
 1. Startup configuration is validated first. Required Alpaca credentials must exist, numeric settings must parse, `STOP_LOSS_PROFIT_RATIO` must be a valid `risk:reward` pair, `SESSION_MODE` must be `EMULATION`, `PAPER`, or `LIVE`, and `SESSION_DATE` is normalized to `YYYY-MM-DD`.
 
 - _Test: `rules.test.ts` — `it('rules 1-2: validates environment configuration and derives execution mode settings')`_
 
-1. Execution mode is derived next. `EMULATION` always sets `dryRun=true`, `PAPER` and `LIVE` allow real order submission, and `--continuous` keeps the current-day scheduler running across sessions instead of exiting after one session.
+2. Execution mode is derived next. `EMULATION` always sets `dryRun=true`, `PAPER` and `LIVE` allow real order submission, and `--continuous` keeps the current-day scheduler running across sessions instead of exiting after one session.
 
 - _Test: `rules.test.ts` — `it('rules 1-2: validates environment configuration and derives execution mode settings')`_
 
-1. The app then splits into one of two operating paths: historical emulation or current-day scheduling. Historical emulation is only selected when `SESSION_MODE=EMULATION` and `SESSION_DATE` is set to a date before the current New York date. Live emulation for today stays on the current-day path.
+3. The app then splits into one of two operating paths: historical emulation or current-day scheduling. Historical emulation is only selected when `SESSION_MODE=EMULATION` and `SESSION_DATE` is set to a date before the current New York date. Live emulation for today stays on the current-day path.
 
-- _Test: `rules.test.ts` — `it('rules 3-6 and 31: historical emulation filters weekdays, emits progress UI messages, skips failures, and reports closes')`_
+- _Test: `rules.test.ts` — `it('rules 3-6 and 33: historical emulation filters weekdays, emits progress UI messages, skips failures, and reports closes')`_
 
-1. In historical emulation with continuous mode (the `--continuous` flag or the test runner), the app builds an inclusive date range from `SESSION_DATE` through the current New York date, then filters that range to weekdays only. In non-continuous historical mode it processes only the single `SESSION_DATE` and exits. If no weekday sessions remain, the run ends immediately.
+4. In historical emulation with continuous mode (the `--continuous` flag or the test runner), the app builds an inclusive date range from `SESSION_DATE` through the current New York date, then filters that range to weekdays only. In non-continuous historical mode it processes only the single `SESSION_DATE` and exits. If no weekday sessions remain, the run ends immediately.
 
-- _Test: `rules.test.ts` — `it('rules 3-6 and 31: historical emulation filters weekdays, emits progress UI messages, skips failures, and reports closes')`_
+- _Test: `rules.test.ts` — `it('rules 3-6 and 33: historical emulation filters weekdays, emits progress UI messages, skips failures, and reports closes')`_
 
-1. For each historical weekday session, the app emits UI progress messages in this order: `Determing open range.`, then `High range prices: {HIGH_RANGE_PRICE}, Low range prices: {LOW_RANGE_PRICE}.`, then `Identified Breakout Candidates, {SYMBOLS}` with the current most-active symbol list when available.
+5. For each historical weekday session, the app emits UI progress messages in this order: `Determing open range.`, then `High range prices: {HIGH_RANGE_PRICE}, Low range prices: {LOW_RANGE_PRICE}.`, then `Identified Breakout Candidates, {SYMBOLS}` with the current most-active symbol list when available.
 
-- _Test: `rules.test.ts` — `it('rules 3-6 and 31: historical emulation filters weekdays, emits progress UI messages, skips failures, and reports closes')`_
+- _Test: `rules.test.ts` — `it('rules 3-6 and 33: historical emulation filters weekdays, emits progress UI messages, skips failures, and reports closes')`_
 
-1. Each historical session then generates a full ORB report. If a session cannot be generated because data is unavailable or another error occurs, that session is skipped and the run continues to the next weekday.
+6. Each historical session then generates a full ORB report. If a session cannot be generated because data is unavailable or another error occurs, that session is skipped and the run continues to the next weekday.
 
-- _Test: `rules.test.ts` — `it('rules 3-6 and 31: historical emulation filters weekdays, emits progress UI messages, skips failures, and reports closes')`_
+- _Test: `rules.test.ts` — `it('rules 3-6 and 33: historical emulation filters weekdays, emits progress UI messages, skips failures, and reports closes')`_
 
-1. A same-day emulation session that starts after market close (current New York time ≥ `FORCE_EXIT_TIME`) is treated as historical — the app runs the one-shot historical branch for that date and exits, rather than entering the live polling loop.
+7. A same-day emulation session that starts after market close (current New York time ≥ `FORCE_EXIT_TIME`) is treated as historical - the app runs the one-shot historical branch for that date and exits, rather than entering the live polling loop.
 
-- _Test: `rules.test.ts` — `it('rules 3-6: same-day emulation after market close runs the historical branch')`_
+- _Test: `rules.test.ts` — `it('rule 7: same-day emulation after market close runs the historical branch')`_
 
-1. In current-day mode, the loop runs forever until it is allowed to exit. On weekends it does nothing except wait. Before the New York open it does nothing except wait for the market to open.
+8. In current-day mode, the loop runs forever until it is allowed to exit. On weekends it does nothing except wait. Before the New York open it does nothing except wait for the market to open.
 
-- _Test: `rules.test.ts` — `it('rules 7 and 32: current-day scheduling waits before open and exits after generating one end-of-day report')`_
+- _Test: `rules.test.ts` — `it('rules 8 and 34: current-day scheduling waits before open and exits after generating one end-of-day report')`_
 
-1. During market hours, the first `OPENING_RANGE_MINUTES` are treated as opening-range discovery time. The UI reports `Determing open range.` during that window. After the OR window completes, the app computes and publishes the opening-range high and low.
+9. During market hours, the first `OPENING_RANGE_MINUTES` are treated as opening-range discovery time. The UI reports `Determing open range.` during that window. After the OR window completes, the app computes and publishes the opening-range high and low.
 
-- _Test: `rules.test.ts` — `it('rules 8-9: current-day mode emits opening-range and waiting-for-breakouts UI messages after the OR window completes')`_
+- _Test: `rules.test.ts` — `it('rules 9-10: current-day mode emits opening-range and waiting-for-breakouts UI messages after the OR window completes')`_
 
-1. After the opening-range high/low are published, the app also publishes `Identified Breakout Candidates, {SYMBOLS}` with the current most-active symbol list when available.
+10. After the opening-range high/low are published, the app also publishes `Identified Breakout Candidates, {SYMBOLS}` with the current most-active symbol list when available.
 
-- _Test: `rules.test.ts` — `it('rules 8-9: current-day mode emits opening-range and waiting-for-breakouts UI messages after the OR window completes')`_
+- _Test: `rules.test.ts` — `it('rules 9-10: current-day mode emits opening-range and waiting-for-breakouts UI messages after the OR window completes')`_
 
-1. Every active cycle starts by loading the Alpaca account. If `tradingBlocked` is true, the cycle stops immediately and no candidate evaluation or order logic runs.
+11. Every active cycle starts by loading the Alpaca account. If `tradingBlocked` is true, the cycle stops immediately and no candidate evaluation or order logic runs.
 
-- _Test: `rules.test.ts` — `it('rules 10-16: runCycle halts on trading block, and candidate evaluation handles positions, duplicates, and missing bars')`_
+- _Test: `rules.test.ts` — `it('rules 11-17: runCycle halts on trading block, and candidate evaluation handles positions, duplicates, and missing bars')`_
 
-1. The candidate universe is sourced from Alpaca most-active symbols with a two-stage retrieval rule: fetch `max(QUANTITY_TO_RETRIEVE, 4 x QUANTITY_TO_RETRIEVE)` symbols, cap that fetch at 100, then apply the price filter and keep the top `QUANTITY_TO_RETRIEVE` for evaluation. The default `QUANTITY_TO_RETRIEVE` is 40 symbols, and the Web UI can override this per run using the "Most active stocks to scan" spinner.
+12. The candidate universe is sourced from Alpaca most-active symbols with a two-stage retrieval rule: fetch `max(QUANTITY_TO_RETRIEVE, 4 x QUANTITY_TO_RETRIEVE)` symbols, cap that fetch at 100, then apply the price filter and keep the top `QUANTITY_TO_RETRIEVE` for evaluation. The default `QUANTITY_TO_RETRIEVE` is 40 symbols, and the Web UI can override this per run using the "Most active stocks to scan" spinner.
 
-- _Test: `rules.test.ts` — `it('rules 10-16: runCycle halts on trading block, and candidate evaluation handles positions, duplicates, and missing bars')`_
+- _Test: `rules.test.ts` — `it('rules 11-17: runCycle halts on trading block, and candidate evaluation handles positions, duplicates, and missing bars')`_
 
-1. Each symbol is evaluated independently. If the account already has an open position in that symbol, the app switches from entry logic to profit-capture management instead of generating a new breakout candidate.
+13. Each symbol is evaluated independently. If the account already has an open position in that symbol, the app switches from entry logic to profit-capture management instead of generating a new breakout candidate.
 
-- _Test: `rules.test.ts` — `it('rules 10-16: runCycle halts on trading block, and candidate evaluation handles positions, duplicates, and missing bars')`_
+- _Test: `rules.test.ts` — `it('rules 11-17: runCycle halts on trading block, and candidate evaluation handles positions, duplicates, and missing bars')`_
 
-1. Existing-position management follows this order: if the position has no entry price, it is skipped; if there are no session bars, it is skipped; if the current bar is earlier than `FORCE_EXIT_TIME`, it is skipped; at or after `FORCE_EXIT_TIME`, the position is only closed if the latest close is favorable relative to entry price, meaning `latestClose >= entryPrice` for longs or `latestClose <= entryPrice` for shorts.
+14. Existing-position management follows this order: if the position has no entry price, it is skipped; if there are no session bars, it is skipped; if the current bar is earlier than `FORCE_EXIT_TIME`, it is skipped; at or after `FORCE_EXIT_TIME`, the position is only closed if the latest close is favorable relative to entry price, meaning `latestClose >= entryPrice` for longs or `latestClose <= entryPrice` for shorts.
 
-- _Test: `rules.test.ts` — `it('rules 10-16: runCycle halts on trading block, and candidate evaluation handles positions, duplicates, and missing bars')`_
+- _Test: `rules.test.ts` — `it('rules 11-17: runCycle halts on trading block, and candidate evaluation handles positions, duplicates, and missing bars')`_
 
-1. When an existing position is closed by the profit-capture rule, the UI reports `Closing {SYMBOL} for a {PROFIT_LOSS_STATUS} of {PROFIT_LOSS_AMOUNT}.` and the trade monitor records a close event. In `EMULATION`, this is logged as a dry-run close instead of sending a live close order.
+15. When an existing position is closed by the profit-capture rule, the UI reports `Closing {SYMBOL} for a {PROFIT_LOSS_STATUS} of {PROFIT_LOSS_AMOUNT}.` and the trade monitor records a close event. In `EMULATION`, this is logged as a dry-run close instead of sending a live close order.
 
-- _Test: `rules.test.ts` — `it('rules 10-16: runCycle halts on trading block, and candidate evaluation handles positions, duplicates, and missing bars')`_
+- _Test: `rules.test.ts` — `it('rules 11-17: runCycle halts on trading block, and candidate evaluation handles positions, duplicates, and missing bars')`_
 
-1. If no open position exists, duplicate-entry protection is applied next. Any symbol already present in the in-memory `executedToday` set for that session date is skipped.
+16. If no open position exists, duplicate-entry protection is applied next. Any symbol already present in the in-memory `executedToday` set for that session date is skipped.
 
-- _Test: `rules.test.ts` — `it('rules 10-16: runCycle halts on trading block, and candidate evaluation handles positions, duplicates, and missing bars')`_
+- _Test: `rules.test.ts` — `it('rules 11-17: runCycle halts on trading block, and candidate evaluation handles positions, duplicates, and missing bars')`_
 
-1. If the symbol has no intraday bars for the session, it is skipped.
+17. If the symbol has no intraday bars for the session, it is skipped.
 
-- _Test: `rules.test.ts` — `it('rules 10-16: runCycle halts on trading block, and candidate evaluation handles positions, duplicates, and missing bars')`_
+- _Test: `rules.test.ts` — `it('rules 11-17: runCycle halts on trading block, and candidate evaluation handles positions, duplicates, and missing bars')`_
 
-1. Candidate construction begins by deduplicating bars, filtering them to the current session date in New York time, and computing the opening range from the configured market open through the first `OPENING_RANGE_MINUTES` minutes. The opening range window starts one minute after NY open at 09:31 ET. With default 15-minute settings, the range covers 1-minute bars from 09:31 through 09:45 ET, and all required bars must exist or the candidate fails.
+18. Candidate construction begins by deduplicating bars, filtering them to the current session date in New York time, and computing the opening range from the configured market open through the first `OPENING_RANGE_MINUTES` minutes. The opening range window starts one minute after NY open at 09:31 ET. With default 15-minute settings, the range covers 1-minute bars from 09:31 through 09:45 ET, and all required bars must exist or the candidate fails.
 
-- _Test: `rules.test.ts` — `it('rules 17-22: builds only confirmed breakout candidates with wick anchors, ATR, and positive scores')`_
+- _Test: `rules.test.ts` — `it('rules 18-19 and 21-24: builds only confirmed breakout candidates with wick anchors, ATR, and positive scores')`_
 
-1. Breakout detection then examines only the next opening-range-sized evaluation window after the opening range. With defaults, that means the next 15 minutes, evaluated using `BREAKOUT_CONFIRMATION_CANDLE_MINUTES` (default 5-minute candles). A breakout attempt is only created when that candle closes outside the opening range.
+19. Breakout detection then examines only the next opening-range-sized evaluation window after the opening range. With defaults, that means the next 15 minutes, evaluated using `BREAKOUT_CONFIRMATION_CANDLE_MINUTES` (default 5-minute candles). A breakout attempt is only created when that candle closes outside the opening range.
 
-- _Test: `rules.test.ts` — `it('rules 17-22: builds only confirmed breakout candidates with wick anchors, ATR, and positive scores')`_
+- _Test: `rules.test.ts` — `it('rules 18-19 and 21-24: builds only confirmed breakout candidates with wick anchors, ATR, and positive scores')`_
 
-1. Breakout quality filters are then applied (enabled by default). The breakout must pass minimum volume expansion, minimum relative strength/weakness beyond the opening-range boundary, and higher-timeframe trend alignment.
+20. If breakout quality filters are enabled, the breakout must pass minimum volume expansion, minimum relative strength/weakness beyond the opening-range boundary, and higher-timeframe trend alignment.
 
-- _Test: `rules.test.ts` — `it('rules 17-22c: requires 5-minute close confirmation and breakout quality filters by default')`_
+- _Test: `rules.test.ts` — `it('rules 19-20: requires 5-minute close confirmation and applies breakout quality filters when enabled')`_
 
-1. A breakout is not tradeable by itself. The app requires a confirmation retest after the breakout bar. For longs, a later bar must trade back to or below opening-range high and still close above opening-range high. For shorts, a later bar must trade back to or above opening-range low and still close below opening-range low.
+21. A breakout is not tradeable by itself. The app requires a confirmation retest after the breakout bar. For longs, a later bar must trade back to or below opening-range high and still close above opening-range high. For shorts, a later bar must trade back to or above opening-range low and still close below opening-range low.
 
-- _Test: `rules.test.ts` — `it('rules 17-22: builds only confirmed breakout candidates with wick anchors, ATR, and positive scores')`_
+- _Test: `rules.test.ts` — `it('rules 18-19 and 21-24: builds only confirmed breakout candidates with wick anchors, ATR, and positive scores')`_
 
-1. The bar immediately before the breakout becomes the wick anchor for stop placement. Its high is used for long stop anchoring and its low is used for short stop anchoring.
+22. For the current New York session, a confirmation retest is only valid for a limited time window. If the retest is older than `BREAKOUT_RETEST_MAX_AGE_MINUTES`, the candidate is skipped as stale. Set `BREAKOUT_RETEST_MAX_AGE_MINUTES=0` to disable this staleness guard.
 
-- _Test: `rules.test.ts` — `it('rules 17-22: builds only confirmed breakout candidates with wick anchors, ATR, and positive scores')`_
+- _Test: `rules.test.ts` — `it('rule 21a: rejects stale retest entries for the current NY session')`_
 
-1. ATR is then computed from session bars up through the confirmation retest using a 14-bar average true range. If ATR cannot be computed or is not positive, the candidate is rejected.
+23. The bar immediately before the breakout becomes the wick anchor for stop placement. Its high is used for long stop anchoring and its low is used for short stop anchoring.
 
-- _Test: `rules.test.ts` — `it('rules 17-22: builds only confirmed breakout candidates with wick anchors, ATR, and positive scores')`_
+- _Test: `rules.test.ts` — `it('rules 18-19 and 21-24: builds only confirmed breakout candidates with wick anchors, ATR, and positive scores')`_
 
-1. Candidate score is computed as `relative breakout percent * log10(total session volume)`. Only candidates with score greater than `MIN_SCORE` survive sizing.
+24. ATR is then computed from session bars up through the confirmation retest using a 14-bar average true range. If ATR cannot be computed or is not positive, the candidate is rejected.
 
-- _Test: `rules.test.ts` — `it('rules 17-22: builds only confirmed breakout candidates with wick anchors, ATR, and positive scores')`_
+- _Test: `rules.test.ts` — `it('rules 18-19 and 21-24: builds only confirmed breakout candidates with wick anchors, ATR, and positive scores')`_
 
-1. Surviving candidates are ranked separately by side. The app keeps the top `MAX_POSITIONS_PER_SIDE` longs and top `MAX_POSITIONS_PER_SIDE` shorts by score. The current default is 3 per side.
+25. Candidate score is computed as `relative breakout percent * log10(total session volume)`. Only candidates with score greater than `MIN_SCORE` survive sizing.
 
-- _Test: `rules.test.ts` — `it('rules 23-28: ranks candidates, assigns weighted risk, derives stops and 4R targets, and normalizes to constraints')`_
+- _Test: `rules.test.ts` — `it('rules 18-19 and 21-24: builds only confirmed breakout candidates with wick anchors, ATR, and positive scores')`_
 
-1. Risk dollars are assigned proportionally by score across the selected basket, using `MAX_TOTAL_RISK` as the total planned stop-loss budget.
+26. Surviving candidates are ranked separately by side. The app keeps the top `MAX_POSITIONS_PER_SIDE` longs and top `MAX_POSITIONS_PER_SIDE` shorts by score. The current default is 3 per side.
 
-- _Test: `rules.test.ts` — `it('rules 23-28: ranks candidates, assigns weighted risk, derives stops and 4R targets, and normalizes to constraints')`_
+- _Test: `rules.test.ts` — `it('rules 25-30: ranks candidates, assigns weighted risk, derives stops and 4R targets, and normalizes to constraints')`_
 
-1. Stop price is determined next. If a breakout wick anchor exists, it is used first. Otherwise the stop falls back to the most conservative price produced by the opening-range bound, the ATR-based stop, and the minimum stop-percent rule.
+27. Risk dollars are assigned proportionally by score across the selected basket, using `MAX_TOTAL_RISK` as the total planned stop-loss budget.
 
-- _Test: `rules.test.ts` — `it('rules 23-28: ranks candidates, assigns weighted risk, derives stops and 4R targets, and normalizes to constraints')`_
+- _Test: `rules.test.ts` — `it('rules 25-30: ranks candidates, assigns weighted risk, derives stops and 4R targets, and normalizes to constraints')`_
 
-1. Any trade is rejected if stop distance is zero or negative, if entry price and stop price are equal at two-decimal execution precision, or if computed quantity falls below the minimum quantity threshold.
+28. Stop price is determined next. If a breakout wick anchor exists, it is used first. Otherwise the stop falls back to the most conservative price produced by the opening-range bound, the ATR-based stop, and the minimum stop-percent rule.
 
-- _Test: `rules.test.ts` — `it('rules 23-28: ranks candidates, assigns weighted risk, derives stops and 4R targets, and normalizes to constraints')`_
+- _Test: `rules.test.ts` — `it('rules 25-30: ranks candidates, assigns weighted risk, derives stops and 4R targets, and normalizes to constraints')`_
 
-1. Profit target is then set to `takeProfitMultiple * stopDistance`, which is 4R by default because `STOP_LOSS_PROFIT_RATIO` defaults to `1:4`.
+29. Any trade is rejected if stop distance is zero or negative, if entry price and stop price are equal at two-decimal execution precision, or if computed quantity falls below the minimum quantity threshold.
 
-- _Test: `rules.test.ts` — `it('rules 23-28: ranks candidates, assigns weighted risk, derives stops and 4R targets, and normalizes to constraints')`_
+- _Test: `rules.test.ts` — `it('rules 25-30: ranks candidates, assigns weighted risk, derives stops and 4R targets, and normalizes to constraints')`_
 
-1. After initial sizing, the basket is normalized in two passes. First each trade is individually scaled down to obey `MAX_POSITION_NOTIONAL`. Then the whole basket is scaled by the smaller of the risk cap scale and the available buying power scale. Quantities are floored to four decimal places, and anything below the minimum quantity is dropped.
+30. Profit target is then set to `takeProfitMultiple * stopDistance`, which is 4R by default because `STOP_LOSS_PROFIT_RATIO` defaults to `1:4`.
+
+- _Test: `rules.test.ts` — `it('rules 25-30: ranks candidates, assigns weighted risk, derives stops and 4R targets, and normalizes to constraints')`_
+
+31. After initial sizing, the basket is normalized in two passes. First each trade is individually scaled down to obey `MAX_POSITION_NOTIONAL`. Then the whole basket is scaled by the smaller of the risk cap scale and the available buying power scale. Quantities are floored to four decimal places, and anything below the minimum quantity is dropped.
 
 - _Test: `basket.test.ts` — `it('normalizes the basket so risk and notional fit constraints simultaneously')`_
 
-1. Before execution, duplicate-entry protection is applied again at the trade basket stage. Any already-executed symbol for the session date is skipped.
+32. Before execution, duplicate-entry protection is applied again at the trade basket stage. Any already-executed symbol for the session date is skipped.
 
-- _Test: `rules.test.ts` — `it('rules 29-30: execution prevents duplicates, uses dry-run monitor events in EMULATION, and submits bracket orders outside dry-run')`_
+- _Test: `rules.test.ts` — `it('rules 31-32: execution prevents duplicates, uses dry-run monitor events in EMULATION, and submits bracket orders outside dry-run')`_
 
-1. In `EMULATION`, entries are never submitted to Alpaca. The app only logs dry-run entries and emits trade-monitor events. In `PAPER` and `LIVE`, the app submits Alpaca bracket orders with the computed entry side, quantity, stop, and take-profit prices.
+33. In `EMULATION`, entries are never submitted to Alpaca. The app only logs dry-run entries and emits trade-monitor events. In `PAPER` and `LIVE`, the app submits Alpaca bracket orders with the computed entry side, quantity, stop, and take-profit prices.
 
-- _Test: `rules.test.ts` — `it('rules 29-30: execution prevents duplicates, uses dry-run monitor events in EMULATION, and submits bracket orders outside dry-run')`_
+- _Test: `rules.test.ts` — `it('rules 31-32: execution prevents duplicates, uses dry-run monitor events in EMULATION, and submits bracket orders outside dry-run')`_
 
-1. When historical reports contain closed trades, the UI reports `Closing {SYMBOL} for a {PROFIT_LOSS_STATUS} of {PROFIT_LOSS_AMOUNT}.` before emitting the close event into the trade monitor.
+34. When historical reports contain closed trades, the UI reports `Closing {SYMBOL} for a {PROFIT_LOSS_STATUS} of {PROFIT_LOSS_AMOUNT}.` before emitting the close event into the trade monitor.
 
-- _Test: `rules.test.ts` — `it('rules 3-6 and 31: historical emulation filters weekdays, emits progress UI messages, skips failures, and reports closes')`_
+- _Test: `rules.test.ts` — `it('rules 3-6 and 33: historical emulation filters weekdays, emits progress UI messages, skips failures, and reports closes')`_
 
-1. After `FORCE_EXIT_TIME`, if the end-of-day report for the session has not yet been generated, the app generates it once. In one-shot current-day mode the process then exits. In continuous mode it stays alive and waits for the next session.
+35. After `FORCE_EXIT_TIME`, if the end-of-day report for the session has not yet been generated, the app generates it once. In one-shot current-day mode the process then exits. In continuous mode it stays alive and waits for the next session.
 
-- _Test: `rules.test.ts` — `it('rules 7 and 32: current-day scheduling waits before open and exits after generating one end-of-day report')`_
+- _Test: `rules.test.ts` — `it('rules 8 and 34: current-day scheduling waits before open and exits after generating one end-of-day report')`_
 
-1. Intraday bar data for breakout candidate evaluation is always fetched via HTTP REST calls. The `getIntradayBars` method makes a direct request to Alpaca's `/v2/stocks/{symbol}/bars` endpoint with `timeframe=1Min` and the full session window (`09:30–16:00 ET`). No WebSocket connection is attempted for the initial bar fetch, eliminating the latency and reliability issues previously caused by WebSocket connection timeouts and authentication handshakes.
+36. Intraday bar data for breakout candidate evaluation is always fetched via HTTP REST calls. The `getIntradayBars` method makes a direct request to Alpaca's `/v2/stocks/{symbol}/bars` endpoint with `timeframe=1Min` and the full session window (`09:30-16:00 ET`). No WebSocket connection is attempted for the initial bar fetch, eliminating the latency and reliability issues previously caused by WebSocket connection timeouts and authentication handshakes.
 
 - _Test: `connections.test.ts` — `it('getIntradayBars fetches bars via HTTP directly')`_
 
-1. For batch evaluation of multiple symbols during breakout candidate scanning, bars are fetched concurrently using `Promise.all` over individual HTTP requests per symbol via `getIntradayBarsBatch`. This avoids sequential overhead while keeping the implementation simpler and more reliable than WebSocket batching.
+37. For batch evaluation of multiple symbols during breakout candidate scanning, bars are fetched concurrently using `Promise.all` over individual HTTP requests per symbol via `getIntradayBarsBatch`. This avoids sequential overhead while keeping the implementation simpler and more reliable than WebSocket batching.
 
-- _Test: `connections.test.ts` — `it('fetches bars for all symbols via concurrent HTTP calls')` / `it('returns map with empty arrays for symbols with no bars')`_
+- _Tests: `connections.test.ts` — `it('fetches bars for all symbols via concurrent HTTP calls')` / `it('returns map with empty arrays for symbols with no bars')`_
 
-1. The WebSocket client infrastructure (`AlpacaWebSocketClient`, header-based auth, v2 streaming format parsing, array-wrapped response handling, unsubscribe-after-batch, rate-limit handling, and fast rejection on close/error) is fully implemented and unit-tested, but reserved for future real-time streaming between polling cycles. It is not used during the initial bar fetch.
+38. The WebSocket client infrastructure (`AlpacaWebSocketClient`, header-based auth, v2 streaming format parsing, array-wrapped response handling, unsubscribe-after-batch, rate-limit handling, and fast rejection on close/error) is fully implemented and unit-tested, but reserved for future real-time streaming between polling cycles. It is not used during the initial bar fetch.
 
 - _Test: `connections.test.ts` — all `handleMessage (v2 streaming format)` tests_
 
-1. Same-minute target/stop hit detection: When scanning post-entry bars for stop-loss and take-profit hits, the filter includes the bar whose 1-minute window overlaps the entry time. A target or stop hit occurring on the same bar as the entry (e.g., entry at `14:30:15`, target hit at `14:30:30` on the `14:30:00` bar) is detected, rather than being excluded because the bar timestamp (start of minute) precedes the entry time.
+39. Same-minute target/stop hit detection: When scanning post-entry bars for stop-loss and take-profit hits, the filter includes the bar whose 1-minute window overlaps the entry time. A target or stop hit occurring on the same bar as the entry (e.g., entry at `14:30:15`, target hit at `14:30:30` on the `14:30:00` bar) is detected, rather than being excluded because the bar timestamp (start of minute) precedes the entry time.
 
 - _Test: `strategy.test.ts` — `it('closes position when target is hit on the same-minute bar as entry')`_
+
+<!-- markdownlint-enable MD029 -->
 
 ### Resilience and Stability
 
@@ -495,7 +507,7 @@ Logs are written to:
 Each line in `logs/trades/trades-YYYY-MM-DD.log` is a JSON object describing a single trade event. The file date component is derived from the event's own timestamp, not the system clock. Event types:
 
 | Field | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `type` | string | `BREAKOUT_HIGH`, `BREAKOUT_LOW`, `TRADE_OPEN`, or `TRADE_CLOSE` |
 | `symbol` | string | The ticker symbol |
 | `timestamp` | string | ISO-8601 timestamp of the event |
@@ -532,7 +544,8 @@ The app reads configuration from `.env` (via `dotenv`) and supports the followin
 | `APCA_API_SECRET_KEY` | Yes | None | Alpaca API secret key paired with `APCA_API_KEY_ID`. |
 | `ATR_STOP_MULTIPLE` | No | `1` | ATR multiplier used as one candidate stop-distance component in sizing fallback. |
 | `BREAKOUT_CONFIRMATION_CANDLE_MINUTES` | No | `5` | Candle size (in minutes) used to confirm breakout closes outside the opening range. |
-| `BREAKOUT_QUALITY_FILTERS_ENABLED` | No | `true` | Enables breakout quality filters (volume expansion, relative strength/weakness, higher-timeframe trend alignment). |
+| `BREAKOUT_RETEST_MAX_AGE_MINUTES` | No | `1` | Maximum age (in minutes) allowed between confirmation retest and entry evaluation for the current NY session. Set to `0` to disable this staleness guard. |
+| `BREAKOUT_QUALITY_FILTERS_ENABLED` | No | `false` | Enables breakout quality filters and also controls the Web UI's initial Breakout Quality Filters checkbox state. |
 | `BREAKOUT_MIN_VOLUME_EXPANSION` | No | `1.2` | Minimum breakout-candle volume expansion ratio versus earlier confirmation candles. |
 | `BREAKOUT_MIN_RELATIVE_STRENGTH_PCT` | No | `0.25` | Minimum percent close beyond opening-range high/low required for breakout strength. |
 | `BREAKOUT_TREND_TIMEFRAME_MINUTES` | No | `5` | Higher-timeframe candle size used for trend alignment checks. |

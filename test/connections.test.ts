@@ -6,22 +6,62 @@ import { installMockFetch } from './helpers/mock-fetch';
 
 describe('Alpaca WebSocket client connection type', () => {
     describe('isMarketHours', () => {
+        function withMockedNow(isoTimestamp: string, run: () => void) {
+            const RealDate = Date;
+
+            class MockDate extends RealDate {
+                constructor(value?: string | number | Date) {
+                    if (arguments.length === 0) {
+                        super(isoTimestamp);
+                        return;
+                    }
+
+                    super(value as string | number | Date);
+                }
+
+                static override now(): number {
+                    return new RealDate(isoTimestamp).getTime();
+                }
+
+                static override parse(value: string): number {
+                    return RealDate.parse(value);
+                }
+
+                static override UTC(
+                    year: number,
+                    monthIndex: number,
+                    day?: number,
+                    hours?: number,
+                    minutes?: number,
+                    seconds?: number,
+                    ms?: number,
+                ): number {
+                    return RealDate.UTC(year, monthIndex, day, hours, minutes, seconds, ms);
+                }
+            }
+
+            (global as unknown as { Date: DateConstructor }).Date = MockDate as unknown as DateConstructor;
+            try {
+                run();
+            } finally {
+                (global as unknown as { Date: DateConstructor }).Date = RealDate;
+            }
+        }
+
         it('returns true during market hours on a weekday', () => {
-            const day = new Date().getDay();
-            const isWeekday = day >= 1 && day <= 5;
-            if (isWeekday) {
+            // 2026-06-01T14:00:00Z = 10:00 AM New York (weekday, market open)
+            withMockedNow('2026-06-01T14:00:00Z', () => {
                 const result = isMarketHours();
                 expect(result).to.equal(true);
-            }
+            });
         });
 
         it('returns false on weekends', () => {
-            const day = new Date().getDay();
-            const isWeekend = day === 0 || day === 6;
-            if (isWeekend) {
+            // 2026-06-07T14:00:00Z = Sunday in New York
+            withMockedNow('2026-06-07T14:00:00Z', () => {
                 const result = isMarketHours();
                 expect(result).to.equal(false);
-            }
+            });
         });
     });
 
@@ -228,7 +268,7 @@ describe('Alpaca WebSocket client connection type', () => {
     describe('unsubscribeAll', () => {
         it('clears pending subscriptions', () => {
             const client = new AlpacaWebSocketClient();
-            (client as any).pendingSubscriptions.set('SPY', () => {});
+            (client as any).pendingSubscriptions.set('SPY', () => { });
             client.unsubscribeAll();
             expect((client as any).pendingSubscriptions.size).to.equal(0);
         });

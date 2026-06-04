@@ -75,6 +75,13 @@ describe('can take profit before retest (simplified)', () => {
             async getMostActiveSymbols() { return [symbol]; }
             async getOpenPosition() { return null; }
             async getIntradayBars() { return bars; }
+            async getIntradayBarsBatch(symbols: string[]) {
+                const map = new Map<string, Bar[]>();
+                for (const requestedSymbol of symbols) {
+                    map.set(requestedSymbol, requestedSymbol === symbol ? bars : []);
+                }
+                return map;
+            }
         }
         const client = new TestClient();
 

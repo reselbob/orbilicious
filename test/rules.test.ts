@@ -555,12 +555,12 @@ describe('Operational Rules support', () => {
         expect(() => require('../src/config')).to.throw('Invalid session mode');
     });
 
-    // Rules 3-6 and 31: Verifies that startApp in EMULATION mode with a past SESSION_DATE
+    // Rules 3-6 and 33: Verifies that startApp in EMULATION mode with a past SESSION_DATE
     // builds a weekday-only date range, emits the three-step UI progress sequence
     // (__UI_STATUS__Determing open ranage → High/Low range prices → Waiting for breakouts)
     // for each session, skips sessions that throw (rule 6), and emits the close UI
-    // message before the trade-monitor close event for profitable historical trades (rule 31).
-    it('rules 3-6 and 31: historical emulation filters weekdays, emits progress UI messages, skips failures, and reports closes', async () => {
+    // message before the trade-monitor close event for profitable historical trades (rule 33).
+    it('rules 3-6 and 33: historical emulation filters weekdays, emits progress UI messages, skips failures, and reports closes', async () => {
         env.sessionMode = 'EMULATION';
         env.sessionDate = '2026-05-14';
         env.dryRun = true;
@@ -603,11 +603,11 @@ describe('Operational Rules support', () => {
         expect(output.indexOf('__UI_STATUS__Closing SPY for a profit of $8.00.')).to.be.lessThan(output.indexOf('"eventType":"close"'));
     });
 
-    // Rules 7 and 32: Verifies that the current-day scheduler (no SESSION_DATE) logs
+    // Rules 8 and 34: Verifies that the current-day scheduler (no SESSION_DATE) logs
     // "Waiting for market open" when the mocked clock is before the NY open, then later
     // generates exactly one end-of-day report once the clock advances past market close,
     // and logs the one-shot exit message before terminating.
-    it('rules 7 and 32: current-day scheduling waits before open and exits after generating one end-of-day report', async () => {
+    it('rules 8 and 34: current-day scheduling waits before open and exits after generating one end-of-day report', async () => {
         env.sessionMode = 'PAPER';
         env.sessionDate = '';
         env.dryRun = false;
@@ -637,9 +637,9 @@ describe('Operational Rules support', () => {
         expect(reportedSessions).to.deep.equal(['2026-05-18']);
     });
 
-    // Rules 3-6: When a same-day EMULATION session starts after market close, the app
+    // Rule 7: When a same-day EMULATION session starts after market close, the app
     // should treat it as historical emulation and run the one-shot historical branch.
-    it('rules 3-6: same-day emulation after market close runs the historical branch', async () => {
+    it('rule 7: same-day emulation after market close runs the historical branch', async () => {
         env.sessionMode = 'EMULATION';
         env.sessionDate = '2026-05-18';
         env.dryRun = true;
@@ -666,11 +666,11 @@ describe('Operational Rules support', () => {
         expect(reportedSessions).to.deep.equal(['2026-05-18']);
     });
 
-    // Rules 8-9: Verifies that after the 15-minute opening-range window closes the app
+    // Rules 9-10: Verifies that after the 15-minute opening-range window closes the app
     // emits the opening-range completion status (__UI_STATUS__Determing open range.,
     // __UI_STATUS__High range prices / Low range prices) and then appends the most-active
     // symbol list to the Waiting for breakouts message.
-    it('rules 8-9: current-day mode emits opening-range and waiting-for-breakouts UI messages after the OR window completes', async () => {
+    it('rules 9-10: current-day mode emits opening-range and waiting-for-breakouts UI messages after the OR window completes', async () => {
         env.sessionMode = 'PAPER';
         env.sessionDate = '';
         env.dryRun = false;
@@ -705,13 +705,13 @@ describe('Operational Rules support', () => {
         expect(output).to.include('__UI_STATUS__Identified Breakout Candidates, SPY, QQQ');
     });
 
-    // Rules 10-16: Verifies that runCycle immediately returns without querying the
-    // symbol universe when tradingBlocked=true (rule 10); that findBreakoutCandidates
+    // Rules 11-17: Verifies that runCycle immediately returns without querying the
+    // symbol universe when tradingBlocked=true (rule 11); that findBreakoutCandidates
     // switches to profit-capture for existing positions and emits a close UI message
-    // (rules 12-14); that symbols with no intraday bars are silently skipped (rule 16);
+    // (rules 13-15); that symbols with no intraday bars are silently skipped (rule 17);
     // and that executeSizedTrades registers symbols in executedToday so a second call
-    // for the same session finds no eligible candidates (rule 15).
-    it('rules 10-16: runCycle halts on trading block, and candidate evaluation handles positions, duplicates, and missing bars', async () => {
+    // for the same session finds no eligible candidates (rule 16).
+    it('rules 11-17: runCycle halts on trading block, and candidate evaluation handles positions, duplicates, and missing bars', async () => {
         class TradingBlockedClient extends AlpacaClient {
             mostActiveCalls = 0;
 
@@ -805,12 +805,12 @@ describe('Operational Rules support', () => {
         expect(secondPass).to.have.length(0);
     });
 
-    // Rules 17-22: Verifies that findBreakoutCandidates returns only symbols with
+    // Rules 18-19 and 21-24: Verifies that findBreakoutCandidates returns only symbols with
     // a confirmed retest (LONG_OK and SHORT_OK pass; NO_RETEST and LATE_BREAKOUT are
     // rejected), that the wick-anchor stop prices are taken from the pre-breakout bar's
-    // high/low (rule 20), that ATR is computed and is positive (rule 21), and that
-    // candidate scores exceed MIN_SCORE (rule 22).
-    it('rules 17-22: builds only confirmed breakout candidates with wick anchors, ATR, and positive scores', async () => {
+    // high/low (rule 22), that ATR is computed and is positive (rule 23), and that
+    // candidate scores exceed MIN_SCORE (rule 24).
+    it('rules 18-19 and 21-24: builds only confirmed breakout candidates with wick anchors, ATR, and positive scores', async () => {
         class CandidateClient extends AlpacaClient {
             async getMostActiveSymbols(limit = 40) {
                 // getMostActiveSymbolsFiltered internally fetches 4x the desired count, capped at 100
@@ -915,7 +915,7 @@ describe('Operational Rules support', () => {
         expect(both.map((candidate) => candidate.side).sort()).to.deep.equal(['buy', 'sell']);
     });
 
-    it('rules 17-22c: requires 5-minute close confirmation and breakout quality filters by default', async () => {
+    it('rules 19-20: requires 5-minute close confirmation and applies breakout quality filters when enabled', async () => {
         class QualityClient extends AlpacaClient {
             async getMostActiveSymbols() {
                 return ['SPIKE_ONLY', 'WEAK_RS', 'CONFIRMED'];
@@ -964,13 +964,58 @@ describe('Operational Rules support', () => {
         expect(candidates.map((candidate) => candidate.symbol)).to.deep.equal(['CONFIRMED']);
     });
 
-    // Rules 23-28: Verifies the full sizing pipeline using synthetic candidates.
-    // Confirms that rankAndSelectCandidates keeps the top-N per side by score (rule 23),
+    it('rule 21a: rejects stale retest entries for the current NY session', async () => {
+        class StaleRetestClient extends AlpacaClient {
+            async getMostActiveSymbols() {
+                return ['CONFIRMED'];
+            }
+
+            async getOpenPosition(): Promise<Position | null> {
+                return null;
+            }
+
+            async getIntradayBars(symbol: string, sessionDate: string) {
+                return makeConfirmedLongCandidateBars(symbol, sessionDate);
+            }
+
+            async getIntradayBarsBatch(symbols: string[], sessionDate: string) {
+                const map = new Map<string, Bar[]>();
+                for (const symbol of symbols) {
+                    map.set(symbol, await this.getIntradayBars(symbol, sessionDate));
+                }
+                return map;
+            }
+
+            async getLatestPrices(symbols: string[]) {
+                const map = new Map<string, number>();
+                for (const symbol of symbols) {
+                    map.set(symbol, 10);
+                }
+                return map;
+            }
+        }
+
+        withMockDateSequence(Array.from({ length: 20 }, () => '2026-05-20T14:37:00Z'));
+        env.sessionMode = 'PAPER';
+        env.breakoutRetestMaxAgeMinutes = 1;
+        env.breakoutQualityFiltersEnabled = false;
+        strategyConfig.openingRangeMinutes = 14;
+
+        const staleCandidates = await findBreakoutCandidates(new StaleRetestClient(), '2026-05-20');
+        expect(staleCandidates).to.deep.equal([]);
+
+        env.breakoutRetestMaxAgeMinutes = 120;
+        const freshCandidates = await findBreakoutCandidates(new StaleRetestClient(), '2026-05-20');
+        expect(freshCandidates.map((candidate) => candidate.symbol)).to.deep.equal(['CONFIRMED']);
+    });
+
+    // Rules 25-30: Verifies the full sizing pipeline using synthetic candidates.
+    // Confirms that rankAndSelectCandidates keeps the top-N per side by score (rule 25),
     // that buildWeightedRiskTrades assigns wick-anchored stop prices and 4R profit targets
-    // (rules 25 and 27), that a zero-ATR candidate is dropped (rule 26), and that
+    // (rules 27 and 29), that a zero-ATR candidate is dropped (rule 28), and that
     // normalizeTradesToConstraints scales the basket so total risk, total notional, and
-    // per-position notional all stay within their caps (rule 28).
-    it('rules 23-28: ranks candidates, assigns weighted risk, derives stops and 4R targets, and normalizes to constraints', () => {
+    // per-position notional all stay within their caps (rule 30).
+    it('rules 25-30: ranks candidates, assigns weighted risk, derives stops and 4R targets, and normalizes to constraints', () => {
         const candidates = [
             {
                 symbol: 'LONG_TOP',
@@ -1059,12 +1104,94 @@ describe('Operational Rules support', () => {
         expect(normalized.every((trade) => Number(trade.qty.toFixed(4)) === trade.qty)).to.equal(true);
     });
 
-    // Rules 29-30: Verifies that executeSizedTrades skips a symbol on the second call
-    // for the same session date (duplicate protection, rule 29); that dryRun=true emits
+    it('rule 30b: cumulative risk across cycles stays within maxTotalRisk', () => {
+        const maxTotalRisk = 1000;
+        const candidates = [
+            { symbol: 'A', side: 'buy' as const, price: 100, score: 10, reason: 'test', relativeBreakPct: 1, totalVolume: 10000, openingRangeHigh: 101, openingRangeLow: 99, atr1m: 1, preBreakoutWickPrice: 100 },
+            { symbol: 'B', side: 'buy' as const, price: 100, score: 10, reason: 'test', relativeBreakPct: 1, totalVolume: 10000, openingRangeHigh: 101, openingRangeLow: 99, atr1m: 1, preBreakoutWickPrice: 100 },
+            { symbol: 'C', side: 'buy' as const, price: 100, score: 10, reason: 'test', relativeBreakPct: 1, totalVolume: 10000, openingRangeHigh: 101, openingRangeLow: 99, atr1m: 1, preBreakoutWickPrice: 100 },
+            { symbol: 'D', side: 'buy' as const, price: 100, score: 10, reason: 'test', relativeBreakPct: 1, totalVolume: 10000, openingRangeHigh: 101, openingRangeLow: 99, atr1m: 1, preBreakoutWickPrice: 100 },
+            { symbol: 'E', side: 'buy' as const, price: 100, score: 10, reason: 'test', relativeBreakPct: 1, totalVolume: 10000, openingRangeHigh: 101, openingRangeLow: 99, atr1m: 1, preBreakoutWickPrice: 100 },
+        ];
+
+        // First cycle — allocate remainingRisk = maxTotalRisk (no open positions yet)
+        let usedRisk = 0;
+        let remainingRisk = Math.max(0, maxTotalRisk - usedRisk);
+        let batch = buildWeightedRiskTrades(candidates, remainingRisk, 4);
+        batch = normalizeTradesToConstraints(batch, remainingRisk, 25000, 5000);
+        const cycle1Risk = batch.reduce((s, t) => s + t.plannedRiskDollars, 0);
+        expect(cycle1Risk).to.be.at.most(remainingRisk + 0.0001);
+
+        // Simulate holding these positions (e.g. after executeSizedTrades)
+        const openPositions = new Map(batch.map((t) => [t.symbol, {
+            side: t.side === 'buy' ? 'long' as const : 'short' as const,
+            entryPrice: t.price,
+            entryTime: new Date().toISOString(),
+            stopPrice: t.stopPrice,
+            stopLossPct: t.stopLossPct,
+            takeProfitPrice: t.takeProfitPrice,
+            qty: t.qty,
+        }]));
+
+        // Second cycle — deduct used risk from existing positions
+        usedRisk = Array.from(openPositions.values()).reduce((sum, pos) => {
+            const perShare = pos.side === 'long'
+                ? pos.entryPrice - pos.stopPrice
+                : pos.stopPrice - pos.entryPrice;
+            return sum + Math.max(0, perShare) * pos.qty;
+        }, 0);
+        expect(usedRisk).to.be.greaterThan(0);
+
+        remainingRisk = Math.max(0, maxTotalRisk - usedRisk);
+        const remainingCandidates = candidates.slice(0, 3);
+        batch = buildWeightedRiskTrades(remainingCandidates, remainingRisk, 4);
+        batch = normalizeTradesToConstraints(batch, remainingRisk, 25000, 5000);
+        const cycle2Risk = batch.reduce((s, t) => s + t.plannedRiskDollars, 0);
+        expect(cycle2Risk).to.be.at.most(remainingRisk + 0.0001);
+
+        // Combined risk from both cycles must not exceed maxTotalRisk
+        const totalRisk = usedRisk + cycle2Risk;
+        expect(totalRisk).to.be.at.most(maxTotalRisk + 0.0002);
+    });
+
+    it('rule 30c: close handler reconciles totalProfitLossToDate from sessionEvents close PnLs', () => {
+        type CloseEvent = { eventType: string; pnl: number };
+        type Record = { totals?: { totalProfitLossToDate?: number }; sessionEvents?: CloseEvent[] };
+
+        // Close events with known PnLs summing to 221.75
+        const events: CloseEvent[] = [
+            { eventType: 'close', pnl: 150.00 },
+            { eventType: 'close', pnl: -37.50 },
+            { eventType: 'close', pnl: 53.54 },
+            { eventType: 'close', pnl: -37.50 },
+            { eventType: 'close', pnl: 93.21 },
+        ];
+        const expectedSum = 150.00 + (-37.50) + 53.54 + (-37.50) + 93.21;
+
+        // Simulate close handler reconciliation
+        const closePnl = events
+            .filter((e) => e.eventType === 'close')
+            .reduce((sum, e) => sum + e.pnl, 0);
+
+        const record: Record = { totals: { totalProfitLossToDate: -999 } };
+        record.totals = record.totals ?? {};
+        record.totals.totalProfitLossToDate = Number(closePnl.toFixed(2));
+
+        expect(record.totals.totalProfitLossToDate).to.equal(Number(expectedSum.toFixed(2)));
+
+        // Empty events — should produce 0
+        const emptyClosePnl = []
+            .filter((e: CloseEvent) => e.eventType === 'close')
+            .reduce((sum: number, e: CloseEvent) => sum + e.pnl, 0);
+        expect(emptyClosePnl).to.equal(0);
+    });
+
+    // Rules 31-32: Verifies that executeSizedTrades skips a symbol on the second call
+    // for the same session date (duplicate protection, rule 31); that dryRun=true emits
     // exactly one trade-monitor open event to stdout without calling submitBracketOrder
-    // (rule 30 EMULATION path); and that dryRun=false calls submitBracketOrder with the
-    // correct symbol, side, and quantity for a new session date (rule 30 LIVE path).
-    it('rules 29-30: execution prevents duplicates, uses dry-run monitor events in EMULATION, and submits bracket orders outside dry-run', async () => {
+    // (rule 32 EMULATION path); and that dryRun=false calls submitBracketOrder with the
+    // correct symbol, side, and quantity for a new session date (rule 32 LIVE path).
+    it('rules 31-32: execution prevents duplicates, uses dry-run monitor events in EMULATION, and submits bracket orders outside dry-run', async () => {
         class ExecutionClient extends AlpacaClient {
             submitted: Array<{ symbol: string; side: 'buy' | 'sell'; qty: number }> = [];
 

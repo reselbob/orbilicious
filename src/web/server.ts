@@ -9,9 +9,19 @@ import { findLiquidityZonesForSymbol } from '../liquidity';
 import { OrbService } from '../services/orb-service';
 import { toNyParts } from '../time';
 import { AlpacaClient, MostActiveSymbolDetail } from '../alpaca';
+import {
+    compareTradeMonitorEvents,
+    loadReplayTradeMonitorEventsFromRecord,
+    resolveClosedTradePnl,
+    toCanonicalTradeMonitorEvents,
+} from './trade-monitor-utils';
+import {
+    buildDailySymbolCharts,
+    type DailySymbolSnapshot,
+} from './daily-symbol-snapshots';
 import type { Bar } from '../types';
 
-type SessionMode = 'EMULATION' | 'PAPER' | 'LIVE';
+type SessionMode = 'EMULATION' | 'REPLAY' | 'PAPER' | 'LIVE';
 type CandidateTradeType = 'LONG' | 'SHORT' | 'LONG_AND_SHORT';
 
 type AppState = {
@@ -102,6 +112,7 @@ type TradeEvent = {
     qty: number;
     entryPrice?: number;
     stopPrice?: number;
+    stopLossPct?: number;
     targetPrice?: number;
     closePrice?: number;
     pnl?: number;
@@ -215,11 +226,16 @@ type DailySessionRecord = {
         price?: number;
         qty?: number;
         stopPrice?: number;
+        stopLossPct?: number;
         takeProfitPrice?: number;
     }>;
     finalOutcomes?: Array<{
         symbol: string;
         side?: 'buy' | 'sell';
+        entryPrice?: number;
+        stopPrice?: number;
+        takeProfitPrice?: number;
+        qty?: number;
         status?: string;
         pnl?: number;
         exitPrice?: number | null;
@@ -261,11 +277,13 @@ type DailySessionRecord = {
         qty: number;
         entryPrice?: number;
         stopPrice?: number;
+        stopLossPct?: number;
         targetPrice?: number;
         closePrice?: number;
         pnl?: number;
         reason?: string;
     }>;
+    symbolSnapshots?: Record<string, DailySymbolSnapshot>;
     runtimeSnapshot?: {
         runtimeStatus?: string;
         orbUiMessage?: string | null;
@@ -399,6 +417,42 @@ function addActivityLine(stream: 'stdout' | 'stderr' | 'system', message: string
     }
 }
 
+function persistTradeEvent(event: Omit<TradeEvent, 'id'>) {
+    const sessionDate = event.sessionDate;
+    if (!sessionDate || !isValidSessionDate(sessionDate)) {
+        return;
+    }
+
+    const existing = readDailySessionRecord(sessionDate);
+    if (!existing) {
+        return;
+    }
+
+    const existingEvents = Array.isArray(existing.sessionEvents) ? existing.sessionEvents : [];
+    existing.sessionEvents = [
+        ...existingEvents,
+        {
+            eventId: String(nextTradeEventId - 1),
+            eventType: event.eventType as 'open' | 'close',
+            sessionDate: event.sessionDate,
+            timestamp: event.timestamp,
+            symbol: event.symbol,
+            side: event.side as 'buy' | 'sell',
+            position: event.position as 'long' | 'short',
+            qty: event.qty,
+            entryPrice: event.entryPrice,
+            stopPrice: event.stopPrice,
+            stopLossPct: event.stopLossPct,
+            targetPrice: event.targetPrice,
+            closePrice: event.closePrice,
+            pnl: event.pnl,
+            reason: event.reason,
+        },
+    ];
+
+    writeDailySessionRecordAtomic(sessionDate, existing);
+}
+
 function addTradeEvent(event: Omit<TradeEvent, 'id'>) {
     tradeEvents.push({
         id: nextTradeEventId++,
@@ -418,11 +472,11 @@ function addTradeEvent(event: Omit<TradeEvent, 'id'>) {
         appState.currentBalance += event.pnl;
     }
 
-    persistCanonicalDailySession(event.sessionDate);
+    persistTradeEvent(event);
 }
 
 function isSessionMode(value: string): value is SessionMode {
-    return value === 'EMULATION' || value === 'PAPER' || value === 'LIVE';
+    return value === 'EMULATION' || value === 'REPLAY' || value === 'PAPER' || value === 'LIVE';
 }
 
 function normalizedSessionMode(value: unknown): SessionMode {
@@ -592,7 +646,6 @@ function wireProcessOutput(stream: 'stdout' | 'stderr', source: NodeJS.ReadableS
             if (line.startsWith('__UI_STATUS__')) {
                 const payload = line.slice('__UI_STATUS__'.length).trim();
                 appState.orbUiMessage = payload || null;
-                persistCanonicalDailySession();
                 continue;
             }
 
@@ -667,6 +720,47 @@ function startOrbiliciousProcess(params: {
     appState.isRunning = true;
     appState.startedAt = new Date().toISOString();
 
+    const replayMode = sessionMode === 'REPLAY';
+    const childSessionMode: SessionMode = replayMode ? 'EMULATION' : sessionMode;
+    const effectiveContinuous = replayMode ? false : continuous;
+
+    if (replayMode && emulationSessionDate) {
+        appState.backtestProgress = {
+            startSessionDate: emulationSessionDate,
+            endSessionDate: emulationSessionDate,
+            totalWeekdaySessions: 1,
+            processedDates: 1,
+            skippedDates: 0,
+            currentSessionDate: emulationSessionDate,
+            completed: true,
+        };
+        appState.orbUiMessage = `Replaying canonical session record for ${emulationSessionDate}.`;
+        appState.runtimeStatus = 'Running replay';
+        appState.isRunning = false;
+        appState.continuous = false;
+        appState.sessionMode = sessionMode;
+        appState.emulationSessionDate = emulationSessionDate;
+        appState.moneyInAccount = hardBasketCap ?? null;
+        appState.currentBalance = hardBasketCap ?? null;
+        appState.maxRiskPerSession = maxTotalRisk ?? null;
+        appState.stopProfitRewardPart = stopProfitRewardPart ?? null;
+        appState.mostActiveSymbolLimit = mostActiveSymbolLimit;
+        appState.lastOutcome = 'running';
+        appState.lastError = null;
+        appState.realtimeDataFeed = false;
+        appState.realtimeDataFeedError = false;
+        appState.candidateTradeType = candidateTradeType;
+        appState.breakoutConfirmationCandleMinutes = breakoutConfirmationCandleMinutes;
+        appState.breakoutQualityFiltersEnabled = breakoutQualityFiltersEnabled;
+        appState.breakoutMinVolumeExpansion = breakoutMinVolumeExpansion;
+        appState.breakoutMinRelativeStrengthPct = breakoutMinRelativeStrengthPct;
+        appState.breakoutTrendTimeframeMinutes = breakoutTrendTimeframeMinutes;
+        appState.breakoutTrendLookbackBars = breakoutTrendLookbackBars;
+        appState.pid = null;
+        addActivityLine('system', `Loaded replay from canonical daily session record for ${emulationSessionDate}.`);
+        return;
+    }
+
     // Determine initial runtime status
     if (sessionMode === 'EMULATION' && emulationSessionDate) {
         // Check if this is live emulation (today's date) with continuous mode
@@ -697,7 +791,7 @@ function startOrbiliciousProcess(params: {
         } else {
             appState.runtimeStatus = 'Running historical emulation';
         }
-    } else if (continuous && sessionMode !== 'EMULATION') {
+    } else if (effectiveContinuous && sessionMode !== 'EMULATION') {
         // For live continuous mode, check if markets are open
         const nyNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
         const dayOfWeek = nyNow.getDay();
@@ -718,7 +812,7 @@ function startOrbiliciousProcess(params: {
         appState.runtimeStatus = 'Running in real time';
     }
 
-    appState.continuous = continuous;
+    appState.continuous = effectiveContinuous;
     appState.sessionMode = sessionMode;
     appState.emulationSessionDate = emulationSessionDate;
     appState.moneyInAccount = hardBasketCap ?? null;
@@ -743,7 +837,7 @@ function startOrbiliciousProcess(params: {
         cwd: process.cwd(),
         env: {
             ...process.env,
-            SESSION_MODE: sessionMode,
+            SESSION_MODE: childSessionMode,
             SESSION_DATE: emulationSessionDate ?? '',
             HARD_BASKET_CAP: hardBasketCap ? hardBasketCap.toString() : '',
             MAX_TOTAL_RISK: maxTotalRisk ? maxTotalRisk.toString() : '',
@@ -766,7 +860,7 @@ function startOrbiliciousProcess(params: {
 
     addActivityLine(
         'system',
-        `Starting ORBilicious in ${sessionMode} mode${continuous ? ' (continuous)' : ''}${emulationSessionDate ? ` for ${emulationSessionDate}` : ''}${hardBasketCap ? ` | Basket Cap: $${hardBasketCap.toLocaleString()}` : ''}${maxTotalRisk ? ` | Max Risk: $${maxTotalRisk.toLocaleString()}` : ''}${stopProfitRewardPart ? ` | Stop/Profit: 1/${stopProfitRewardPart}` : ''} | Most Active: ${mostActiveSymbolLimit} | Candidate Trades: ${candidateTradeType} | Confirm Candle: ${breakoutConfirmationCandleMinutes}m | Quality Filters: ${breakoutQualityFiltersEnabled ? 'on' : 'off'}`
+        `Starting ORBilicious in ${sessionMode} mode${effectiveContinuous ? ' (continuous)' : ''}${emulationSessionDate ? ` for ${emulationSessionDate}` : ''}${hardBasketCap ? ` | Basket Cap: $${hardBasketCap.toLocaleString()}` : ''}${maxTotalRisk ? ` | Max Risk: $${maxTotalRisk.toLocaleString()}` : ''}${stopProfitRewardPart ? ` | Stop/Profit: 1/${stopProfitRewardPart}` : ''} | Most Active: ${mostActiveSymbolLimit} | Candidate Trades: ${candidateTradeType} | Confirm Candle: ${breakoutConfirmationCandleMinutes}m | Quality Filters: ${breakoutQualityFiltersEnabled ? 'on' : 'off'}`
     );
 
     wireProcessOutput('stdout', child.stdout);
@@ -781,19 +875,60 @@ function startOrbiliciousProcess(params: {
         appState.lastOutcome = 'failed';
         appState.lastError = error.message;
         addActivityLine('system', `Process error: ${error.message}`);
-        logger.error('Failed starting Orbilicious child process', { error, sessionMode, continuous });
+        logger.error('Failed starting Orbilicious child process', { error, sessionMode, continuous: effectiveContinuous });
     });
 
     child.on('close', (code, signal) => {
         const wasStopRequested = stopRequested;
         stopRequested = false;
 
+        const sessionDate = appState.emulationSessionDate;
         appState.isRunning = false;
         appState.pid = null;
         appState.runtimeStatus = 'Stopped';
         appState.orbUiMessage = null;
         appState.emulationSessionDate = null;
-        persistCanonicalDailySession();
+
+        // Re-inject in-memory trade events as sessionEvents into the canonical
+        // record so REPLAY and the trade monitor reflect the actual run, even
+        // though the child's generateOrbReport / writeDailySessionRecord may
+        // have already overwritten the file without sessionEvents.
+        if (sessionDate && tradeEvents.some((e) => e.sessionDate === sessionDate)) {
+            const existing = readDailySessionRecord(sessionDate);
+            if (existing) {
+                const events = tradeEvents
+                    .filter((e) => e.sessionDate === sessionDate)
+                    .map((e) => ({
+                        eventId: String(e.id),
+                        eventType: e.eventType as 'open' | 'close',
+                        sessionDate: e.sessionDate,
+                        timestamp: e.timestamp,
+                        symbol: e.symbol,
+                        side: e.side as 'buy' | 'sell',
+                        position: e.position as 'long' | 'short',
+                        qty: e.qty,
+                        entryPrice: e.entryPrice,
+                        stopPrice: e.stopPrice,
+                        stopLossPct: e.stopLossPct,
+                        targetPrice: e.targetPrice,
+                        closePrice: e.closePrice,
+                        pnl: e.pnl,
+                        reason: e.reason,
+                    }))
+                    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+                existing.sessionEvents = events;
+
+                // Reconcile totals to match runtime PnL from sessionEvents
+                const closePnl = events
+                    .filter((e) => e.eventType === 'close')
+                    .reduce((sum, e) => sum + (typeof e.pnl === 'number' ? e.pnl : 0), 0);
+                existing.totals = existing.totals ?? {} as NonNullable<DailySessionRecord['totals']>;
+                existing.totals.totalProfitLossToDate = Number(closePnl.toFixed(2));
+
+                writeDailySessionRecordAtomic(sessionDate, existing);
+            }
+        }
 
         if (wasStopRequested || signal === 'SIGTERM') {
             appState.lastOutcome = 'completed';
@@ -814,6 +949,19 @@ function startOrbiliciousProcess(params: {
 }
 
 function stopOrbiliciousProcess(): boolean {
+    if (!appProcess && appState.isRunning && appState.sessionMode === 'REPLAY') {
+        appState.isRunning = false;
+        appState.pid = null;
+        appState.runtimeStatus = 'Stopped';
+        appState.orbUiMessage = null;
+        appState.emulationSessionDate = null;
+        appState.backtestProgress = null;
+        appState.lastOutcome = 'completed';
+        appState.lastError = null;
+        addActivityLine('system', 'Replay stopped.');
+        return true;
+    }
+
     if (!appProcess || !appState.isRunning) {
         return false;
     }
@@ -980,7 +1128,11 @@ function persistenceSessionDate(preferredSessionDate?: string): string | null {
         return preferredSessionDate;
     }
 
-    if (appState.sessionMode === 'EMULATION' && appState.emulationSessionDate && isValidSessionDate(appState.emulationSessionDate)) {
+    if (
+        (appState.sessionMode === 'EMULATION' || appState.sessionMode === 'REPLAY')
+        && appState.emulationSessionDate
+        && isValidSessionDate(appState.emulationSessionDate)
+    ) {
         return appState.emulationSessionDate;
     }
 
@@ -1032,6 +1184,7 @@ function buildLiveSessionRecordFromRuntime(
             qty: existingEvent.qty,
             entryPrice: existingEvent.entryPrice,
             stopPrice: existingEvent.stopPrice,
+            stopLossPct: existingEvent.stopLossPct,
             targetPrice: existingEvent.targetPrice,
             closePrice: existingEvent.closePrice,
             pnl: existingEvent.pnl,
@@ -1059,6 +1212,7 @@ function buildLiveSessionRecordFromRuntime(
             qty: event.qty,
             entryPrice: event.entryPrice,
             stopPrice: event.stopPrice,
+            stopLossPct: event.stopLossPct,
             targetPrice: event.targetPrice,
             closePrice: event.closePrice,
             pnl: event.pnl,
@@ -1293,144 +1447,6 @@ function persistCanonicalDailySession(preferredSessionDate?: string): boolean {
     return true;
 }
 
-type DailySymbolSnapshot = {
-    chartSvg?: string;
-    openingPrice?: number;
-    openingRangeHigh?: number;
-    openingRangeLow?: number;
-    breakoutPrice?: number;
-    breakoutTimestamp?: string;
-    confirmationRetestPrice?: number;
-    confirmationRetestTimestamp?: string;
-    atr1m?: number;
-};
-
-function calculateAtr1mFromBars(bars: Bar[], period = 14): number | null {
-    if (bars.length < 2) {
-        return null;
-    }
-
-    const trueRanges: number[] = [];
-    for (let index = 1; index < bars.length; index += 1) {
-        const current = bars[index];
-        const previous = bars[index - 1];
-        const rangeHighLow = current.high - current.low;
-        const rangeHighPrevClose = Math.abs(current.high - previous.close);
-        const rangeLowPrevClose = Math.abs(current.low - previous.close);
-        trueRanges.push(Math.max(rangeHighLow, rangeHighPrevClose, rangeLowPrevClose));
-    }
-
-    const atrWindow = trueRanges.slice(-period);
-    if (!atrWindow.length) {
-        return null;
-    }
-
-    const atr = atrWindow.reduce((sum, value) => sum + value, 0) / atrWindow.length;
-    return Number.isFinite(atr) && atr > 0 ? atr : null;
-}
-
-async function buildDailySymbolCharts(record: DailySessionRecord, symbols: string[]): Promise<Map<string, DailySymbolSnapshot>> {
-    const snapshotsBySymbol = new Map<string, DailySymbolSnapshot>();
-    if (!symbols.length) {
-        return snapshotsBySymbol;
-    }
-
-    const rowBySymbol = new Map((record.evaluationRows ?? []).map((row) => [row.symbol, row]));
-    const tradeBySymbol = new Map((record.emulatedTrades ?? []).map((row) => [row.symbol, row]));
-    const candidateBySymbol = new Map((record.breakoutCandidates ?? []).map((row) => [row.symbol, row]));
-    const activityBySymbol = new Map(
-        (Array.isArray(record.candidateTradeActivity) ? record.candidateTradeActivity : [])
-            .map((row) => [row.symbol, row]),
-    );
-    const outcomeBySymbol = new Map((record.finalOutcomes ?? []).map((row) => [row.symbol, row]));
-    const client = new AlpacaClient();
-
-    await Promise.all(symbols.map(async (symbol) => {
-        const row = rowBySymbol.get(symbol);
-        const trade = tradeBySymbol.get(symbol);
-        const candidate = candidateBySymbol.get(symbol);
-        const activity = activityBySymbol.get(symbol);
-        const outcome = outcomeBySymbol.get(symbol);
-        const determinationTimestamp = row?.confirmationRetestTimestamp
-            ?? row?.breakoutTimestamp
-            ?? activity?.entryTimestamp
-            ?? null;
-        const entryPrice = activity?.entryPrice ?? trade?.price ?? candidate?.price;
-        const stopPrice = activity?.stopPrice ?? trade?.stopPrice ?? candidate?.stopPrice;
-        const targetPrice = activity?.targetPrice ?? trade?.takeProfitPrice ?? candidate?.takeProfitPrice;
-        const entryTimestamp = activity?.entryTimestamp ?? determinationTimestamp ?? undefined;
-
-        const snapshot: DailySymbolSnapshot = {
-            breakoutPrice: entryPrice,
-            breakoutTimestamp: entryTimestamp ?? undefined,
-            confirmationRetestPrice: entryPrice,
-            confirmationRetestTimestamp: entryTimestamp ?? undefined,
-        };
-
-        if (
-            typeof determinationTimestamp !== 'string'
-            || !determinationTimestamp
-            || typeof entryPrice !== 'number'
-            || !Number.isFinite(entryPrice)
-            || typeof stopPrice !== 'number'
-            || !Number.isFinite(stopPrice)
-            || typeof targetPrice !== 'number'
-            || !Number.isFinite(targetPrice)
-        ) {
-            return;
-        }
-
-        try {
-            const bars = await client.getIntradayBars(symbol, record.sessionDate);
-            const sessionBars = barsForSessionDate(bars, record.sessionDate);
-            if (!sessionBars.length) {
-                snapshotsBySymbol.set(symbol, snapshot);
-                return;
-            }
-
-            const openingRangeBars = Math.max(1, strategyConfig.openingRangeMinutes);
-            const openingBars = sessionBars.slice(0, Math.min(openingRangeBars, sessionBars.length));
-            if (openingBars.length) {
-                snapshot.openingPrice = openingBars[0].open;
-                snapshot.openingRangeHigh = Math.max(...openingBars.map((bar) => bar.high));
-                snapshot.openingRangeLow = Math.min(...openingBars.map((bar) => bar.low));
-            }
-
-            const atr1m = calculateAtr1mFromBars(sessionBars, 14);
-            if (atr1m != null) {
-                snapshot.atr1m = atr1m;
-            }
-
-            const svg = renderCandidateChartSvg({
-                bars: sessionBars,
-                sessionDate: record.sessionDate,
-                determinationTimestamp,
-                entryTimestamp,
-                entryPrice,
-                stopPrice,
-                targetPrice,
-                closePrice: typeof activity?.closePrice === 'number'
-                    ? activity.closePrice
-                    : (typeof outcome?.exitPrice === 'number' ? outcome.exitPrice : null),
-                closeTimestamp: activity?.closeTimestamp ?? outcome?.exitTimestamp ?? null,
-                openingRangeMinutes: strategyConfig.openingRangeMinutes,
-                maxBarsAfterDetermination: 30,
-            });
-            snapshot.chartSvg = svg;
-            snapshotsBySymbol.set(symbol, snapshot);
-        } catch (error) {
-            logger.warn('Failed building daily drilldown chart', {
-                symbol,
-                sessionDate: record.sessionDate,
-                error: error instanceof Error ? error.message : String(error),
-            });
-            snapshotsBySymbol.set(symbol, snapshot);
-        }
-    }));
-
-    return snapshotsBySymbol;
-}
-
 async function renderDailySessionView(
     record: DailySessionRecord,
     options?: { sourceDiagnostic?: string },
@@ -1470,26 +1486,42 @@ async function renderDailySessionView(
                 price: row.breakoutPrice ?? undefined,
             }));
 
-    const symbolSnapshots = await buildDailySymbolCharts(
+    const symbolSnapshots = await buildDailySymbolCharts({
         record,
-        drilldownCandidates.map((candidate) => candidate.symbol),
-    );
+        symbols: drilldownCandidates.map((candidate) => candidate.symbol),
+        openingRangeMinutes: strategyConfig.openingRangeMinutes,
+        barsForSessionDate,
+        renderCandidateChartSvg,
+        readDailySessionRecord,
+        writeDailySessionRecordAtomic,
+        logWarn: (message, payload) => logger.warn(message, payload),
+    });
 
     const drilldownSummaryRows = drilldownCandidates.length
         ? drilldownCandidates.map((candidate) => {
             const symbol = candidate.symbol;
             const evalRow = rowBySymbol.get(symbol);
             const outcome = outcomeBySymbol.get(symbol);
+            const trade = emulatedBySymbol.get(symbol);
+            const activity = activityBySymbol.get(symbol);
             const quality = evalRow?.qualityDetail;
             const qualityLabel = quality ? (quality.passed ? 'PASS' : 'FAIL') : 'n/a';
             const statusLabel = (outcome?.status ?? 'n/a').toUpperCase();
+            const resolvedPnl = resolveClosedTradePnl({
+                position: trade?.side === 'sell' ? 'short' : 'long',
+                entryPrice: activity?.entryPrice ?? trade?.price ?? candidate.price ?? null,
+                closePrice: outcome?.exitPrice ?? activity?.closePrice ?? null,
+                qty: typeof trade?.qty === 'number' ? trade.qty : (typeof activity?.qty === 'number' ? activity.qty : null),
+                fallbackQty: 1,
+                existingPnl: outcome?.pnl ?? activity?.pnl ?? null,
+            });
             return `
             <tr>
                 <td><a href="#drilldown-${escapeHtml(symbol)}">${escapeHtml(symbol)}</a></td>
                 <td>${escapeHtml((candidate.side ?? 'n/a').toUpperCase())}</td>
                 <td>${qualityLabel}</td>
                 <td>${statusLabel}</td>
-                <td>${fmt(outcome?.pnl)}</td>
+                <td>${fmt(resolvedPnl)}</td>
             </tr>`;
         }).join('')
         : '<tr><td colspan="5" class="muted">No drilldown candidates were found for this session.</td></tr>';
@@ -1536,6 +1568,14 @@ async function renderDailySessionView(
                 ?? evalRow?.breakoutTimestamp
                 ?? 'n/a';
             const exitTimestamp = outcome?.exitTimestamp ?? activity?.closeTimestamp ?? 'n/a';
+            const pnlValue = resolveClosedTradePnl({
+                position: trade?.side === 'sell' ? 'short' : 'long',
+                entryPrice: activity?.entryPrice ?? trade?.price ?? candidate.price ?? null,
+                closePrice: outcome?.exitPrice ?? activity?.closePrice ?? null,
+                qty: typeof trade?.qty === 'number' ? trade.qty : (typeof activity?.qty === 'number' ? activity.qty : null),
+                fallbackQty: 1,
+                existingPnl: outcome?.pnl ?? activity?.pnl ?? null,
+            });
             return `
             <details class="card-detail" id="drilldown-${escapeHtml(symbol)}">
                 <summary>
@@ -1546,7 +1586,7 @@ async function renderDailySessionView(
                     <span>${fmt(trade?.qty, 4)}</span>
                     <span>${escapeHtml(exitTimestamp)}</span>
                     <span>${fmt(outcome?.exitPrice)}</span>
-                    <span>${fmt(outcome?.pnl)}</span>
+                    <span>${fmt(pnlValue)}</span>
                 </summary>
                 <div class="detail-grid">
                     <div class="detail-panel">
@@ -1574,7 +1614,7 @@ async function renderDailySessionView(
                                 <tr><th>Exit</th><td>${fmt(outcome?.exitPrice)}</td></tr>
                                 <tr><th>Exit Time</th><td>${escapeHtml(outcome?.exitTimestamp ?? 'n/a')}</td></tr>
                                 <tr><th>Status</th><td>${escapeHtml((outcome?.status ?? 'n/a').toUpperCase())}</td></tr>
-                                <tr><th>P/L</th><td>${fmt(outcome?.pnl)}</td></tr>
+                                <tr><th>P/L</th><td>${fmt(pnlValue)}</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -1754,6 +1794,63 @@ async function renderDailySessionView(
 
 async function loadDailySessionRecord(sessionDate: string): Promise<DailySessionRecord | null> {
     return readDailySessionRecord(sessionDate);
+}
+
+function loadReplayTradeMonitorEvents(sessionDate: string): TradeEvent[] | null {
+    const record = readDailySessionRecord(sessionDate);
+    return loadReplayTradeMonitorEventsFromRecord(record, strategyConfig.sessionTimezone);
+}
+
+function tradeMonitorSessionDates(): string[] {
+    const dates = new Set<string>();
+
+    if (
+        appState.backtestProgress
+        && isValidSessionDate(appState.backtestProgress.startSessionDate)
+        && isValidSessionDate(appState.backtestProgress.endSessionDate)
+    ) {
+        const start = parseAnchorDateInput(appState.backtestProgress.startSessionDate).dateUtc;
+        const end = parseAnchorDateInput(appState.backtestProgress.endSessionDate).dateUtc;
+
+        for (const current = new Date(start); current.getTime() <= end.getTime(); current.setUTCDate(current.getUTCDate() + 1)) {
+            const dayOfWeek = current.getUTCDay();
+            if (dayOfWeek === 0 || dayOfWeek === 6) {
+                continue;
+            }
+
+            dates.add(isoDateUTC(current));
+        }
+    }
+
+    const preferred = persistenceSessionDate();
+    if (preferred) {
+        dates.add(preferred);
+    }
+
+    if (!dates.size && fs.existsSync(dailySessionDir)) {
+        const latest = fs.readdirSync(dailySessionDir)
+            .filter((entry) => /^\d{4}-\d{2}-\d{2}\.json$/.test(entry))
+            .map((entry) => entry.slice(0, -5))
+            .sort((left, right) => left.localeCompare(right))
+            .pop();
+
+        if (latest) {
+            dates.add(latest);
+        }
+    }
+
+    return Array.from(dates.values()).sort((left, right) => left.localeCompare(right));
+}
+
+function loadCanonicalTradeMonitorEvents(): TradeEvent[] {
+    const records = tradeMonitorSessionDates()
+        .map((sessionDate) => readDailySessionRecord(sessionDate))
+        .filter((record): record is DailySessionRecord => record !== null);
+
+    return toCanonicalTradeMonitorEvents({
+        records,
+        sessionTimezone: strategyConfig.sessionTimezone,
+    });
 }
 
 function nyDateString(date = new Date()): string {
@@ -2244,7 +2341,16 @@ async function buildWeeklyTradingActivityReport(anchorDate: Date): Promise<Weekl
                 })) ?? [];
             const symbols = candidates.map((c) => c.symbol);
 
-            const chartSnapshots = await buildDailySymbolCharts(daily, symbols);
+            const chartSnapshots = await buildDailySymbolCharts({
+                record: daily,
+                symbols,
+                openingRangeMinutes: strategyConfig.openingRangeMinutes,
+                barsForSessionDate,
+                renderCandidateChartSvg,
+                readDailySessionRecord,
+                writeDailySessionRecordAtomic,
+                logWarn: (message, payload) => logger.warn(message, payload),
+            });
 
             dailyRowsData.push({
                 sessionDate,
@@ -3101,6 +3207,23 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
         const sinceParam = url.searchParams.get('since');
         const since = sinceParam ? Number(sinceParam) : 0;
         const lowerBound = Number.isFinite(since) ? since : 0;
+
+        if (appState.sessionMode === 'REPLAY' && appState.emulationSessionDate) {
+            const replayEvents = loadReplayTradeMonitorEvents(appState.emulationSessionDate);
+            if (!replayEvents) {
+                sendJson(res, 409, {
+                    ok: false,
+                    message: `Replay data for ${appState.emulationSessionDate} is unavailable because sessionEvents are missing from the canonical daily JSON.`,
+                });
+                return;
+            }
+
+            const events = replayEvents.filter((event) => event.id > lowerBound);
+            const nextCursor = replayEvents.length ? replayEvents[replayEvents.length - 1].id : lowerBound;
+            sendJson(res, 200, { events, nextCursor });
+            return;
+        }
+
         const events = tradeEvents.filter((event) => event.id > lowerBound);
         const nextCursor = tradeEvents.length ? tradeEvents[tradeEvents.length - 1].id : lowerBound;
         sendJson(res, 200, { events, nextCursor });
@@ -3125,6 +3248,22 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
         const entryTimestamp = entryTimestampRaw.trim() || determinationTimestamp;
         const closeTimestamp = closeTimestampRaw.trim() || null;
         const hasValidSessionDate = /^\d{4}-\d{2}-\d{2}$/.test(sessionDate);
+
+        if (appState.sessionMode === 'REPLAY' && symbol.length > 0 && hasValidSessionDate) {
+            const record = readDailySessionRecord(sessionDate);
+            const persistedSnapshot = record?.symbolSnapshots?.[symbol];
+            if (persistedSnapshot?.chartSvg) {
+                sendJson(res, 200, {
+                    ok: true,
+                    symbol,
+                    sessionDate,
+                    svg: persistedSnapshot.chartSvg,
+                    source: 'daily-json',
+                });
+                return;
+            }
+        }
+
         const determinationMs = new Date(determinationTimestamp).getTime();
         const entryMs = new Date(entryTimestamp).getTime();
         const closeMs = closeTimestamp === null ? Number.NaN : new Date(closeTimestamp).getTime();
@@ -3296,7 +3435,7 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
         const continuous = payload.continuous === true;
         const realTimeData = payload.realTimeData === true;
         const sessionMode = normalizedSessionMode(payload.sessionMode);
-        const emulationSessionDate = sessionMode === 'EMULATION'
+        const emulationSessionDate = (sessionMode === 'EMULATION' || sessionMode === 'REPLAY')
             ? (typeof payload.emulationSessionDate === 'string' && payload.emulationSessionDate.trim() !== ''
                 ? payload.emulationSessionDate.trim()
                 : null)
@@ -3351,12 +3490,41 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
             20,
         );
 
-        if (sessionMode === 'EMULATION' && emulationSessionDate && !isValidSessionDate(emulationSessionDate)) {
+        if ((sessionMode === 'EMULATION' || sessionMode === 'REPLAY') && emulationSessionDate && !isValidSessionDate(emulationSessionDate)) {
             sendJson(res, 400, {
                 ok: false,
                 message: 'Invalid emulation date. Use YYYY-MM-DD and do not select a future date.',
             });
             return;
+        }
+
+        if (sessionMode === 'REPLAY' && !emulationSessionDate) {
+            sendJson(res, 400, {
+                ok: false,
+                message: 'Replay mode requires a session date.',
+            });
+            return;
+        }
+
+        if (sessionMode === 'REPLAY' && emulationSessionDate && !readDailySessionRecord(emulationSessionDate)) {
+            sendJson(res, 404, {
+                ok: false,
+                message: `No canonical daily session record was found for ${emulationSessionDate}.`,
+            });
+            return;
+        }
+
+        if (sessionMode === 'REPLAY' && emulationSessionDate) {
+            const replayRecord = readDailySessionRecord(emulationSessionDate);
+            const hasSessionEvents = Array.isArray(replayRecord?.sessionEvents) && replayRecord.sessionEvents.length > 0;
+            const hasEmulatedTrades = Array.isArray(replayRecord?.emulatedTrades) && replayRecord.emulatedTrades.length > 0;
+            if (!hasSessionEvents && !hasEmulatedTrades) {
+                sendJson(res, 409, {
+                    ok: false,
+                    message: `Replay for ${emulationSessionDate} requires canonical sessionEvents or emulatedTrades in data/daily/${emulationSessionDate}.json.`,
+                });
+                return;
+            }
         }
 
         startOrbiliciousProcess({
