@@ -1,3 +1,6 @@
+// Core orbilicious session logic: cycle execution, breakout-candidate
+// filtering, trade simulation, dry-run position tracking, and exit
+// evaluation.
 import { env, strategyConfig } from './config';
 import { AlpacaClient } from './alpaca';
 import { logger } from './logger';
@@ -63,6 +66,7 @@ type UiStatusEvent = {
 function emitTradeMonitorEvent(event: TradeMonitorEvent) {
     try {
         const payload = JSON.stringify(event);
+        logger.debug('Trade monitor event', { event, eventType: event.eventType, symbol: event.symbol });
         process.stdout.write(`__TRADE_MONITOR__${payload}\n`);
     } catch {
         // Keep failures silent so monitoring output never blocks strategy execution.
@@ -72,6 +76,7 @@ function emitTradeMonitorEvent(event: TradeMonitorEvent) {
 function emitBacktestProgressEvent(event: BacktestProgressEvent) {
     try {
         const payload = JSON.stringify(event);
+        logger.debug('Backtest progress event', { event });
         process.stdout.write(`__BACKTEST_PROGRESS__${payload}\n`);
     } catch {
         // Keep failures silent so monitoring output never blocks strategy execution.
@@ -80,6 +85,7 @@ function emitBacktestProgressEvent(event: BacktestProgressEvent) {
 
 function emitUiStatusEvent(event: UiStatusEvent) {
     try {
+        logger.debug('UI status event', { message: event.message });
         process.stdout.write(`__UI_STATUS__${event.message}\n`);
     } catch {
         // Keep failures silent so monitoring output never blocks strategy execution.

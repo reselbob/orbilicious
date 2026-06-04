@@ -1,3 +1,6 @@
+// Daily symbol snapshot charts: generates SVG sparkline charts
+// per symbol for a session date, used in the daily-session detail
+// view.
 import { AlpacaClient } from '../alpaca';
 import type { Bar } from '../types';
 

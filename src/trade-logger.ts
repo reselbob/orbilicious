@@ -1,3 +1,5 @@
+// Trade open/close logging: appends structured trade records
+// to `logs/trades/` for post-session review.
 import fs from 'node:fs';
 import path from 'node:path';
 

@@ -1,3 +1,5 @@
+// Loads and validates all environment variables into a typed
+// `env` export and a `strategyConfig` export.
 import 'dotenv/config';
 import { StrategyConfig } from './types';
 import { logger } from './logger';

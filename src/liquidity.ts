@@ -1,3 +1,5 @@
+// Liquidity-zone detection: identifies clustered support/resistance
+// levels from intraday bar data for stop-placement reference.
 import { strategyConfig } from './config';
 import { toNyParts } from './time';
 import { Bar } from './types';

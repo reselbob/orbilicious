@@ -1,3 +1,5 @@
+// Alpaca Markets API client: account, orders, positions, bars,
+// most-active symbols, snapshots, and bracket-order submission.
 import { env, strategyConfig } from './config';
 import { logger } from './logger';
 import { toNyParts } from './time';

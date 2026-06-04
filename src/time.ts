@@ -1,3 +1,5 @@
+// Date/time helpers: converts timestamps to New-York date components
+// and formats for time-zone–aware comparisons.
 export function toNyParts(dateInput: string | Date, timeZone = 'America/New_York') {
     const date = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
     const parts = new Intl.DateTimeFormat('en-CA', {

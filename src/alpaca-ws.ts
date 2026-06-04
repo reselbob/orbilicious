@@ -1,3 +1,5 @@
+// Alpaca real-time WebSocket client: connects, authenticates,
+// subscribes to bar streams, and dispatches parsed messages.
 import { env } from './config';
 import { logger } from './logger';
 import { Bar } from './types';

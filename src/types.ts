@@ -1,3 +1,5 @@
+// Core TypeScript types shared across the orbilicious codebase:
+// signal types, bar data, positions, and configuration shape.
 export type Side = 'long' | 'short';
 export type SignalType = 'BUY' | 'SELL' | 'EXIT' | 'NONE';
 

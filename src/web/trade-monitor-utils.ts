@@ -1,3 +1,6 @@
+// Trade-monitor utilities: parses session events, builds REPLAY
+// trade sequences, resolves closed-trade P&L, and compares
+// trade-monitor events.
 import fs from 'node:fs';
 import path from 'node:path';
 import { toNyParts } from '../time';

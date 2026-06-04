@@ -1,3 +1,6 @@
+// ORB service layer: manages the continuous cycle loop, session
+// lifecycle, realtime-feed coordination, and historical backtest
+// dispatch.
 import { AlpacaClient } from '../alpaca';
 import { runCycle } from '../app';
 import type {

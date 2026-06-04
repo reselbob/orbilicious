@@ -1,3 +1,5 @@
+// Configures and exports a Winston logger with daily-rotate-file
+// transports for orbilicious logs.
 import winston from 'winston';
 import DailyRotateFile from 'winston-daily-rotate-file';
 import path from 'node:path';

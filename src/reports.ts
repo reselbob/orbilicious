@@ -1,3 +1,6 @@
+// Report generation: computes per-session ORB report data,
+// emulates exits, generates HTML/PDF reports, and writes daily
+// session JSON records.
 import fs from "node:fs";
 import path from "node:path";
 import puppeteer from "puppeteer";

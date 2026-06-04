@@ -1,3 +1,6 @@
+// Web UI server: HTTP server serving the orbilicious dashboard,
+// start/stop/status endpoints, daily-session views, and
+// weekly/monthly report rendering.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';

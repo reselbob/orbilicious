@@ -10,7 +10,7 @@
   - [Trade Monitor](#trade-monitor)
   - [Daily Summary](#daily-summary)
   - [Reports](#reports)
-  - [Reports Weekly Summary](#reports-daily-summary)
+  - [Reports Weekly Summary](#reports-weekly-summary)
   - [Reports Daily Detail](#reports-daily-detail)
 - [Developer Notes](#developer-notes)
   - [Strategy Rules](#strategy-rules)
@@ -166,7 +166,7 @@ Use these controls together to reduce false breakouts while keeping enough oppor
 - **Min Relative Strength (%)** requires the breakout close to clear the opening-range boundary by a minimum percentage.
 - **Trend Timeframe (minutes)** and **Trend Lookback Bars** define higher-timeframe trend alignment.
 
-Retest freshness is also enforced by environment setting: `BREAKOUT_RETEST_MAX_AGE_MINUTES` (default `1`). In the current NY session, entries are skipped when the confirmation retest is older than this threshold. Set it to `0` to disable staleness filtering.
+Retest freshness is also enforced by environment setting: `BREAKOUT_RETEST_MAX_AGE_MINUTES` (default `1`). In the current NY session, entries are skipped when the confirmation retest is older than this threshold. Set it to `0` to disable staleness filtering. In EMULATION mode the staleness check is bypassed entirely so all session breakouts are evaluated.
 
 `BREAKOUT_QUALITY_FILTERS_ENABLED` is the single source of truth for both the Web UI's initial checkbox state and the runtime strategy behavior.
 
@@ -256,7 +256,7 @@ Expand the pane to scroll through historical days.
 - **Refresh List**: Fetch latest reports from the `reports/` directory.
 - **Open Report**: Display the selected report in an embedded viewer.
 
-#### Reports Daily Summary
+#### Reports Weekly Summary
 
 ![Reports Weekly Summary](docs/reports-detail.png)
 
@@ -304,8 +304,8 @@ Below the chart, each detail row lists:
     - _Tests: `basket.test.ts` `it('uses the widest of opening-range, ATR, and minimum-stop distances when sizing')`, `rules.test.ts` `it('rules 18-19 and 21-24: builds only confirmed breakout candidates with wick anchors, ATR, and positive scores')`_
 - Profit target: 4R, where R is the entry-to-stop distance by default (`1:4`), or the ratio declared in the environment variable `STOP_LOSS_PROFIT_RATIO`. **If the price reaches the profit target before a retest confirmation occurs, the trade is closed immediately and profit is taken, regardless of retest status.**
   - _Tests: `basket.test.ts` `it('builds weighted-risk trades and sets 4R profit targets')` / `it('applies configured STOP_LOSS_PROFIT_RATIO (1:2) so take-profit distance equals 2x stop distance')`, `rules.test.ts` `it('rules 25-30: ranks candidates, assigns weighted risk, derives stops and 4R targets, and normalizes to constraints')`_
-- Risk budget: total planned stop-loss exposure across the full basket defaults to $1000. Risk dollars are assigned proportionally by score.
-  - _Test: `basket.test.ts` `it('selects and sizes all QUANTITY_TO_RETRIEVE candidate trades with weighted risk so total stop loss never exceeds MAX_TOTAL_RISK')`_
+- Risk budget: total planned stop-loss exposure across the basket defaults to $1000. Risk dollars are assigned proportionally by score. In EMULATION mode, the remaining risk budget for each cycle is computed as `maxTotalRisk - usedRisk` where `usedRisk` is the sum of stop-loss risk from all currently open simulated positions. If remaining risk is zero or negative, the cycle is skipped. This makes `MAX_TOTAL_RISK` a true daily cap rather than a per-cycle cap.
+  - _Tests: `basket.test.ts` `it('selects and sizes all QUANTITY_TO_RETRIEVE candidate trades with weighted risk so total stop loss never exceeds MAX_TOTAL_RISK')`_ and `rules.test.ts` `it('rule 30b: cumulative risk across cycles stays within maxTotalRisk')`_
 - Basket normalization: trade sizes are scaled so the full basket fits both:
   - configured total stop-loss risk cap
   - Alpaca account buying power
@@ -403,7 +403,7 @@ The list below follows the order the app actually applies rules at runtime.
 
 - _Test: `rules.test.ts` — `it('rules 18-19 and 21-24: builds only confirmed breakout candidates with wick anchors, ATR, and positive scores')`_
 
-22. For the current New York session, a confirmation retest is only valid for a limited time window. If the retest is older than `BREAKOUT_RETEST_MAX_AGE_MINUTES`, the candidate is skipped as stale. Set `BREAKOUT_RETEST_MAX_AGE_MINUTES=0` to disable this staleness guard.
+22. For the current New York session, a confirmation retest is only valid for a limited time window. If the retest is older than `BREAKOUT_RETEST_MAX_AGE_MINUTES`, the candidate is skipped as stale. Set `BREAKOUT_RETEST_MAX_AGE_MINUTES=0` to disable this staleness guard. In EMULATION mode the staleness check is bypassed entirely so all session breakouts are evaluated.
 
 - _Test: `rules.test.ts` — `it('rule 21a: rejects stale retest entries for the current NY session')`_
 
@@ -443,35 +443,43 @@ The list below follows the order the app actually applies rules at runtime.
 
 - _Test: `basket.test.ts` — `it('normalizes the basket so risk and notional fit constraints simultaneously')`_
 
-32. Before execution, duplicate-entry protection is applied again at the trade basket stage. Any already-executed symbol for the session date is skipped.
+32. In EMULATION mode, the remaining risk budget for each cycle is computed as `maxTotalRisk - usedRisk`, where `usedRisk` is the sum of stop-loss risk from all currently open simulated positions. If the remaining risk is zero or negative, the cycle is skipped and no new trades are opened. This makes `MAX_TOTAL_RISK` a true daily cap rather than a per-cycle cap.
+
+- _Test: `rules.test.ts` — `it('rule 30b: cumulative risk across cycles stays within maxTotalRisk')`_
+
+33. Before execution, duplicate-entry protection is applied again at the trade basket stage. Any already-executed symbol for the session date is skipped.
 
 - _Test: `rules.test.ts` — `it('rules 31-32: execution prevents duplicates, uses dry-run monitor events in EMULATION, and submits bracket orders outside dry-run')`_
 
-33. In `EMULATION`, entries are never submitted to Alpaca. The app only logs dry-run entries and emits trade-monitor events. In `PAPER` and `LIVE`, the app submits Alpaca bracket orders with the computed entry side, quantity, stop, and take-profit prices.
+34. In `EMULATION`, entries are never submitted to Alpaca. The app only logs dry-run entries and emits trade-monitor events. In `PAPER` and `LIVE`, the app submits Alpaca bracket orders with the computed entry side, quantity, stop, and take-profit prices.
 
 - _Test: `rules.test.ts` — `it('rules 31-32: execution prevents duplicates, uses dry-run monitor events in EMULATION, and submits bracket orders outside dry-run')`_
 
-34. When historical reports contain closed trades, the UI reports `Closing {SYMBOL} for a {PROFIT_LOSS_STATUS} of {PROFIT_LOSS_AMOUNT}.` before emitting the close event into the trade monitor.
+35. When historical reports contain closed trades, the UI reports `Closing {SYMBOL} for a {PROFIT_LOSS_STATUS} of {PROFIT_LOSS_AMOUNT}.` before emitting the close event into the trade monitor.
 
 - _Test: `rules.test.ts` — `it('rules 3-6 and 33: historical emulation filters weekdays, emits progress UI messages, skips failures, and reports closes')`_
 
-35. After `FORCE_EXIT_TIME`, if the end-of-day report for the session has not yet been generated, the app generates it once. In one-shot current-day mode the process then exits. In continuous mode it stays alive and waits for the next session.
+36. After `FORCE_EXIT_TIME`, if the end-of-day report for the session has not yet been generated, the app generates it once. In one-shot current-day mode the process then exits. In continuous mode it stays alive and waits for the next session.
 
 - _Test: `rules.test.ts` — `it('rules 8 and 34: current-day scheduling waits before open and exits after generating one end-of-day report')`_
 
-36. Intraday bar data for breakout candidate evaluation is always fetched via HTTP REST calls. The `getIntradayBars` method makes a direct request to Alpaca's `/v2/stocks/{symbol}/bars` endpoint with `timeframe=1Min` and the full session window (`09:30-16:00 ET`). No WebSocket connection is attempted for the initial bar fetch, eliminating the latency and reliability issues previously caused by WebSocket connection timeouts and authentication handshakes.
+37. When the child process exits, the close handler reads the existing daily session record and injects all in-memory trade events as `sessionEvents`. It then recomputes `totals.totalProfitLossToDate` from the sum of close event PnLs in `sessionEvents`, ensuring the daily summary and the stored total match the runtime simulation's actual PnL rather than the report's independent recomputation.
+
+- _Test: `rules.test.ts` — `it('rule 30c: close handler reconciles totalProfitLossToDate from sessionEvents close PnLs')`_
+
+38. Intraday bar data for breakout candidate evaluation is always fetched via HTTP REST calls. The `getIntradayBars` method makes a direct request to Alpaca's `/v2/stocks/{symbol}/bars` endpoint with `timeframe=1Min` and the full session window (`09:30-16:00 ET`). No WebSocket connection is attempted for the initial bar fetch, eliminating the latency and reliability issues previously caused by WebSocket connection timeouts and authentication handshakes.
 
 - _Test: `connections.test.ts` — `it('getIntradayBars fetches bars via HTTP directly')`_
 
-37. For batch evaluation of multiple symbols during breakout candidate scanning, bars are fetched concurrently using `Promise.all` over individual HTTP requests per symbol via `getIntradayBarsBatch`. This avoids sequential overhead while keeping the implementation simpler and more reliable than WebSocket batching.
+39. For batch evaluation of multiple symbols during breakout candidate scanning, bars are fetched concurrently using `Promise.all` over individual HTTP requests per symbol via `getIntradayBarsBatch`. This avoids sequential overhead while keeping the implementation simpler and more reliable than WebSocket batching.
 
 - _Tests: `connections.test.ts` — `it('fetches bars for all symbols via concurrent HTTP calls')` / `it('returns map with empty arrays for symbols with no bars')`_
 
-38. The WebSocket client infrastructure (`AlpacaWebSocketClient`, header-based auth, v2 streaming format parsing, array-wrapped response handling, unsubscribe-after-batch, rate-limit handling, and fast rejection on close/error) is fully implemented and unit-tested, but reserved for future real-time streaming between polling cycles. It is not used during the initial bar fetch.
+40. The WebSocket client infrastructure (`AlpacaWebSocketClient`, header-based auth, v2 streaming format parsing, array-wrapped response handling, unsubscribe-after-batch, rate-limit handling, and fast rejection on close/error) is fully implemented and unit-tested, but reserved for future real-time streaming between polling cycles. It is not used during the initial bar fetch.
 
 - _Test: `connections.test.ts` — all `handleMessage (v2 streaming format)` tests_
 
-39. Same-minute target/stop hit detection: When scanning post-entry bars for stop-loss and take-profit hits, the filter includes the bar whose 1-minute window overlaps the entry time. A target or stop hit occurring on the same bar as the entry (e.g., entry at `14:30:15`, target hit at `14:30:30` on the `14:30:00` bar) is detected, rather than being excluded because the bar timestamp (start of minute) precedes the entry time.
+41. Same-minute target/stop hit detection: When scanning post-entry bars for stop-loss and take-profit hits, the filter includes the bar whose 1-minute window overlaps the entry time. A target or stop hit occurring on the same bar as the entry (e.g., entry at `14:30:15`, target hit at `14:30:30` on the `14:30:00` bar) is detected, rather than being excluded because the bar timestamp (start of minute) precedes the entry time.
 
 - _Test: `strategy.test.ts` — `it('closes position when target is hit on the same-minute bar as entry')`_
 
@@ -521,6 +529,8 @@ Example trade open entry:
 
 Console output is also enabled.
 
+In addition to the structured trade log, every `__TRADE_MONITOR__`, `__BACKTEST_PROGRESS__`, and `__UI_STATUS__` event emitted by the child process is also written to the orbilicious log file at `debug` level. Use `LOG_LEVEL=debug` to capture these events for post-session auditing.
+
 Use `.env` to control log verbosity:
 
 ```bash
@@ -544,7 +554,7 @@ The app reads configuration from `.env` (via `dotenv`) and supports the followin
 | `APCA_API_SECRET_KEY` | Yes | None | Alpaca API secret key paired with `APCA_API_KEY_ID`. |
 | `ATR_STOP_MULTIPLE` | No | `1` | ATR multiplier used as one candidate stop-distance component in sizing fallback. |
 | `BREAKOUT_CONFIRMATION_CANDLE_MINUTES` | No | `5` | Candle size (in minutes) used to confirm breakout closes outside the opening range. |
-| `BREAKOUT_RETEST_MAX_AGE_MINUTES` | No | `1` | Maximum age (in minutes) allowed between confirmation retest and entry evaluation for the current NY session. Set to `0` to disable this staleness guard. |
+| `BREAKOUT_RETEST_MAX_AGE_MINUTES` | No | `1` | Maximum age (in minutes) allowed between confirmation retest and entry evaluation for the current NY session. Set to `0` to disable this staleness guard. In EMULATION mode the check is bypassed entirely. |
 | `BREAKOUT_QUALITY_FILTERS_ENABLED` | No | `false` | Enables breakout quality filters and also controls the Web UI's initial Breakout Quality Filters checkbox state. |
 | `BREAKOUT_MIN_VOLUME_EXPANSION` | No | `1.2` | Minimum breakout-candle volume expansion ratio versus earlier confirmation candles. |
 | `BREAKOUT_MIN_RELATIVE_STRENGTH_PCT` | No | `0.25` | Minimum percent close beyond opening-range high/low required for breakout strength. |
@@ -565,7 +575,7 @@ The app reads configuration from `.env` (via `dotenv`) and supports the followin
 | `QTY` | No | `1` | Baseline strategy quantity field in config. Not used by weighted basket sizing path. |
 | `QUANTITY_TO_RETRIEVE` | No | `40` | Number of most-active symbols targeted for candidate generation. The app over-fetches for filtering using `max(QUANTITY_TO_RETRIEVE, 4 x QUANTITY_TO_RETRIEVE)`, capped at `100` symbols, then keeps the top `QUANTITY_TO_RETRIEVE`. In Web UI runs, this is overridden by the Most active stocks to scan control when provided. |
 | `SESSION_DATE` | No | Empty | Session date (`YYYY-MM-DD`). If set, app runs a one-shot historical report for that date and exits; if empty, app runs current-day live scheduling and generates end-of-day report(s). |
-| `SESSION_MODE` | No | `EMULATION` | Execution mode: `EMULATION` (Alpaca data, no order submission), `PAPER` (Alpaca paper trading), `LIVE` (Alpaca live trading). |
+| `SESSION_MODE` | No | `EMULATION` | Execution mode: `EMULATION` (Alpaca data, no order submission), `PAPER` (Alpaca paper trading), `LIVE` (Alpaca live trading). The Web UI also supports `REPLAY` mode for replaying completed sessions. |
 | `STOP_LOSS_PROFIT_RATIO` | No | `1:4` | Risk/reward ratio in `risk:reward` format. Example `1:2` gives a 2R target. |
 | `SYMBOL` | No | `SPY` | Strategy config symbol baseline (kept for config completeness; main scanner still uses most-active universe). |
 
@@ -621,7 +631,8 @@ npm test
 - This project uses direct Alpaca REST calls rather than a separate SDK wrapper.
 - Bracket orders are submitted using Alpaca's `/v2/orders` endpoint.
 - Buying power is read from Alpaca's `/v2/account` endpoint before basket normalization.
-- Realized losses can still exceed planned stop-loss exposure because of slippage, fast markets, gaps, and execution behavior.
+- Realized losses can still exceed planned stop-loss exposure because of slippage, fast markets, gaps, and execution behavior. The cumulative risk budget limits planned exposure to `MAX_TOTAL_RISK` per day in EMULATION mode.
+- After a child process exits, the close handler reconciles `totals.totalProfitLossToDate` from the sum of close event PnLs so the daily summary and stored record match the runtime simulation's actual PnL, not the report's independent recomputation.
 - This should be tested in Alpaca PAPER mode before any live use.
 
 ### Recommended next upgrades

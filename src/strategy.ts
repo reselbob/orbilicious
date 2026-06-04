@@ -1,3 +1,5 @@
+// Opening-range breakout strategy: identification of breakout/breakdown,
+// retest confirmation, and entry-signal generation.
 import { Bar, OpeningRange, Position, Signal, StrategyConfig } from './types';
 import { toNyParts } from './time';
 import { logger } from './logger';

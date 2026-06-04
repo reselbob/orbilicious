@@ -1,3 +1,5 @@
+// CLI entry point: runs historical backtests, single-day emulations,
+// and generates reports from the command line.
 import { readFile, writeFile } from 'fs/promises';
 import { resolve } from 'path';
 import { logger } from './logger';

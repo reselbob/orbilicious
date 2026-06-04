@@ -1,3 +1,6 @@
+// Trade sizing, scoring, and basket normalization:
+// break-even candidate scoring, weighted-risk allocation,
+// position capping, and constraint enforcement.
 import { env } from './config';
 import { Bar } from './types';
 
