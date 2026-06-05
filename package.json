@@ -4,6 +4,7 @@
   "description": "A Node JS project for running the Opening Range Breakout pattern against the 20 most active stock in the NYSE and NASDAQ exchanges on the current day",
   "main": "index.js",
   "scripts": {
+    "build": "tsc -p tsconfig.json",
     "test": "TS_NODE_PROJECT=tsconfig.test.json mocha -r ts-node/register \"test/**/*.test.ts\"",
     "test:smoke": "TS_NODE_PROJECT=tsconfig.test.json RUN_SMOKE_TESTS=1 mocha -r ts-node/register \"test/**/*.smoke.ts\"",
     "test:coverage": "nyc mocha -r ts-node/register \"test/**/*.test.ts\"",
@@ -11,7 +12,7 @@
     "coverage:report": "nyc report --reporter=text --reporter=html",
     "dev": "tsx src/main.ts",
     "dev:web": "tsx src/web/server.ts",
-    "start": "node dist/main.js",
+    "start": "node dist/web/server.js",
     "start:web": "node dist/web/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "clean": "rm -rf logs/orbilicious-*.log logs/trades logs/*.gz"
