@@ -1165,9 +1165,11 @@ export async function startApp(options?: StartAppOptions) {
 
     const marketOpenMinutes = strategyConfig.sessionOpenHour * 60 + strategyConfig.sessionOpenMinute;
     const openingRangeEndMinutes = marketOpenMinutes + strategyConfig.openingRangeMinutes;
+    const breakoutWindowEndMinutes = openingRangeEndMinutes + Math.max(1, env.breakoutConfirmationCandleMinutes);
     const isCurrentDayMode = !continuousMode;
     const reportedOpeningRangeByDate = new Set<string>();
     const reportedWaitingBreakoutsByDate = new Set<string>();
+    const breakoutScanCompleteByDate = new Set<string>();
 
     logger.info('Starting ORB normalized weighted-risk runner (daily schedule)', {
         sessionDateMode: 'current-day',
@@ -1179,6 +1181,8 @@ export async function startApp(options?: StartAppOptions) {
         rewardMode: `${env.stopLossRiskPart}:${env.takeProfitPart}`,
         dryRun: env.dryRun,
         marketOpenMinutes,
+        openingRangeEndMinutes,
+        breakoutWindowEndMinutes,
         marketCloseMinutes,
     });
 
@@ -1216,7 +1220,17 @@ export async function startApp(options?: StartAppOptions) {
                     reportedWaitingBreakoutsByDate.add(sessionDate);
                 }
 
-                await runCycle(client, sessionDate);
+                if (!breakoutScanCompleteByDate.has(sessionDate)) {
+                    await runCycle(client, sessionDate);
+                    if (currentMinutes >= breakoutWindowEndMinutes) {
+                        logger.info('Breakout window closed; initial scan complete', {
+                            sessionDate,
+                            currentTime: nyNow.hhmm,
+                            breakoutWindowEndMinutes,
+                        });
+                        breakoutScanCompleteByDate.add(sessionDate);
+                    }
+                }
             } else if (!reportedDates.has(sessionDate)) {
                 logger.info('Market closed; generating end-of-day ORB report', {
                     sessionDate,

@@ -1246,4 +1246,54 @@ describe('Operational Rules support', () => {
 
         expect(client.submitted).to.deep.equal([{ symbol: 'LIVE_A', side: 'buy', qty: 2 }]);
     });
+
+    // Rule 42: Verifies that in current-day mode, runCycle only executes during the
+    // breakout-determination window (openingRangeMinutes + breakoutConfirmationCandleMinutes).
+    // After the window closes, runCycle runs one final cycle and then stops. The polling
+    // loop continues to detect market close and generate the end-of-day report.
+    it('rule 42: breakout scan completes after the determination window and runCycle stops executing', async () => {
+        env.sessionMode = 'PAPER';
+        env.sessionDate = '';
+        env.dryRun = false;
+        env.pollIntervalSeconds = 0;
+        env.breakoutConfirmationCandleMinutes = 5;
+        strategyConfig.openingRangeMinutes = 15;
+
+        // Date sequence: within-window (13:46), after-window (13:52), post-close (20:05)
+        // Generous lengths because each logger.* call consumes a mock Date entry.
+        withMockDateSequence([
+            ...Array.from({ length: 500 }, () => '2026-05-19T13:46:00Z'),
+            ...Array.from({ length: 500 }, () => '2026-05-19T13:52:00Z'),
+            ...Array.from({ length: 500 }, () => '2026-05-19T20:05:00Z'),
+        ]);
+
+        const { infoMessages } = captureLogMessages();
+        const reportedSessions: string[] = [];
+
+        stubProperty(AlpacaClient.prototype, 'getAccount', (async function () {
+            return { buyingPower: 25000, tradingBlocked: true };
+        }) as typeof AlpacaClient.prototype.getAccount);
+        stubProperty(AlpacaClient.prototype, 'getIntradayBars', (async function (_symbol: string, sessionDate: string) {
+            return makeConfirmedLongCandidateBars('SPY', sessionDate);
+        }) as typeof AlpacaClient.prototype.getIntradayBars);
+        stubProperty(AlpacaClient.prototype, 'getMostActiveSymbols', (async function () {
+            return ['SPY', 'QQQ'];
+        }) as typeof AlpacaClient.prototype.getMostActiveSymbols);
+        stubProperty(AlpacaClient.prototype, 'generateOrbReport', (async function (sessionDate?: string | Date) {
+            reportedSessions.push(String(sessionDate));
+            return makeHistoricalReport(String(sessionDate));
+        }) as typeof AlpacaClient.prototype.generateOrbReport);
+
+        await startApp();
+
+        // "Starting run cycle" appears at least once (during the breakout window + final scan)
+        const runCycleCount = infoMessages.filter((m) => m === 'Starting run cycle').length;
+        expect(runCycleCount).to.be.at.least(1);
+
+        // "Breakout window closed; initial scan complete" appears - proves gate fired
+        expect(infoMessages.includes('Breakout window closed; initial scan complete')).to.be.true;
+
+        // End-of-day report still generated after market close
+        expect(reportedSessions).to.deep.equal(['2026-05-19']);
+    });
 });

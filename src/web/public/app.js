@@ -729,7 +729,10 @@ function weekdayRangeInclusive(startIso, endIso) {
 
 function renderDailySummary() {
     const dailyTotals = new Map();
+    const dailyClosedCounts = new Map();
+    const dailyOpenEvents = new Map();
     const openEventsByKey = new Map();
+    const dailyUniqueSymbols = new Map();
     const isReplay = isReplayMode();
 
     for (const event of tradeEvents) {
@@ -738,10 +741,16 @@ function renderDailySummary() {
             continue;
         }
 
+        if (!dailyUniqueSymbols.has(sessionDate)) {
+            dailyUniqueSymbols.set(sessionDate, new Set());
+        }
+        dailyUniqueSymbols.get(sessionDate).add(event.symbol);
+
         const key = `${sessionDate}|${event.symbol}`;
 
         if (event.eventType === 'open') {
             openEventsByKey.set(key, event);
+            dailyOpenEvents.set(sessionDate, (dailyOpenEvents.get(sessionDate) || 0) + 1);
             continue;
         }
 
@@ -754,6 +763,7 @@ function renderDailySummary() {
 
             const previous = dailyTotals.get(sessionDate) || 0;
             dailyTotals.set(sessionDate, previous + pnlValue);
+            dailyClosedCounts.set(sessionDate, (dailyClosedCounts.get(sessionDate) || 0) + 1);
             continue;
         }
 
@@ -763,6 +773,7 @@ function renderDailySummary() {
 
         const previous = dailyTotals.get(sessionDate) || 0;
         dailyTotals.set(sessionDate, previous + event.pnl);
+        dailyClosedCounts.set(sessionDate, (dailyClosedCounts.get(sessionDate) || 0) + 1);
     }
 
     const grandTotalPnl = Array.from(dailyTotals.values()).reduce((sum, value) => sum + value, 0);
@@ -793,7 +804,7 @@ function renderDailySummary() {
     }
 
     if (!allSessionDates.size) {
-        dailySummaryBody.innerHTML = '<tr><td colspan="2" class="text-muted">No closed trades yet.</td></tr>';
+        dailySummaryBody.innerHTML = '<tr><td colspan="5" class="text-muted">No closed trades yet.</td></tr>';
         return;
     }
 
@@ -801,6 +812,10 @@ function renderDailySummary() {
         .sort((a, b) => a.localeCompare(b))
         .map((date) => {
             const pnl = dailyTotals.get(date) || 0;
+            const closed = dailyClosedCounts.get(date) || 0;
+            const opened = dailyOpenEvents.get(date) || 0;
+            const openTrades = Math.max(0, opened - closed);
+            const candidates = dailyUniqueSymbols.has(date) ? dailyUniqueSymbols.get(date).size : 0;
             const pnlClass = pnl > 0 ? 'result-profit' : pnl < 0 ? 'result-loss' : 'result-open';
             const noTradeBadge = pnl === 0
                 ? '<span class="badge text-bg-secondary daily-summary-flat-badge">NO TRADES</span>'
@@ -808,6 +823,9 @@ function renderDailySummary() {
             return `
                 <tr>
                     <td>${date}</td>
+                    <td class="text-end">${candidates}</td>
+                    <td class="text-end">${closed}</td>
+                    <td class="text-end">${openTrades}</td>
                     <td class="text-end trade-price ${pnlClass}">${formatPnl(pnl)}${noTradeBadge}</td>
                 </tr>`;
         })

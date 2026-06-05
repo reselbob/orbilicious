@@ -483,6 +483,10 @@ The list below follows the order the app actually applies rules at runtime.
 
 - _Test: `strategy.test.ts` — `it('closes position when target is hit on the same-minute bar as entry')`_
 
+42. In current-day mode, the breakout-determination window is computed as `OPENING_RANGE_MINUTES + max(1, BREAKOUT_CONFIRMATION_CANDLE_MINUTES)` after market open. During this window (default: 9:30–9:50 AM ET), `runCycle` executes on every polling interval to identify breakout candidates and execute trades. After the window closes, `runCycle` runs one final cycle to capture any last candidates, then stops executing for the session. The polling loop continues solely to detect market close and trigger the end-of-day report. No further most-active-symbol scanning occurs after the breakout window closes.
+
+- _Test: `rules.test.ts` — `it('rule 42: breakout scan completes after the determination window and runCycle stops executing')`_
+
 <!-- markdownlint-enable MD029 -->
 
 ### Resilience and Stability

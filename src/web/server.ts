@@ -1460,15 +1460,13 @@ async function renderDailySessionView(
         && !Array.isArray(candidateTradeActivityValue)
     ) ? candidateTradeActivityValue : {};
     let totals = record.totals ?? candidateTradeActivitySummary;
-    const closeEventsPnl = Array.isArray(record.sessionEvents)
-        ? record.sessionEvents
-            .filter((e) => e.eventType === 'close' && typeof e.pnl === 'number')
-            .reduce((sum, e) => sum + (e.pnl as number), 0)
-        : 0;
-    if (
-        closeEventsPnl !== 0
-        && (!totals.totalProfitLossToDate || totals.totalProfitLossToDate === 0)
-    ) {
+    const sessionEventsArr = Array.isArray(record.sessionEvents) ? record.sessionEvents : [];
+    const closeEventsPnl = sessionEventsArr
+        .filter((e) => e.eventType === 'close' && typeof e.pnl === 'number')
+        .reduce((sum, e) => sum + (e.pnl as number), 0);
+    const openCount = sessionEventsArr.filter((e) => e.eventType === 'open').length;
+    const closedCount = sessionEventsArr.filter((e) => e.eventType === 'close').length;
+    if (closeEventsPnl !== 0) {
         totals = { ...totals, totalProfitLossToDate: Number(closeEventsPnl.toFixed(2)) };
     }
     const artifacts = record.artifacts ?? {};
@@ -1489,7 +1487,6 @@ async function renderDailySessionView(
     const emulatedBySymbol = new Map(emulatedTrades.map((row) => [row.symbol, row]));
     const outcomeBySymbol = new Map(finalOutcomes.map((row) => [row.symbol, row]));
     const activityBySymbol = new Map(candidateTradeActivity.map((row) => [row.symbol, row]));
-
     const drilldownCandidates = breakoutCandidates.length
         ? breakoutCandidates
         : evaluationRows
@@ -1499,6 +1496,76 @@ async function renderDailySessionView(
                 side: row.side === 'sell' ? 'sell' : row.side === 'buy' ? 'buy' : undefined,
                 price: row.breakoutPrice ?? undefined,
             }));
+
+    // Override report trade/outcome/activity data with runtime sessionEvents data
+    if (Array.isArray(record.sessionEvents)) {
+        const openBySymbol = new Map<string, NonNullable<DailySessionRecord['sessionEvents']>[number]>();
+        const closeBySymbol = new Map<string, NonNullable<DailySessionRecord['sessionEvents']>[number]>();
+        for (const e of record.sessionEvents) {
+            if (e.eventType === 'open') openBySymbol.set(e.symbol, e);
+            else if (e.eventType === 'close') closeBySymbol.set(e.symbol, e);
+        }
+        for (const [symbol, close] of closeBySymbol) {
+            const open = openBySymbol.get(symbol);
+            const status = close.reason?.toLowerCase().includes('profit') ? 'PROFIT'
+                : close.reason?.toLowerCase().includes('loss') ? 'LOSS'
+                : close.pnl != null && close.pnl >= 0 ? 'PROFIT' : 'LOSS';
+            emulatedBySymbol.set(symbol, {
+                symbol,
+                side: close.position === 'long' ? 'buy' : 'sell',
+                price: close.entryPrice,
+                qty: close.qty,
+                stopPrice: close.stopPrice,
+                stopLossPct: close.entryPrice
+                    ? Math.abs((close.stopPrice ?? 0) - close.entryPrice) / close.entryPrice
+                    : undefined,
+                takeProfitPrice: close.targetPrice,
+            });
+            outcomeBySymbol.set(symbol, {
+                symbol,
+                side: close.side,
+                entryPrice: close.entryPrice,
+                stopPrice: close.stopPrice,
+                takeProfitPrice: close.targetPrice,
+                qty: close.qty,
+                status,
+                pnl: close.pnl,
+                exitPrice: close.closePrice ?? null,
+                exitTimestamp: close.timestamp,
+            });
+            activityBySymbol.set(symbol, {
+                symbol,
+                side: close.position === 'long' ? 'sell' : 'buy',
+                position: close.position,
+                qty: close.qty,
+                entryPrice: close.entryPrice,
+                stopPrice: close.stopPrice,
+                targetPrice: close.targetPrice,
+                closePrice: close.closePrice,
+                pnl: close.pnl,
+                status,
+                reason: close.reason,
+                entryTimestamp: open?.timestamp ?? close.timestamp,
+                closeTimestamp: close.timestamp,
+            });
+        }
+    }
+
+    const drilldownCandidateSymbols = new Set(drilldownCandidates.map((c) => c.symbol));
+    if (Array.isArray(record.sessionEvents)) {
+        for (const e of record.sessionEvents) {
+            if (e.eventType === 'close' && !drilldownCandidateSymbols.has(e.symbol)) {
+                drilldownCandidates.push({
+                    symbol: e.symbol,
+                    side: (e.side === 'sell' && e.position === 'long') ? 'buy'
+                        : (e.side === 'buy' && e.position === 'short') ? 'sell'
+                        : undefined,
+                    price: e.entryPrice,
+                });
+                drilldownCandidateSymbols.add(e.symbol);
+            }
+        }
+    }
 
     const symbolSnapshots = await buildDailySymbolCharts({
         record,
@@ -1701,6 +1768,9 @@ async function renderDailySessionView(
             <div class="metric"><span class="metric-label">Candidates Bought at Start</span><span class="metric-value">${totals.totalCandidatesBoughtAtStart ?? 0}</span></div>
             <div class="metric"><span class="metric-label">Sold Long</span><span class="metric-value">${totals.numberOfCandidatesSoldLong ?? 0}</span></div>
             <div class="metric"><span class="metric-label">Bought Short</span><span class="metric-value">${totals.numberOfCandidatesBoughtShort ?? 0}</span></div>
+            <div class="metric"><span class="metric-label"># Breakout Candidates</span><span class="metric-value">${drilldownCandidates.length}</span></div>
+            <div class="metric"><span class="metric-label"># Open Trades</span><span class="metric-value">${closedCount > 0 ? openCount - closedCount : 0}</span></div>
+            <div class="metric"><span class="metric-label"># Closed Trades</span><span class="metric-value">${closedCount}</span></div>
             <div class="metric"><span class="metric-label">P/L to Date</span><span class="metric-value">${Number(totals.totalProfitLossToDate ?? 0).toFixed(2)}</span></div>
         </div>
     </section>
@@ -2293,6 +2363,9 @@ type WeeklyTradingActivityReport = {
         longs: number;
         shorts: number;
         pnl: number;
+        breakoutCandidatesCount: number;
+        openTrades: number;
+        closedTrades: number;
         dailyWithCharts: DailySessionWithCharts;
     }>;
 };
@@ -2329,6 +2402,9 @@ async function buildWeeklyTradingActivityReport(anchorDate: Date): Promise<Weekl
         longs: number;
         shorts: number;
         pnl: number;
+        breakoutCandidatesCount: number;
+        openTrades: number;
+        closedTrades: number;
         dailyWithCharts: DailySessionWithCharts;
     }> = [];
 
@@ -2366,11 +2442,18 @@ async function buildWeeklyTradingActivityReport(anchorDate: Date): Promise<Weekl
                 logWarn: (message, payload) => logger.warn(message, payload),
             });
 
+            const sessionEvents = Array.isArray(daily.sessionEvents) ? daily.sessionEvents : [];
+            const closeEvents = sessionEvents.filter((e) => e.eventType === 'close');
+            const openEvents = sessionEvents.filter((e) => e.eventType === 'open');
+
             dailyRowsData.push({
                 sessionDate,
                 longs: daily.totals?.numberOfCandidatesSoldLong ?? 0,
                 shorts: daily.totals?.numberOfCandidatesBoughtShort ?? 0,
                 pnl: daily.totals?.totalProfitLossToDate ?? 0,
+                breakoutCandidatesCount: candidates.length,
+                openTrades: openEvents.length - closeEvents.length,
+                closedTrades: closeEvents.length,
                 dailyWithCharts: {
                     record: daily,
                     chartSnapshots,
@@ -2522,17 +2605,20 @@ function renderWeeklyTradingActivityHtml(weeklyReport: WeeklyTradingActivityRepo
                 <td>${escapeHtml(day.sessionDate)}</td>
                 <td>${day.longs}</td>
                 <td>${day.shorts}</td>
+                <td>${day.breakoutCandidatesCount}</td>
+                <td>${day.openTrades}</td>
+                <td>${day.closedTrades}</td>
                 <td class="${pnlClass(day.pnl)}">${day.pnl.toFixed(2)}</td>
                 <td><button class="day-detail-toggle" onclick="toggleDayDetail('day-${escapeHtml(day.sessionDate)}', this)">Show Details</button></td>
             </tr>
             <tr class="day-detail-row" id="day-${escapeHtml(day.sessionDate)}" style="display:none">
-                <td colspan="5">
+                <td colspan="8">
                     ${dayDetail}
                 </td>
             </tr>`;
         }).join('')
         : `<tr>
-            <td colspan="5">No reportable trading sessions available yet for this week.</td>
+            <td colspan="8">No reportable trading sessions available yet for this week.</td>
         </tr>`;
 
     return `<!doctype html>
@@ -2614,6 +2700,9 @@ function renderWeeklyTradingActivityHtml(weeklyReport: WeeklyTradingActivityRepo
                     <th>Session Date</th>
                     <th>Longs</th>
                     <th>Shorts</th>
+                    <th># Breakout</th>
+                    <th># Open</th>
+                    <th># Closed</th>
                     <th>P/L</th>
                     <th>Details</th>
                 </tr>
@@ -2987,9 +3076,12 @@ function renderWeeklyTradingActivityPdfHtml(weeklyReport: WeeklyTradingActivityR
             <td>${escapeHtml(day.sessionDate)}</td>
             <td>${day.longs}</td>
             <td>${day.shorts}</td>
+            <td>${day.breakoutCandidatesCount}</td>
+            <td>${day.openTrades}</td>
+            <td>${day.closedTrades}</td>
             <td>${day.pnl.toFixed(2)}</td>
         </tr>`).join('')
-        : '<tr><td colspan="4">No reportable sessions for this week.</td></tr>';
+        : '<tr><td colspan="7">No reportable sessions for this week.</td></tr>';
 
     return `<!doctype html>
 <html lang="en">
@@ -3016,7 +3108,7 @@ function renderWeeklyTradingActivityPdfHtml(weeklyReport: WeeklyTradingActivityR
     <section class="panel">
         <h2>Daily Summary</h2>
         <table>
-            <thead><tr><th>Session Date</th><th>Longs</th><th>Shorts</th><th>P/L</th></tr></thead>
+            <thead><tr><th>Session Date</th><th>Longs</th><th>Shorts</th><th># Breakout</th><th># Open</th><th># Closed</th><th>P/L</th></tr></thead>
             <tbody>${rows}</tbody>
         </table>
     </section>
