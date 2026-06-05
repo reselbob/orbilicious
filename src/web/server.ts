@@ -1459,7 +1459,18 @@ async function renderDailySessionView(
         candidateTradeActivityValue
         && !Array.isArray(candidateTradeActivityValue)
     ) ? candidateTradeActivityValue : {};
-    const totals = record.totals ?? candidateTradeActivitySummary;
+    let totals = record.totals ?? candidateTradeActivitySummary;
+    const closeEventsPnl = Array.isArray(record.sessionEvents)
+        ? record.sessionEvents
+            .filter((e) => e.eventType === 'close' && typeof e.pnl === 'number')
+            .reduce((sum, e) => sum + (e.pnl as number), 0)
+        : 0;
+    if (
+        closeEventsPnl !== 0
+        && (!totals.totalProfitLossToDate || totals.totalProfitLossToDate === 0)
+    ) {
+        totals = { ...totals, totalProfitLossToDate: Number(closeEventsPnl.toFixed(2)) };
+    }
     const artifacts = record.artifacts ?? {};
     const mostActiveSymbols = record.mostActiveSymbols ?? [];
     const insufficientSymbols = record.insufficientSymbols ?? [];
