@@ -1165,7 +1165,7 @@ export async function startApp(options?: StartAppOptions) {
 
     const marketOpenMinutes = strategyConfig.sessionOpenHour * 60 + strategyConfig.sessionOpenMinute;
     const openingRangeEndMinutes = marketOpenMinutes + strategyConfig.openingRangeMinutes;
-    const breakoutWindowEndMinutes = openingRangeEndMinutes + Math.max(1, env.breakoutConfirmationCandleMinutes);
+    const breakoutWindowEndMinutes = openingRangeEndMinutes + 1;
     const isCurrentDayMode = !continuousMode;
     const reportedOpeningRangeByDate = new Set<string>();
     const reportedWaitingBreakoutsByDate = new Set<string>();

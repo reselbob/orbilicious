@@ -363,7 +363,7 @@ The list below follows the order the app actually applies rules at runtime.
 
 - _Test: `rules.test.ts` — `it('rules 11-17: runCycle halts on trading block, and candidate evaluation handles positions, duplicates, and missing bars')`_
 
-12. The candidate universe is sourced from Alpaca most-active symbols with a two-stage retrieval rule: fetch `max(QUANTITY_TO_RETRIEVE, 4 x QUANTITY_TO_RETRIEVE)` symbols, cap that fetch at 100, then apply the price filter and keep the top `QUANTITY_TO_RETRIEVE` for evaluation. The default `QUANTITY_TO_RETRIEVE` is 40 symbols, and the Web UI can override this per run using the "Most active stocks to scan" spinner.
+12. The candidate universe is sourced from Alpaca most-active symbols with a two-stage retrieval rule: fetch `max(QUANTITY_TO_RETRIEVE, 4 x QUANTITY_TO_RETRIEVE)` symbols, cap that fetch at 100, then apply the price filter (price >= $1.00) and keep the top `QUANTITY_TO_RETRIEVE` for evaluation. The default `QUANTITY_TO_RETRIEVE` is 40 symbols, and the Web UI can override this per run using the "Most active stocks to scan" spinner. This symbol fetch only occurs during the initial breakout-determination window (see [rule 42](#operational-rules)); after the window closes, no further most-active scanning takes place.
 
 - _Test: `rules.test.ts` — `it('rules 11-17: runCycle halts on trading block, and candidate evaluation handles positions, duplicates, and missing bars')`_
 
@@ -483,7 +483,7 @@ The list below follows the order the app actually applies rules at runtime.
 
 - _Test: `strategy.test.ts` — `it('closes position when target is hit on the same-minute bar as entry')`_
 
-42. In current-day mode, the breakout-determination window is computed as `OPENING_RANGE_MINUTES + max(1, BREAKOUT_CONFIRMATION_CANDLE_MINUTES)` after market open. During this window (default: 9:30–9:50 AM ET), `runCycle` executes on every polling interval to identify breakout candidates and execute trades. After the window closes, `runCycle` runs one final cycle to capture any last candidates, then stops executing for the session. The polling loop continues solely to detect market close and trigger the end-of-day report. No further most-active-symbol scanning occurs after the breakout window closes.
+42. Breakout-candidate determination runs from 1 minute after market open (09:31 ET) through `OPENING_RANGE_MINUTES + 1` minute after market open (default: 09:31–09:46 ET). During this window, `runCycle` executes on every polling interval to identify breakout candidates and execute trades. After the window closes, `runCycle` runs one final cycle to capture any last candidates, then stops executing for the session. The polling loop continues solely to detect market close and trigger the end-of-day report. No further most-active-symbol scanning occurs after the breakout window closes. If the server crashes and restarts mid-session, `runCycle` executes once on restart (since the session's `breakoutScanComplete` flag starts empty) and then halts — providing one recovery scan before settling into post-breakout idle.
 
 - _Test: `rules.test.ts` — `it('rule 42: breakout scan completes after the determination window and runCycle stops executing')`_
 
