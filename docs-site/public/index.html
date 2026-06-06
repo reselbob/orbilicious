@@ -253,7 +253,7 @@
     .sidebar { display: none; }
     .content { padding: 24px; max-width: 100%; }
   }
-</style><div class="app"><nav class="sidebar"><div class="sidebar-header"><h1>ORBilicious</h1><div class="subtitle">Documentation v0.0.8</div></div><ul class="toc-list"><li><a class="toc-link" href="#setup">Setup</a></li><li><a class="toc-link" href="#startup-scripts">Startup Scripts</a></li><li><span class="toc-section-header">User Manual</span><ul class="toc-children"><li><a class="toc-child-link" href="#system-requirements">System Requirements</a></li><li><a class="toc-child-link" href="#runtime-controls">Runtime Controls</a></li><li><a class="toc-child-link" href="#how-to-use-the-breakout-confirmation-and-quality-filters">Breakout Confirmation &amp; Quality Filters</a></li><li><a class="toc-child-link" href="#trade-monitor">Trade Monitor</a></li><li><a class="toc-child-link" href="#daily-summary">Daily Summary</a></li><li><a class="toc-child-link" href="#reports">Reports</a></li><li><a class="toc-child-link" href="#reports-weekly-summary">Reports Weekly Summary</a></li><li><a class="toc-child-link" href="#reports-daily-detail">Reports Daily Detail</a></li></ul></li><li><span class="toc-section-header">Developer Notes</span><ul class="toc-children"><li><a class="toc-child-link" href="#workflow">Workflow</a></li><li><a class="toc-child-link" href="#trading-architecture">Trading Architecture</a></li><li><a class="toc-child-link" href="#strategy-rules">Strategy Rules</a></li><li><a class="toc-child-link" href="#operational-rules">Operational Rules</a></li><li><a class="toc-child-link" href="#resilience-and-stability">Resilience and Stability</a></li><li><a class="toc-child-link" href="#logging">Logging</a></li><li><a class="toc-child-link" href="#environment-variables">Environment Variables</a></li><li><a class="toc-child-link" href="#report-modes-and-scheduling">Report Modes and Scheduling</a></li><li><a class="toc-child-link" href="#tests">Tests</a></li></ul></li><li><a class="toc-link" href="#notes">Notes</a></li><li><a class="toc-link" href="#recommended-next-upgrades">Recommended Next Upgrades</a></li></ul></nav><main class="content"><style>
+</style><div class="app"><nav class="sidebar"><div class="sidebar-header"><h1>ORBilicious</h1><div class="subtitle">Documentation v0.0.8</div></div><ul class="toc-list"><li><a class="toc-link" href="#setup">Setup</a></li><li><a class="toc-link" href="#startup-scripts">Startup Scripts</a></li><li><span class="toc-section-header">User Manual</span><ul class="toc-children"><li><a class="toc-child-link" href="#system-requirements">System Requirements</a></li><li><a class="toc-child-link" href="#runtime-controls">Runtime Controls</a></li><li><a class="toc-child-link" href="#how-to-use-the-breakout-confirmation-and-quality-filters">Breakout Confirmation &amp; Quality Filters</a></li><li><a class="toc-child-link" href="#trade-monitor">Trade Monitor</a></li><li><a class="toc-child-link" href="#daily-summary">Daily Summary</a></li><li><a class="toc-child-link" href="#reports">Reports</a></li><li><a class="toc-child-link" href="#reports-weekly-summary">Reports Weekly Summary</a></li><li><a class="toc-child-link" href="#reports-daily-detail">Reports Daily Detail</a></li></ul></li><li><span class="toc-section-header">Developer Notes</span><ul class="toc-children"><li><a class="toc-child-link" href="#workflow">Workflow</a></li><li><a class="toc-child-link" href="#trading-architecture">Trading Architecture</a></li><li><a class="toc-child-link" href="#strategy-rules">Strategy Rules</a></li><li><a class="toc-child-link" href="#operational-rules">Operational Rules</a></li><li><a class="toc-child-link" href="#resilience-and-stability">Resilience and Stability</a></li><li><span class="toc-section-header" style="padding-left:36px;font-size:11px">Logging</span><ul class="toc-children" style="list-style:none"><li><a class="toc-child-link" href="#general-description" style="padding-left:52px">General Description</a></li><li><a class="toc-child-link" href="#trade-log-format" style="padding-left:52px">Trade Log Format</a></li></ul></li><li><a class="toc-child-link" href="#environment-variables">Environment Variables</a></li><li><a class="toc-child-link" href="#report-modes-and-scheduling">Report Modes and Scheduling</a></li><li><a class="toc-child-link" href="#tests">Tests</a></li></ul></li><li><a class="toc-link" href="#notes">Notes</a></li><li><a class="toc-link" href="#recommended-next-upgrades">Recommended Next Upgrades</a></li></ul></nav><main class="content"><style>
 .lightbox-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
@@ -294,11 +294,11 @@
 </style><div class="md-content"><h1 id="orbilicious-008" style="position:relative;"><a href="#orbilicious-008" aria-label="orbilicious 008 permalink" class="anchor before"><span aria-hidden="true">#</span></a>ORBilicious 0.0.8</h1>
 <h2 id="table-of-contents" style="position:relative;"><a href="#table-of-contents" aria-label="table of contents permalink" class="anchor before"><span aria-hidden="true">#</span></a>Table of Contents</h2>
 <ul>
-<li><a href="#setup">Setup</a></li>
-<li><a href="#startup-scripts">Startup Scripts</a></li>
 <li><a href="#user-manual">User Manual</a>
 <ul>
 <li><a href="#system-requirements">System Requirements</a></li>
+<li><a href="#setup">Setup</a></li>
+<li><a href="#startup-scripts">Startup Scripts</a></li>
 <li><a href="#runtime-controls">Runtime Controls</a></li>
 <li><a href="#how-to-use-the-breakout-confirmation-and-quality-filters">How to use the Breakout Confirmation and Quality Filters</a></li>
 <li><a href="#trade-monitor">Trade Monitor</a></li>
@@ -310,6 +310,7 @@
 </li>
 <li><a href="#developer-notes">Developer Notes</a>
 <ul>
+<li><a href="#workflow">Workflow</a></li>
 <li><a href="#trading-architecture">Trading Architecture</a></li>
 <li><a href="#strategy-rules">Strategy Rules</a></li>
 <li><a href="#operational-rules">Operational Rules</a></li>
@@ -395,12 +396,8 @@
 <li>If you are operating against live capital, verify <code>ALPACA_TRADING_BASE_URL</code>, <code>SESSION_MODE=LIVE</code>, and all risk settings before starting the app.</li>
 </ol>
 <p>The comments in <a href=".env.example">.env.example</a> explain the meaning of each variable inline.</p>
-<p>Run in dev mode:</p>
-<pre><code class="language-bash">npm run dev
-</code></pre>
-<p>Or build and run:</p>
-<pre><code class="language-bash">npm run build
-npm start
+<p>Run the web UI:</p>
+<pre><code class="language-bash">tsx src/web/server.ts
 </code></pre>
 <h3 id="startup-scripts" style="position:relative;"><a href="#startup-scripts" aria-label="startup scripts permalink" class="anchor before"><span aria-hidden="true">#</span></a>Startup Scripts</h3>
 <p>All <code>npm run &#x3C;script></code> commands are defined in <code>package.json</code> in the project root.</p>
@@ -416,7 +413,7 @@ npm start
 <tr>
 <td><code>build</code></td>
 <td>Compiles TypeScript to JavaScript via <code>tsc -p tsconfig.json</code>.</td>
-<td>Required before running <code>start</code> or <code>start:web</code>; produces the <code>dist/</code> directory.</td>
+<td>Required before running the compiled application; produces the <code>dist/</code> directory.</td>
 </tr>
 <tr>
 <td><code>test</code></td>
@@ -444,38 +441,18 @@ npm start
 <td>Opens the HTML report in a browser for visual inspection.</td>
 </tr>
 <tr>
-<td><code>dev</code></td>
-<td>Runs the ORB trading engine directly via <code>tsx src/main.ts</code> without compiling.</td>
-<td>Fast inner-loop development — no build step needed.</td>
-</tr>
-<tr>
-<td><code>dev:web</code></td>
-<td>Starts the ORBilicious web UI server via <code>tsx src/web/server.ts</code> on port 8787.</td>
-<td>Develop and test the dashboard, runtime controls, and reports without rebuilding.</td>
-</tr>
-<tr>
-<td><code>start</code></td>
-<td>Runs the compiled trading engine via <code>node dist/web/server.js</code>.</td>
-<td>Production-like execution after <code>build</code>.</td>
-</tr>
-<tr>
-<td><code>start:web</code></td>
-<td>Same as <code>start</code> — alias for consistency.</td>
-<td>Alternate entry point; both run the web UI server from compiled output.</td>
-</tr>
-<tr>
 <td><code>typecheck</code></td>
 <td>Runs the TypeScript compiler in <code>--noEmit</code> mode to check types without emitting files.</td>
 <td>Validates type safety — use before committing or in CI.</td>
 </tr>
 <tr>
 <td><code>full-start</code></td>
-<td>Builds and serves the Gatsby documentation site (port 9000) in the background, then starts the ORBilicious web UI (port 8787).</td>
+<td>Builds and serves the Gatsby documentation site (port 9000) in the background, then starts the ORBilicious web UI (port 8787) via <code>tsx src/web/server.ts</code>.</td>
 <td>One-command startup for both the application and its documentation.</td>
 </tr>
 <tr>
 <td><code>full-stop</code></td>
-<td>Kills <code>gatsby serve</code>, <code>node dist/web/server</code>, and <code>tsx src/web/server</code> processes.</td>
+<td>Kills <code>gatsby serve</code>, and any <code>node</code> or <code>tsx</code> process running <code>web/server</code>.</td>
 <td>Cleans up all services started by <code>full-start</code>.</td>
 </tr>
 <tr>
@@ -1350,4 +1327,4 @@ SESSION_DATE=2026-05-14 npm run dev
 <li>Use an exchange calendar and DST-safe session handling.</li>
 <li>Add asset-tradability and shortability checks.</li>
 <li>Add retry/backoff and rate-limit handling around Alpaca API requests.</li>
-</ul></div></main></div></div><div id="gatsby-announcer" style="position:absolute;top:0;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0, 0, 0, 0);white-space:nowrap;border:0" aria-live="assertive" aria-atomic="true"></div></div><script id="gatsby-script-loader">/*<![CDATA[*/window.pagePath="/";window.___webpackCompilationHash="116f166d6347fe81a1ea";/*]]>*/</script><script id="gatsby-chunk-mapping">/*<![CDATA[*/window.___chunkMapping={"app":["/app-e90f4c0a93f4065c6c40.js"],"component---src-pages-404-js":["/component---src-pages-404-js-3b7cbee4bd0d3b9f774d.js"],"component---src-templates-doc-template-js":["/component---src-templates-doc-template-js-cbe80a16e560ff187158.js"]};/*]]>*/</script><script src="/app-e90f4c0a93f4065c6c40.js" async=""></script><script src="/framework-0f66f41af23e9e72318d.js" async=""></script><script src="/webpack-runtime-3fbbe07fac988cd6720f.js" async=""></script></body></html>
+</ul></div></main></div></div><div id="gatsby-announcer" style="position:absolute;top:0;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0, 0, 0, 0);white-space:nowrap;border:0" aria-live="assertive" aria-atomic="true"></div></div><script id="gatsby-script-loader">/*<![CDATA[*/window.pagePath="/";window.___webpackCompilationHash="17a9283b9277f6adb4c7";/*]]>*/</script><script id="gatsby-chunk-mapping">/*<![CDATA[*/window.___chunkMapping={"app":["/app-e90f4c0a93f4065c6c40.js"],"component---src-pages-404-js":["/component---src-pages-404-js-3b7cbee4bd0d3b9f774d.js"],"component---src-templates-doc-template-js":["/component---src-templates-doc-template-js-39e69cf746fc6ed3c60f.js"]};/*]]>*/</script><script src="/app-e90f4c0a93f4065c6c40.js" async=""></script><script src="/framework-0f66f41af23e9e72318d.js" async=""></script><script src="/webpack-runtime-dacaedc2dfd713d49579.js" async=""></script></body></html>

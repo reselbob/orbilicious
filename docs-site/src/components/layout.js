@@ -19,7 +19,10 @@ const TOC_HEADINGS = [
     { id: 'strategy-rules', label: 'Strategy Rules' },
     { id: 'operational-rules', label: 'Operational Rules' },
     { id: 'resilience-and-stability', label: 'Resilience and Stability' },
-    { id: 'logging', label: 'Logging' },
+    { id: 'logging', label: 'Logging', children: [
+      { id: 'general-description', label: 'General Description' },
+      { id: 'trade-log-format', label: 'Trade Log Format' },
+    ]},
     { id: 'environment-variables', label: 'Environment Variables' },
     { id: 'report-modes-and-scheduling', label: 'Report Modes and Scheduling' },
     { id: 'tests', label: 'Tests' },
@@ -254,9 +257,24 @@ export default function Layout({ children }) {
                     <ul className="toc-children">
                       {section.children.map((child) => (
                         <li key={child.id}>
-                          <a className="toc-child-link" href={`#${child.id}`}>
-                            {child.label}
-                          </a>
+                          {child.children ? (
+                            <>
+                              <span className="toc-section-header" style={{ paddingLeft: 36, fontSize: 11 }}>{child.label}</span>
+                              <ul className="toc-children" style={{ listStyle: 'none' }}>
+                                {child.children.map((sub) => (
+                                  <li key={sub.id}>
+                                    <a className="toc-child-link" href={`#${sub.id}`} style={{ paddingLeft: 52 }}>
+                                      {sub.label}
+                                    </a>
+                                  </li>
+                                ))}
+                              </ul>
+                            </>
+                          ) : (
+                            <a className="toc-child-link" href={`#${child.id}`}>
+                              {child.label}
+                            </a>
+                          )}
                         </li>
                       ))}
                     </ul>
