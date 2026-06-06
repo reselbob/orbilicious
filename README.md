@@ -3,6 +3,7 @@
 ## Table of Contents
 
 - [Setup](#setup)
+- [Startup Scripts](#startup-scripts)
 - [User Manual](#user-manual)
   - [System Requirements](#system-requirements)
   - [Runtime Controls](#runtime-controls)
