@@ -113,6 +113,27 @@ npm run build
 npm start
 ```
 
+### Startup Scripts
+
+All `npm run <script>` commands are defined in `package.json` in the project root.
+
+| Script | What it does | Why it exists |
+| --- | --- | --- |
+| `build` | Compiles TypeScript to JavaScript via `tsc -p tsconfig.json`. | Required before running `start` or `start:web`; produces the `dist/` directory. |
+| `test` | Runs all unit tests through Mocha with ts-node. | Validates strategy, breakout detection, trade sizing, and API integration logic. |
+| `test:smoke` | Runs smoke tests only (files named `*.smoke.ts`). Enabled by `RUN_SMOKE_TESTS=1`. | Quick sanity check before a full test run. |
+| `test:coverage` | Runs tests under `nyc` for code-coverage measurement. | Identifies untested code paths. |
+| `test:coverage-fast` | Same as `test:coverage` but excludes the slow `reporting.test.ts` file. | Faster iteration during development. |
+| `coverage:report` | Generates HTML/LCov coverage reports from a prior `test:coverage` run. | Opens the HTML report in a browser for visual inspection. |
+| `dev` | Runs the ORB trading engine directly via `tsx src/main.ts` without compiling. | Fast inner-loop development — no build step needed. |
+| `dev:web` | Starts the ORBilicious web UI server via `tsx src/web/server.ts` on port 8787. | Develop and test the dashboard, runtime controls, and reports without rebuilding. |
+| `start` | Runs the compiled trading engine via `node dist/web/server.js`. | Production-like execution after `build`. |
+| `start:web` | Same as `start` — alias for consistency. | Alternate entry point; both run the web UI server from compiled output. |
+| `typecheck` | Runs the TypeScript compiler in `--noEmit` mode to check types without emitting files. | Validates type safety — use before committing or in CI. |
+| `full-start` | Builds and serves the Gatsby documentation site (port 9000) in the background, then starts the ORBilicious web UI (port 8787). | One-command startup for both the application and its documentation. |
+| `full-stop` | Kills `gatsby serve`, `node dist/web/server`, and `tsx src/web/server` processes. | Cleans up all services started by `full-start`. |
+| `clean` | Removes log files (`logs/orbilicious-*.log`, `logs/trades/`, `logs/*.gz`). | Frees disk space and resets log state between runs. |
+
 ### Web UI Usage
 
 The web client provides a complete control panel to run and monitor the ORB strategy. Start it using:

@@ -2,6 +2,7 @@ import React from 'react';
 
 const TOC_HEADINGS = [
   { id: 'setup', label: 'Setup' },
+  { id: 'startup-scripts', label: 'Startup Scripts' },
   { id: 'user-manual', label: 'User Manual', children: [
     { id: 'system-requirements', label: 'System Requirements' },
     { id: 'runtime-controls', label: 'Runtime Controls' },
