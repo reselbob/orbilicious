@@ -1,0 +1,2 @@
+"use strict";(self.webpackChunkorbilicious_docs=self.webpackChunkorbilicious_docs||[]).push([[125],{331:function(e,n,t){t.r(n),t.d(n,{default:function(){return u}});var o=t(159);function u(){return o.createElement("div",{style:{padding:48,fontFamily:"sans-serif"}},o.createElement("h1",null,"Page not found"),o.createElement("p",null,o.createElement("a",{href:"/"},"Go to documentation")))}}}]);
+//# sourceMappingURL=component---src-pages-404-js-3b7cbee4bd0d3b9f774d.js.map

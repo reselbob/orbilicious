@@ -15,6 +15,8 @@
     "start": "node dist/web/server.js",
     "start:web": "node dist/web/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "full-start": "(cd docs-site && npm run build && npm run serve) & sleep 2 && npm run dev:web",
+    "full-stop": "pkill -f 'gatsby serve' 2>/dev/null; pkill -f 'node dist/web/server' 2>/dev/null; pkill -f 'tsx src/web/server' 2>/dev/null; echo 'All services stopped.'",
     "clean": "rm -rf logs/orbilicious-*.log logs/trades logs/*.gz"
   },
   "repository": {
