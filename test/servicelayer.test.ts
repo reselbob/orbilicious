@@ -2,6 +2,8 @@ import { expect } from 'chai';
 import { describe, it } from 'mocha';
 import { AlpacaClient } from '../src/alpaca';
 import { OrbService } from '../src/services/orb-service';
+import { ITrader } from '../src/trading/trader-interface';
+import { LiveTrader } from '../src/trading/live-trader';
 import type {
     OrbReportResult,
     RunningSummaryOrbReportResult,
@@ -92,15 +94,17 @@ describe('service layer', () => {
         const client = new StubAlpacaClient();
         const runnerCalls: Array<{
             client: AlpacaClient;
+            trader: ITrader;
             sessionDate: string;
             options?: { mostActiveSymbolLimit?: number };
         }> = [];
         const runner = async (
             runnerClient: AlpacaClient,
+            runnerTrader: ITrader,
             sessionDate: string,
             options?: { mostActiveSymbolLimit?: number },
         ) => {
-            runnerCalls.push({ client: runnerClient, sessionDate, options });
+            runnerCalls.push({ client: runnerClient, trader: runnerTrader, sessionDate, options });
         };
 
         const service = new OrbService(client, runner);
@@ -108,6 +112,7 @@ describe('service layer', () => {
 
         expect(runnerCalls).to.have.length(1);
         expect(runnerCalls[0].client).to.equal(client);
+        expect(runnerCalls[0].trader).to.not.be.undefined;
         expect(runnerCalls[0].sessionDate).to.equal('2099-01-07');
         expect(runnerCalls[0].options).to.deep.equal({ mostActiveSymbolLimit: 55 });
     });

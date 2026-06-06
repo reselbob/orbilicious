@@ -13,6 +13,7 @@
   - [Reports Weekly Summary](#reports-weekly-summary)
   - [Reports Daily Detail](#reports-daily-detail)
 - [Developer Notes](#developer-notes)
+  - [Trading Architecture](#trading-architecture)
   - [Strategy Rules](#strategy-rules)
   - [Operational Rules](#operational-rules)
   - [Resilience and Stability](#resilience-and-stability)
@@ -28,7 +29,9 @@
 ORBilicious is a Node + TypeScript project that implements the [Opening Range Breakout strategy](https://www.equiti.com/sc-en/news/trading-ideas/opening-range-breakout-strategy/). The project identifies stocks with a high probability of generating profit by detecting breakout price action. It begins by discovering the most actively traded stocks during the first minute after the New York markets opens. (Discovery occurs on a daily basis.) These stocks are then monitored over a 15-minute period using 1-minute candlesticks. Based on this observation and analysis, ORBilicious selects the daily set of breakout candidates—stocks that conform to the selection parameters defined by the Opening Range Breakout strategy. Then, ORBilicous executes the breakout candidates as long or short trades according to profit seeking entry and close behavior assumed in the Opening Range Breakout strategy. The project has the following features:
 
 - [Alpaca](https://alpaca.markets/) market-data integration
-- Alpaca bracket-order execution
+- Alpaca bracket-order execution (PAPER and LIVE modes)
+- Mode-independent emulation via `Emulator` class (EMULATION mode, no orders)
+- `ITrader` interface decoupling core strategy from mode-specific execution
 - Configurable most-active universe scan (default 40)
 - Weighted total stop-risk sizing
 - Basket normalization to fit both total planned stop-loss risk and available buying power
@@ -289,6 +292,24 @@ Below the chart, each detail row lists:
 
 ![ORB Trading Pipeline](docs/workflow.png)
 
+### Trading Architecture
+
+ORBilicious separates emulation and live trading into two independent classes behind a common `ITrader` interface, avoiding interleaved `if (env.dryRun)` branching throughout the core logic.
+
+- **`ITrader` interface** (`src/trading/trader-interface.ts`): Defines the contract for all mode-specific operations — `getAccount()`, `getPosition()`, `closePosition()`, `executeTrades()`, `computeUsedRisk()`, and `managePosition()`. The core `app.ts` functions (`evaluateSymbol`, `findBreakoutCandidates`, `executeSizedTrades`, `runCycle`) take an `ITrader` parameter and never branch on session mode directly.
+
+- **`Emulator`** (`src/trading/emulator.ts`): Used in `EMULATION` mode. Owns an in-memory `simulatedPositions` Map. `executeTrades()` logs dry-run entries and populates the map. `managePosition()` scans intraday bars for stop/target hits, handles the profit-capture window, emits trade-monitor events, and logs closes — all in-memory with no Alpaca API calls. `computeUsedRisk()` sums the stop-loss risk from all open simulated positions, enforcing `MAX_TOTAL_RISK` as a true daily cap.
+
+- **`LiveTrader`** (`src/trading/live-trader.ts`): Used in `PAPER` and `LIVE` modes. Delegates `getAccount()`, `getPosition()`, and `closePosition()` to `AlpacaClient` for real Alpaca API calls. `executeTrades()` submits real bracket orders via `AlpacaClient.submitBracketOrder()`. `managePosition()` checks the profit-capture window and closes via Alpaca only when favorable. `computeUsedRisk()` returns 0 (buying power limits risk on Alpaca's side).
+
+The trader is selected once at startup in `startApp()` based on `env.sessionMode` (line 781 of `src/app.ts`):
+
+```typescript
+const trader: ITrader = env.sessionMode === 'EMULATION'
+    ? new Emulator(client)
+    : new LiveTrader(client);
+```
+
 ### Strategy rules
 
 - Target profit-taking (all-bars scan): Every session bar is scanned for stop/target hits, not just the latest bar. If any bar since entry touched the take-profit price, the trade is closed immediately even if the latest bar has pulled back below target. This ensures profits are captured even when a spike hits the target and then reverses.
@@ -308,7 +329,7 @@ Below the chart, each detail row lists:
     - _Tests: `basket.test.ts` `it('uses the widest of opening-range, ATR, and minimum-stop distances when sizing')`, `rules.test.ts` `it('rules 18-19 and 21-24: builds only confirmed breakout candidates with wick anchors, ATR, and positive scores')`_
 - Profit target: 4R, where R is the entry-to-stop distance by default (`1:4`), or the ratio declared in the environment variable `STOP_LOSS_PROFIT_RATIO`. **If the price reaches the profit target before a retest confirmation occurs, the trade is closed immediately and profit is taken, regardless of retest status.**
   - _Tests: `basket.test.ts` `it('builds weighted-risk trades and sets 4R profit targets')` / `it('applies configured STOP_LOSS_PROFIT_RATIO (1:2) so take-profit distance equals 2x stop distance')`, `rules.test.ts` `it('rules 25-30: ranks candidates, assigns weighted risk, derives stops and 4R targets, and normalizes to constraints')`_
-- Risk budget: total planned stop-loss exposure across the basket defaults to $1000. Risk dollars are assigned proportionally by score. In EMULATION mode, the remaining risk budget for each cycle is computed as `maxTotalRisk - usedRisk` where `usedRisk` is the sum of stop-loss risk from all currently open simulated positions. If remaining risk is zero or negative, the cycle is skipped. This makes `MAX_TOTAL_RISK` a true daily cap rather than a per-cycle cap.
+- Risk budget: total planned stop-loss exposure across the basket defaults to $1000. Risk dollars are assigned proportionally by score. `runCycle()` calls `trader.computeUsedRisk()` to obtain risk already consumed — `Emulator` sums stop-loss risk from all open simulated positions, `LiveTrader` returns 0. If remaining risk is zero or negative, the cycle is skipped. This makes `MAX_TOTAL_RISK` a true daily cap rather than a per-cycle cap.
   - _Tests: `basket.test.ts` `it('selects and sizes all QUANTITY_TO_RETRIEVE candidate trades with weighted risk so total stop loss never exceeds MAX_TOTAL_RISK')`_ and `rules.test.ts` `it('rule 30b: cumulative risk across cycles stays within maxTotalRisk')`_
 - Basket normalization: trade sizes are scaled so the full basket fits both:
   - configured total stop-loss risk cap
@@ -327,7 +348,7 @@ The list below follows the order the app actually applies rules at runtime.
 
 - _Test: `rules.test.ts` — `it('rules 1-2: validates environment configuration and derives execution mode settings')`_
 
-2. Execution mode is derived next. `EMULATION` always sets `dryRun=true`, `PAPER` and `LIVE` allow real order submission, and `--continuous` keeps the current-day scheduler running across sessions instead of exiting after one session.
+2. Execution mode is derived next. `EMULATION` instantiates an `Emulator` (in-memory simulation, no Alpaca API calls), `PAPER` and `LIVE` instantiate a `LiveTrader` (delegates to AlpacaClient for real orders). Both implement the `ITrader` interface so core cycle logic never branches on mode directly. The `--continuous` flag keeps the current-day scheduler running across sessions instead of exiting after one session.
 
 - _Test: `rules.test.ts` — `it('rules 1-2: validates environment configuration and derives execution mode settings')`_
 
@@ -379,7 +400,7 @@ The list below follows the order the app actually applies rules at runtime.
 
 - _Test: `rules.test.ts` — `it('rules 11-17: runCycle halts on trading block, and candidate evaluation handles positions, duplicates, and missing bars')`_
 
-15. When an existing position is closed by the profit-capture rule, the UI reports `Closing {SYMBOL} for a {PROFIT_LOSS_STATUS} of {PROFIT_LOSS_AMOUNT}.` and the trade monitor records a close event. In `EMULATION`, this is logged as a dry-run close instead of sending a live close order.
+15. Position close operations are dispatched through the `ITrader` interface. In `EMULATION`, `Emulator.closePosition()` deletes the position from the `simulatedPositions` map and emits a dry-run close event. In `PAPER`/`LIVE`, `LiveTrader.closePosition()` sends a live Alpaca order. In both cases the UI reports `Closing {SYMBOL} for a {PROFIT_LOSS_STATUS} of {PROFIT_LOSS_AMOUNT}.` and the trade monitor records a close event.
 
 - _Test: `rules.test.ts` — `it('rules 11-17: runCycle halts on trading block, and candidate evaluation handles positions, duplicates, and missing bars')`_
 
@@ -447,7 +468,7 @@ The list below follows the order the app actually applies rules at runtime.
 
 - _Test: `basket.test.ts` — `it('normalizes the basket so risk and notional fit constraints simultaneously')`_
 
-32. In EMULATION mode, the remaining risk budget for each cycle is computed as `maxTotalRisk - usedRisk`, where `usedRisk` is the sum of stop-loss risk from all currently open simulated positions. If the remaining risk is zero or negative, the cycle is skipped and no new trades are opened. This makes `MAX_TOTAL_RISK` a true daily cap rather than a per-cycle cap.
+32. In EMULATION mode, the remaining risk budget for each cycle is computed via `Emulator.computeUsedRisk()`, which sums the stop-loss risk from all open simulated positions in the in-memory map. `LiveTrader.computeUsedRisk()` returns 0 (buying power handles risk limits on Alpaca's side). If the remaining risk is zero or negative, the cycle is skipped and no new trades are opened. This makes `MAX_TOTAL_RISK` a true daily cap rather than a per-cycle cap.
 
 - _Test: `rules.test.ts` — `it('rule 30b: cumulative risk across cycles stays within maxTotalRisk')`_
 
@@ -455,7 +476,7 @@ The list below follows the order the app actually applies rules at runtime.
 
 - _Test: `rules.test.ts` — `it('rules 31-32: execution prevents duplicates, uses dry-run monitor events in EMULATION, and submits bracket orders outside dry-run')`_
 
-34. In `EMULATION`, entries are never submitted to Alpaca. The app only logs dry-run entries and emits trade-monitor events. In `PAPER` and `LIVE`, the app submits Alpaca bracket orders with the computed entry side, quantity, stop, and take-profit prices.
+34. Trade execution is dispatched through `ITrader.executeTrades()`. The `Emulator` logs dry-run entries, adds them to its `simulatedPositions` map, and emits trade-monitor events — no Alpaca API calls. The `LiveTrader` calls `AlpacaClient.submitBracketOrder()` for each trade with the computed entry side, quantity, stop price, and take-profit price, then emits trade-monitor events on response.
 
 - _Test: `rules.test.ts` — `it('rules 31-32: execution prevents duplicates, uses dry-run monitor events in EMULATION, and submits bracket orders outside dry-run')`_
 

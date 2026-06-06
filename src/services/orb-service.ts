@@ -3,6 +3,10 @@
 // dispatch.
 import { AlpacaClient } from '../alpaca';
 import { runCycle } from '../app';
+import { ITrader } from '../trading/trader-interface';
+import { Emulator } from '../trading/emulator';
+import { LiveTrader } from '../trading/live-trader';
+import { env } from '../config';
 import type {
     OrbReportResult,
     RunningSummaryOrbReportResult,
@@ -20,6 +24,7 @@ export type RunTradingCycleOptions = {
 
 export type RunTradingCycleFn = (
     client: AlpacaClient,
+    trader: ITrader,
     sessionDate: string,
     options?: RunTradingCycleOptions,
 ) => Promise<void>;
@@ -112,6 +117,7 @@ export class OrbService {
     constructor(
         private readonly client: AlpacaClient = new AlpacaClient(),
         private readonly runTradingCycleFn: RunTradingCycleFn = runCycle,
+        private readonly trader: ITrader = env.sessionMode === 'EMULATION' ? new Emulator(client) : new LiveTrader(client),
     ) { }
 
     get alpacaClient(): AlpacaClient {
@@ -119,7 +125,7 @@ export class OrbService {
     }
 
     async runTradingCycle(sessionDate: string, options?: RunTradingCycleOptions): Promise<void> {
-        await this.runTradingCycleFn(this.client, sessionDate, options);
+        await this.runTradingCycleFn(this.client, this.trader, sessionDate, options);
     }
 
     async generateDailyReport(

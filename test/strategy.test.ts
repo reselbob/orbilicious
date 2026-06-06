@@ -1,12 +1,18 @@
 import { expect } from 'chai';
-import { describe, it } from 'mocha';
-import { computeOpeningRange, generateOrbSignal } from '../src/strategy';
-import { Bar, Position, StrategyConfig } from '../src/types';
+import { afterEach, describe, it } from 'mocha';
+import {
+    evaluateSymbol,
+    findBreakoutCandidates,
+    runCycle,
+} from '../src/app';
 import { AlpacaClient } from '../src/alpaca';
-import { findBreakoutCandidates, evaluateSymbol } from '../src/app';
-import { buildWeightedRiskTrades } from '../src/basket';
 import { env, strategyConfig } from '../src/config';
+import { Bar, Position, StrategyConfig } from '../src/types';
+import { computeOpeningRange, generateOrbSignal } from '../src/strategy';
+import { buildWeightedRiskTrades } from '../src/basket';
 import { logger } from '../src/logger';
+import { Emulator } from '../src/trading/emulator';
+import { LiveTrader } from '../src/trading/live-trader';
 
 function makeBar(minute: number, close: number, high = close + 0.2, low = close - 0.2): Bar {
     const hh = 13;
@@ -417,6 +423,7 @@ describe('strategy integration', () => {
             }
         }
         const client = new TestClient(mostActiveSymbols, sessionDate);
+        const trader = new LiveTrader(client);
 
         const retrievedSymbols = await client.getMostActiveSymbols(env.quantityToRetrieve);
 
@@ -426,7 +433,7 @@ describe('strategy integration', () => {
             mostActiveSymbols: retrievedSymbols,
         });
 
-        const candidates = await findBreakoutCandidates(client, sessionDate);
+        const candidates = await findBreakoutCandidates(client, trader, sessionDate);
 
         logger.info('Found breakout candidates', {
             mostActiveCount: retrievedSymbols.length,
@@ -525,8 +532,9 @@ describe('strategy integration', () => {
             [longSymbol]: makeLongBreakoutBars(longSymbol, sessionDate),
             [shortSymbol]: makeShortBreakoutBars(shortSymbol, sessionDate),
         });
+        const trader = new LiveTrader(client);
 
-        const candidates = await findBreakoutCandidates(client, sessionDate);
+        const candidates = await findBreakoutCandidates(client, trader, sessionDate);
         const trades = buildWeightedRiskTrades(candidates, 1000, env.takeProfitMultiple);
 
         const longTrade = trades.find((trade) => trade.symbol === longSymbol);
@@ -580,21 +588,9 @@ describe('strategy integration', () => {
         env.dryRun = true;
 
         try {
-            // Directly insert a simulated position so we don't need to reproduce
-            // the full breakout + retest logic.
-            const { simulatedPositions } = require('../src/app');
             const entryPrice = 100;
             const stopPrice = 95;
             const takeProfitPrice = 110;
-
-            simulatedPositions.set(symbol, {
-                side: 'long',
-                entryPrice,
-                stopPrice,
-                takeProfitPrice,
-                entryTime: '2026-05-21T13:31:30.000Z',
-                qty: 10,
-            });
 
             // Bars: an intermediate bar hits the target (high >= 110), then a
             // pullback bar (latest bar) has high < 110.  Without the fix only
@@ -614,10 +610,19 @@ describe('strategy integration', () => {
                 async getIntradayBars() { return bars; }
             }
             const client = new TestClient();
+            const emulator = new Emulator(client);
+            emulator.simulatedPositions.set(symbol, {
+                side: 'long',
+                entryPrice,
+                stopPrice,
+                takeProfitPrice,
+                entryTime: '2026-05-21T13:31:30.000Z',
+                qty: 10,
+            });
 
-            await evaluateSymbol(client, symbol, sessionDate);
+            await evaluateSymbol(client, emulator, symbol, sessionDate);
 
-            expect(simulatedPositions.has(symbol)).to.be.false;
+            expect(emulator.simulatedPositions.has(symbol)).to.be.false;
         } finally {
             env.dryRun = originalDryRun;
         }
@@ -631,7 +636,6 @@ describe('strategy integration', () => {
         env.dryRun = true;
 
         try {
-            const { simulatedPositions } = require('../src/app');
             const entryPrice = 100;
             const stopPrice = 95;
             const takeProfitPrice = 110;
@@ -639,15 +643,6 @@ describe('strategy integration', () => {
             // Entry time is mid-bar (13:32:15), so the 13:32:00 bar's timestamp
             // is BEFORE entryTime.  The old filter (bar.timestamp >= entryTime)
             // would exclude this bar, missing the target hit.
-            simulatedPositions.set(symbol, {
-                side: 'long',
-                entryPrice,
-                stopPrice,
-                takeProfitPrice,
-                entryTime: '2026-05-21T13:32:15.000Z',
-                qty: 10,
-            });
-
             const bars: Bar[] = [
                 { symbol, timestamp: '2026-05-21T13:30:00Z', open: 100, high: 101, low: 99, close: 100, volume: 1000 },
                 { symbol, timestamp: '2026-05-21T13:31:00Z', open: 100, high: 101, low: 99, close: 100, volume: 1000 },
@@ -662,10 +657,19 @@ describe('strategy integration', () => {
                 async getIntradayBars() { return bars; }
             }
             const client = new TestClient();
+            const emulator = new Emulator(client);
+            emulator.simulatedPositions.set(symbol, {
+                side: 'long',
+                entryPrice,
+                stopPrice,
+                takeProfitPrice,
+                entryTime: '2026-05-21T13:32:15.000Z',
+                qty: 10,
+            });
 
-            await evaluateSymbol(client, symbol, sessionDate);
+            await evaluateSymbol(client, emulator, symbol, sessionDate);
 
-            expect(simulatedPositions.has(symbol)).to.be.false;
+            expect(emulator.simulatedPositions.has(symbol)).to.be.false;
         } finally {
             env.dryRun = originalDryRun;
         }

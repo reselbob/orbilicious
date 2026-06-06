@@ -5,6 +5,7 @@ import { env, strategyConfig } from '../src/config';
 import { Bar } from '../src/types';
 import { findBreakoutCandidates, executeSizedTrades, evaluateSymbol } from '../src/app';
 import { buildWeightedRiskTrades } from '../src/basket';
+import { Emulator } from '../src/trading/emulator';
 
 /**
  * Test: can take profit before retest (simplified)
@@ -84,13 +85,14 @@ describe('can take profit before retest (simplified)', () => {
             }
         }
         const client = new TestClient();
+        const emulator = new Emulator(client);
 
         // Build a breakout candidate and trade
-        const candidates = await findBreakoutCandidates(client, sessionDate);
+        const candidates = await findBreakoutCandidates(client, emulator, sessionDate);
         const trades = buildWeightedRiskTrades(candidates, 1000, env.takeProfitMultiple);
 
         // Simulate trade execution (should open simulated position)
-        await executeSizedTrades(client, sessionDate, trades);
+        await executeSizedTrades(emulator, sessionDate, trades);
 
         // Add a new bar that hits the profit target before retest
         bars.push({
@@ -104,12 +106,9 @@ describe('can take profit before retest (simplified)', () => {
         });
 
         // Re-evaluate symbol to trigger profit-taking logic
-        await evaluateSymbol(client, symbol, sessionDate);
+        await evaluateSymbol(client, emulator, symbol, sessionDate);
 
         // The simulated position should be closed (not present in the map)
-        // We access the simulatedPositions map from the app module
-        // @ts-ignore
-        const { simulatedPositions } = require('../src/app');
-        expect(simulatedPositions.has(symbol)).to.be.false;
+        expect(emulator.simulatedPositions.has(symbol)).to.be.false;
     });
 });

@@ -17,20 +17,13 @@ import {
 import { Bar } from './types';
 import type { OrbReportResult } from './reports';
 import { logBreakoutHigh, logBreakoutLow, logTradeOpen, logTradeClose } from './trade-logger';
+import { ITrader } from './trading/trader-interface';
+import { Emulator } from './trading/emulator';
+import { LiveTrader } from './trading/live-trader';
 
 const executedToday = new Set<string>();
 const reportedDates = new Set<string>();
 
-interface SimulatedPosition {
-    side: 'long' | 'short';
-    entryPrice: number;
-    entryTime: string;
-    stopPrice: number;
-    stopLossPct?: number;
-    takeProfitPrice: number;
-    qty: number;
-}
-export const simulatedPositions = new Map<string, SimulatedPosition>();
 
 type TradeMonitorEvent = {
     eventType: 'open' | 'close';
@@ -580,23 +573,18 @@ function buildConfirmedBreakoutCandidate(
 
 export async function evaluateSymbol(
     client: AlpacaClient,
+    trader: ITrader,
     symbol: string,
     sessionDate: string,
     barsMap?: Map<string, Bar[]>
 ): Promise<BreakoutCandidate | null> {
     try {
-        // In dryRun mode use the in-memory simulated position table; live modes query Alpaca.
-        const rawSim = env.dryRun ? simulatedPositions.get(symbol) : undefined;
-        const position = rawSim
-            ? { symbol, side: rawSim.side, qty: rawSim.qty, entryPrice: rawSim.entryPrice }
-            : (!env.dryRun ? await client.getOpenPosition(symbol) : null);
+        const position = await trader.getPosition(symbol);
 
         if (position) {
             if (position.entryPrice == null) {
                 logger.warn('Skipping position management due to missing entry price', {
-                    symbol,
-                    side: position.side,
-                    qty: position.qty,
+                    symbol, side: position.side, qty: position.qty,
                 });
                 return null;
             }
@@ -609,179 +597,17 @@ export async function evaluateSymbol(
 
             if (!latestBar) {
                 logger.debug('Skipping symbol with existing position and no session bars', {
-                    symbol,
-                    sessionDate,
-                    side: position.side,
-                    entryPrice: position.entryPrice,
+                    symbol, sessionDate, side: position.side, entryPrice: position.entryPrice,
                 });
                 return null;
             }
 
+            const result = await trader.managePosition(
+                symbol, position, sessionDate, sessionBars, latestBar
+            );
 
-            // Scan all session bars (not just latestBar) so a target/stop hit on any
-            // bar since entry is caught — even if the latest bar no longer shows the hit.
-            if (env.dryRun && rawSim) {
-                const postEntryBars = sessionBars.filter(
-                    (bar) => new Date(bar.timestamp).getTime() > new Date(rawSim.entryTime).getTime() - 60000
-                );
-                const hitBar = postEntryBars.find(bar => {
-                    if (rawSim.side === 'long') {
-                        return bar.low <= rawSim.stopPrice || bar.high >= rawSim.takeProfitPrice;
-                    } else {
-                        return bar.high >= rawSim.stopPrice || bar.low <= rawSim.takeProfitPrice;
-                    }
-                });
-
-                if (hitBar) {
-                    const closeEventTimestamp = new Date().toISOString();
-                    const stopHit = rawSim.side === 'long'
-                        ? hitBar.low <= rawSim.stopPrice
-                        : hitBar.high >= rawSim.stopPrice;
-                    const exitPrice = stopHit
-                        ? rawSim.stopPrice
-                        : rawSim.takeProfitPrice;
-                    const exitReason = stopHit
-                        ? `stop-loss hit (bar ${hitBar.timestamp})`
-                        : `take-profit hit (pre-retest, bar ${hitBar.timestamp})`;
-                    const pnl = rawSim.side === 'long'
-                        ? (exitPrice - rawSim.entryPrice) * rawSim.qty
-                        : (rawSim.entryPrice - exitPrice) * rawSim.qty;
-
-                    simulatedPositions.delete(symbol);
-                    logger.info('Dry-run: simulated position closed', {
-                        symbol,
-                        side: rawSim.side,
-                        exitReason,
-                        exitPrice,
-                        entryPrice: rawSim.entryPrice,
-                        pnl,
-                    });
-                    emitTradeCloseUiStatus(symbol, pnl);
-                    emitTradeMonitorEvent({
-                        eventType: 'close',
-                        sessionDate,
-                        timestamp: closeEventTimestamp,
-                        symbol,
-                        side: rawSim.side === 'long' ? 'sell' : 'buy',
-                        position: rawSim.side,
-                        qty: rawSim.qty,
-                        entryPrice: rawSim.entryPrice,
-                        closePrice: exitPrice,
-                        pnl,
-                        reason: exitReason,
-                    });
-                    logTradeClose(symbol, exitPrice, closeEventTimestamp);
-                    return null;
-                }
-
-                // If not stopped or target hit, check for end-of-day profit capture
-                if (isInProfitCaptureWindow(latestBar)) {
-                    const closeEventTimestamp = new Date().toISOString();
-                    const exitPrice = latestBar.close;
-                    const pnl = rawSim.side === 'long'
-                        ? (exitPrice - rawSim.entryPrice) * rawSim.qty
-                        : (rawSim.entryPrice - exitPrice) * rawSim.qty;
-                    simulatedPositions.delete(symbol);
-                    logger.info('Dry-run: simulated position closed (profit-capture window)', {
-                        symbol,
-                        side: rawSim.side,
-                        exitPrice,
-                        entryPrice: rawSim.entryPrice,
-                        pnl,
-                    });
-                    emitTradeCloseUiStatus(symbol, pnl);
-                    emitTradeMonitorEvent({
-                        eventType: 'close',
-                        sessionDate,
-                        timestamp: closeEventTimestamp,
-                        symbol,
-                        side: rawSim.side === 'long' ? 'sell' : 'buy',
-                        position: rawSim.side,
-                        qty: rawSim.qty,
-                        entryPrice: rawSim.entryPrice,
-                        closePrice: exitPrice,
-                        pnl,
-                        reason: `profit-capture close (bar ${latestBar.timestamp})`,
-                    });
-                    logTradeClose(symbol, exitPrice, closeEventTimestamp);
-                    return null;
-                }
-
-                logger.debug('Dry-run: keeping simulated position open', {
-                    symbol,
-                    side: rawSim.side,
-                    entryPrice: rawSim.entryPrice,
-                    stopPrice: rawSim.stopPrice,
-                    takeProfitPrice: rawSim.takeProfitPrice,
-                    latestClose: latestBar.close,
-                    latestLow: latestBar.low,
-                    latestHigh: latestBar.high,
-                });
-                return null;
-            }
-
-            if (!isInProfitCaptureWindow(latestBar)) {
-                logger.debug('Skipping profit-capture close outside end-of-day window', {
-                    symbol,
-                    side: position.side,
-                    entryPrice: position.entryPrice,
-                    latestClose: latestBar.close,
-                    latestTimestamp: latestBar.timestamp,
-                    forceExitTimeHHMM: strategyConfig.forceExitTimeHHMM,
-                });
-                return null;
-            }
-
-            const shouldClose = shouldClosePositionForProfitCapture({
-                side: position.side,
-                entryPrice: position.entryPrice,
-                latestClose: latestBar.close,
-            });
-
-            if (shouldClose) {
-                const closeEventTimestamp = new Date().toISOString();
-                if (env.dryRun) {
-                    logger.info('Dry-run: profit-capture rule would close open position', {
-                        symbol,
-                        side: position.side,
-                        entryPrice: position.entryPrice,
-                        latestClose: latestBar.close,
-                    });
-                } else {
-                    await client.closePosition(symbol);
-                    logger.info('Closed open position for end-of-day profit capture', {
-                        symbol,
-                        side: position.side,
-                        entryPrice: position.entryPrice,
-                        latestClose: latestBar.close,
-                    });
-                }
-
-                const closePnl = position.side === 'long'
-                    ? (latestBar.close - position.entryPrice) * position.qty
-                    : (position.entryPrice - latestBar.close) * position.qty;
-                emitTradeCloseUiStatus(symbol, closePnl);
-                emitTradeMonitorEvent({
-                    eventType: 'close',
-                    sessionDate,
-                    timestamp: closeEventTimestamp,
-                    symbol,
-                    side: position.side === 'long' ? 'sell' : 'buy',
-                    position: position.side,
-                    qty: position.qty,
-                    entryPrice: position.entryPrice,
-                    closePrice: latestBar.close,
-                    pnl: closePnl,
-                    reason: `profit-capture close (bar ${latestBar.timestamp})`,
-                });
-                logTradeClose(symbol, latestBar.close, closeEventTimestamp);
-            } else {
-                logger.debug('Keeping open position; close is not yet favorable for profit capture', {
-                    symbol,
-                    side: position.side,
-                    entryPrice: position.entryPrice,
-                    latestClose: latestBar.close,
-                });
+            if (result.action === 'closed') {
+                executedToday.add(executionKey(sessionDate, symbol));
             }
 
             return null;
@@ -807,6 +633,7 @@ export async function evaluateSymbol(
 
 export async function findBreakoutCandidates(
     client: AlpacaClient,
+    trader: ITrader,
     sessionDate: string,
     options?: { mostActiveSymbolLimit?: number },
 ): Promise<BreakoutCandidate[]> {
@@ -825,7 +652,7 @@ export async function findBreakoutCandidates(
     const barsMap = await client.getIntradayBarsBatch(symbols, sessionDate);
 
     const results = await Promise.all(
-        symbols.map((symbol) => evaluateSymbol(client, symbol, sessionDate, barsMap))
+        symbols.map((symbol) => evaluateSymbol(client, trader, symbol, sessionDate, barsMap))
     );
 
     const candidates = results.filter((x): x is BreakoutCandidate => x !== null);
@@ -848,7 +675,7 @@ export async function findBreakoutCandidates(
 }
 
 export async function executeSizedTrades(
-    client: AlpacaClient,
+    trader: ITrader,
     sessionDate: string,
     trades: SizedTrade[]
 ) {
@@ -860,7 +687,6 @@ export async function executeSizedTrades(
         tradeCount: trades.length,
         totalPlannedRisk,
         totalEstimatedNotional,
-        dryRun: env.dryRun,
     });
 
     const tradesToExecute: SizedTrade[] = [];
@@ -877,115 +703,34 @@ export async function executeSizedTrades(
         tradesToExecute.push(trade);
     }
 
-    if (env.dryRun) {
-        for (const trade of tradesToExecute) {
-            const openEventTimestamp = new Date().toISOString();
-            logger.info('Trade executed in dry-run mode; no Alpaca bracket order submitted', {
-                symbol: trade.symbol,
-                side: trade.side,
-                qty: trade.qty,
-                entry: trade.price,
-                stop: trade.stopPrice,
-                target: trade.takeProfitPrice,
-                plannedRisk: trade.plannedRiskDollars,
-                estimatedNotional: trade.estimatedNotional,
-            });
-
-            emitTradeMonitorEvent({
-                eventType: 'open',
-                sessionDate,
-                timestamp: openEventTimestamp,
-                symbol: trade.symbol,
-                side: trade.side,
-                position: trade.side === 'buy' ? 'long' : 'short',
-                qty: trade.qty,
-                entryPrice: trade.price,
-                stopPrice: trade.stopPrice,
-                stopLossPct: trade.stopLossPct,
-                targetPrice: trade.takeProfitPrice,
-                reason: 'dry-run simulated entry',
-            });
-
-            simulatedPositions.set(trade.symbol, {
-                side: trade.side === 'buy' ? 'long' : 'short',
-                entryPrice: trade.price,
-                entryTime: openEventTimestamp,
-                stopPrice: trade.stopPrice,
-                stopLossPct: trade.stopLossPct,
-                takeProfitPrice: trade.takeProfitPrice,
-                qty: trade.qty,
-            });
-
-            logTradeOpen(trade.symbol, trade.price, openEventTimestamp);
-        }
-
+    if (!tradesToExecute.length) {
         return;
     }
 
-    await Promise.all(
-        tradesToExecute.map((trade) =>
-            client.submitBracketOrder({
-                symbol: trade.symbol,
-                side: trade.side,
-                qty: trade.qty,
-                takeProfitLimitPrice: trade.takeProfitPrice,
-                stopLossStopPrice: trade.stopPrice,
-            })
-        )
-    );
-
-    for (const trade of tradesToExecute) {
-        const openEventTimestamp = new Date().toISOString();
-        emitTradeMonitorEvent({
-            eventType: 'open',
-            sessionDate,
-            timestamp: openEventTimestamp,
-            symbol: trade.symbol,
-            side: trade.side,
-            position: trade.side === 'buy' ? 'long' : 'short',
-            qty: trade.qty,
-            entryPrice: trade.price,
-            stopPrice: trade.stopPrice,
-            stopLossPct: trade.stopLossPct,
-            targetPrice: trade.takeProfitPrice,
-            reason: 'bracket order submitted',
-        });
-
-        logTradeOpen(trade.symbol, trade.price, openEventTimestamp);
-    }
-
-    logger.info('Submitted bracket orders', {
-        sessionDate,
-        submittedCount: tradesToExecute.length,
-        symbols: tradesToExecute.map((trade) => trade.symbol),
-    });
+    await trader.executeTrades(tradesToExecute, sessionDate);
 }
 
 export async function runCycle(
     client: AlpacaClient,
+    trader: ITrader,
     sessionDate: string,
     options?: { mostActiveSymbolLimit?: number },
 ) {
     logger.info('Starting run cycle', { sessionDate });
 
-    const account = await client.getAccount();
+    const account = await trader.getAccount();
 
     if (account.tradingBlocked) {
         logger.warn('Trading is blocked on account', { sessionDate });
         return;
     }
 
-    const candidates = await findBreakoutCandidates(client, sessionDate, options);
+    const candidates = await findBreakoutCandidates(client, trader, sessionDate, options);
     const { longs, shorts } = rankAndSelectCandidates(candidates, env.maxPositionsPerSide);
     const selected = [...longs, ...shorts];
     const effectiveBuyingPower = Math.min(account.buyingPower, env.hardBasketCap);
 
-    const usedRisk = Array.from(simulatedPositions.values()).reduce((sum, pos) => {
-        const perShare = pos.side === 'long'
-            ? pos.entryPrice - pos.stopPrice
-            : pos.stopPrice - pos.entryPrice;
-        return sum + Math.max(0, perShare) * pos.qty;
-    }, 0);
+    const usedRisk = trader.computeUsedRisk();
     const remainingRisk = Math.max(0, env.maxTotalRisk - usedRisk);
 
     if (remainingRisk <= 0) {
@@ -1020,7 +765,7 @@ export async function runCycle(
         normalizedTradeCount: normalizedTrades.length,
     });
 
-    await executeSizedTrades(client, sessionDate, normalizedTrades);
+    await executeSizedTrades(trader, sessionDate, normalizedTrades);
     logger.info('Completed run cycle', { sessionDate });
 }
 
@@ -1029,13 +774,13 @@ export type StartAppOptions = {
 };
 
 export async function startApp(options?: StartAppOptions) {
-    // Reset per-run state so a re-start (e.g. after clearing trades) gets a
-    // fresh run rather than being silently skipped by stale Set entries.
     executedToday.clear();
     reportedDates.clear();
-    simulatedPositions.clear();
 
     const client = new AlpacaClient();
+    const trader: ITrader = env.sessionMode === 'EMULATION'
+        ? new Emulator(client)
+        : new LiveTrader(client);
     const continuousMode = options?.continuous === true;
     const shouldRunHistorical = env.sessionMode === 'EMULATION' && Boolean(env.sessionDate);
 
@@ -1221,7 +966,7 @@ export async function startApp(options?: StartAppOptions) {
                 }
 
                 if (!breakoutScanCompleteByDate.has(sessionDate)) {
-                    await runCycle(client, sessionDate);
+                    await runCycle(client, trader, sessionDate);
                     if (currentMinutes >= breakoutWindowEndMinutes) {
                         logger.info('Breakout window closed; initial scan complete', {
                             sessionDate,

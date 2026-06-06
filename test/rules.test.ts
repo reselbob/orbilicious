@@ -17,6 +17,8 @@ import { env, strategyConfig } from '../src/config';
 import { logger } from '../src/logger';
 import type { OrbReportResult } from '../src/reports';
 import type { Bar, Position } from '../src/types';
+import { Emulator } from '../src/trading/emulator';
+import { LiveTrader } from '../src/trading/live-trader';
 
 type RestoreFn = () => void;
 
@@ -726,7 +728,7 @@ describe('Operational Rules support', () => {
         }
 
         const blockedClient = new TradingBlockedClient();
-        await runCycle(blockedClient, '2026-05-18');
+        await runCycle(blockedClient, new LiveTrader(blockedClient), '2026-05-18');
         expect(blockedClient.mostActiveCalls).to.equal(0);
 
         class EvaluationClient extends AlpacaClient {
@@ -791,7 +793,8 @@ describe('Operational Rules support', () => {
 
         const writes = captureStdout();
         const client = new EvaluationClient();
-        const firstPass = await findBreakoutCandidates(client, '2026-05-18');
+        const liveTrader = new LiveTrader(client);
+        const firstPass = await findBreakoutCandidates(client, liveTrader, '2026-05-18');
 
         // getMostActiveSymbolsFiltered internally fetches 4x the desired count, capped at 100
         expect(client.requestedLimit).to.equal(Math.min(env.quantityToRetrieve * 4, 100));
@@ -800,8 +803,8 @@ describe('Operational Rules support', () => {
         expect(writes.join('')).to.include('__UI_STATUS__Closing HAS_POSITION for a profit of $2.00.');
 
         const seededTrades = normalizeTradesToConstraints(buildWeightedRiskTrades(firstPass, 1000), 1000, 25000, 5000);
-        await executeSizedTrades(client, '2026-05-18', seededTrades);
-        const secondPass = await findBreakoutCandidates(client, '2026-05-18');
+        await executeSizedTrades(liveTrader, '2026-05-18', seededTrades);
+        const secondPass = await findBreakoutCandidates(client, liveTrader, '2026-05-18');
         expect(secondPass).to.have.length(0);
     });
 
@@ -848,7 +851,8 @@ describe('Operational Rules support', () => {
 
         env.quantityToRetrieve = 4;
         strategyConfig.openingRangeMinutes = 14;
-        const candidates = await findBreakoutCandidates(new CandidateClient(), '2026-05-19');
+        const candidateClient = new CandidateClient();
+        const candidates = await findBreakoutCandidates(candidateClient, new LiveTrader(candidateClient), '2026-05-19');
         const bySymbol = new Map(candidates.map((candidate) => [candidate.symbol, candidate]));
 
         expect(candidates.map((candidate) => candidate.symbol).sort()).to.deep.equal(['LONG_OK', 'SHORT_OK']);
@@ -898,20 +902,21 @@ describe('Operational Rules support', () => {
         }
 
         const client = new CandidateTypeClient();
+        const ctTrader = new LiveTrader(client);
         strategyConfig.openingRangeMinutes = 14;
 
         env.candidateTradeType = 'LONG';
-        const longOnly = await findBreakoutCandidates(client, '2026-05-20');
+        const longOnly = await findBreakoutCandidates(client, ctTrader, '2026-05-20');
         expect(longOnly).to.have.length(1);
         expect(longOnly[0].side).to.equal('buy');
 
         env.candidateTradeType = 'SHORT';
-        const shortOnly = await findBreakoutCandidates(client, '2026-05-20');
+        const shortOnly = await findBreakoutCandidates(client, ctTrader, '2026-05-20');
         expect(shortOnly).to.have.length(1);
         expect(shortOnly[0].side).to.equal('sell');
 
         env.candidateTradeType = 'LONG_AND_SHORT';
-        const both = await findBreakoutCandidates(client, '2026-05-20');
+        const both = await findBreakoutCandidates(client, ctTrader, '2026-05-20');
         expect(both.map((candidate) => candidate.side).sort()).to.deep.equal(['buy', 'sell']);
     });
 
@@ -960,7 +965,8 @@ describe('Operational Rules support', () => {
         env.breakoutTrendTimeframeMinutes = 5;
         env.breakoutTrendLookbackBars = 3;
 
-        const candidates = await findBreakoutCandidates(new QualityClient(), '2026-05-20');
+        const qualityClient = new QualityClient();
+        const candidates = await findBreakoutCandidates(qualityClient, new LiveTrader(qualityClient), '2026-05-20');
         expect(candidates.map((candidate) => candidate.symbol)).to.deep.equal(['CONFIRMED']);
     });
 
@@ -1001,11 +1007,13 @@ describe('Operational Rules support', () => {
         env.breakoutQualityFiltersEnabled = false;
         strategyConfig.openingRangeMinutes = 14;
 
-        const staleCandidates = await findBreakoutCandidates(new StaleRetestClient(), '2026-05-20');
+        const staleClient = new StaleRetestClient();
+        const staleCandidates = await findBreakoutCandidates(staleClient, new LiveTrader(staleClient), '2026-05-20');
         expect(staleCandidates).to.deep.equal([]);
 
         env.breakoutRetestMaxAgeMinutes = 120;
-        const freshCandidates = await findBreakoutCandidates(new StaleRetestClient(), '2026-05-20');
+        const freshClient = new StaleRetestClient();
+        const freshCandidates = await findBreakoutCandidates(freshClient, new LiveTrader(freshClient), '2026-05-20');
         expect(freshCandidates.map((candidate) => candidate.symbol)).to.deep.equal(['CONFIRMED']);
     });
 
@@ -1230,8 +1238,9 @@ describe('Operational Rules support', () => {
         }];
 
         env.dryRun = true;
-        await executeSizedTrades(client, '2026-05-20', dryRunTrades);
-        await executeSizedTrades(client, '2026-05-20', dryRunTrades);
+        const emulator = new Emulator(client);
+        await executeSizedTrades(emulator, '2026-05-20', dryRunTrades);
+        await executeSizedTrades(emulator, '2026-05-20', dryRunTrades);
 
         const output = writes.join('');
         expect(client.submitted).to.have.length(0);
@@ -1242,7 +1251,8 @@ describe('Operational Rules support', () => {
             ...dryRunTrades[0],
             symbol: 'LIVE_A',
         }];
-        await executeSizedTrades(client, '2026-05-21', liveTrades);
+        const liveTrader = new LiveTrader(client);
+        await executeSizedTrades(liveTrader, '2026-05-21', liveTrades);
 
         expect(client.submitted).to.deep.equal([{ symbol: 'LIVE_A', side: 'buy', qty: 2 }]);
     });

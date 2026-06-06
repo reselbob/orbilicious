@@ -6,6 +6,7 @@ import { buildWeightedRiskTrades, normalizeTradesToConstraints } from '../src/ba
 import { executeSizedTrades, findBreakoutCandidates } from '../src/app';
 import { installMockFetch } from './helpers/mock-fetch';
 import { Bar, Position } from '../src/types';
+import { LiveTrader } from '../src/trading/live-trader';
 
 describe('alpaca client integration', () => {
     it('reads buying power from account response', async () => {
@@ -252,8 +253,9 @@ describe('alpaca client integration', () => {
 
         const client = new RuntimeNoTradeClient();
         const sessionDate = '2026-05-13';
+        const liveTrader = new LiveTrader(client);
 
-        const candidates = await findBreakoutCandidates(client, sessionDate);
+        const candidates = await findBreakoutCandidates(client, liveTrader, sessionDate);
         const weightedTrades = buildWeightedRiskTrades(
             candidates,
             env.maxTotalRisk,
@@ -268,7 +270,7 @@ describe('alpaca client integration', () => {
         env.dryRun = false;
 
         try {
-            await executeSizedTrades(client, sessionDate, trades);
+            await executeSizedTrades(liveTrader, sessionDate, trades);
         } finally {
             env.dryRun = previousDryRun;
         }

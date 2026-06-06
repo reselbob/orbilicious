@@ -6,6 +6,8 @@ import { env, strategyConfig } from '../src/config';
 import { executeSizedTrades, findBreakoutCandidates } from '../src/app';
 import { logger } from '../src/logger';
 import { Bar, Position } from '../src/types';
+import { Emulator } from '../src/trading/emulator';
+import { LiveTrader } from '../src/trading/live-trader';
 
 type BracketOrderParams = {
     symbol: string;
@@ -193,15 +195,16 @@ describe('app trade execution', () => {
         }
         try {
             const client = new TestClient(activeSymbols, sessionDate);
+            const emulator = new Emulator(client);
 
-            const candidates = await findBreakoutCandidates(client, sessionDate);
+            const candidates = await findBreakoutCandidates(client, emulator, sessionDate);
             const trades = normalizeTradesToConstraints(
                 buildWeightedRiskTrades(candidates, 1000),
                 1000,
                 1_000_000
             );
 
-            await executeSizedTrades(client, sessionDate, trades);
+            await executeSizedTrades(emulator, sessionDate, trades);
 
             const candidateSymbols = candidates.map((candidate) => candidate.symbol);
             const dryRunTradeSymbols = trades.map((trade) => trade.symbol);
@@ -260,7 +263,8 @@ describe('app trade execution', () => {
         env.dryRun = false;
 
         try {
-            const candidates = await findBreakoutCandidates(client, sessionDate);
+            const liveTrader = new LiveTrader(client);
+            const candidates = await findBreakoutCandidates(client, liveTrader, sessionDate);
             expect(candidates).to.have.length(0);
             expect(client.closedSymbols.sort()).to.deep.equal(['LONG_PROFIT', 'SHORT_PROFIT']);
         } finally {
