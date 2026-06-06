@@ -152,27 +152,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CandidateChartsResponse'
-  /liquidity-zones:
-    get:
-      summary: Get liquidity zones for most active symbols
-      parameters:
-        - in: query
-          name: sessionDate
-          schema:
-            type: string
-          required: false
-        - in: query
-          name: limit
-          schema:
-            type: integer
-          required: false
-      responses:
-        '200':
-          description: Returns liquidity zone data for the most active symbols, helping to identify key price levels and support/resistance areas for trading decisions.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/LiquidityZonesResponse'
   /orbilicious/start:
     post:
       summary: Start the ORBilicious process
@@ -408,20 +387,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CandidateChartResponse'
-    LiquidityZonesResponse:
-      type: object
-      properties:
-        zones:
-          type: array
-          items:
-            type: object
-            properties:
-              symbol:
-                type: string
-              levels:
-                type: array
-                items:
-                  type: number
     StartResponse:
       type: object
       properties:

@@ -1,0 +1,74 @@
+flowchart LR
+    Start([Start]) --> Scan
+
+    subgraph Scan ["1. Symbol Scan"]
+        direction TB
+        Fetch["Fetch most active stocks<br>(4x desired, cap 100)"] --> Price["Filter: price >= $1"]
+        Price --> Top["Keep top QUANTITY_TO_RETRIEVE"]
+        Top --> Bars["Get 1-min intraday bars<br>from Alpaca REST"]
+    end
+
+    Scan --> OR
+
+    subgraph OR ["2. Opening Range"]
+        direction TB
+        CompOR["Compute OR high/low<br>from first 15 bars<br>(09:31-09:45 ET)"] --> EmitOR["Emit OR status"]
+    end
+
+    OR --> BD
+
+    subgraph BD ["3. Breakout Determination (09:31-09:46 ET)"]
+        direction TB
+        ForEach["For each symbol:"] --> BC{Breakout bar closes<br>outside OR range?}
+        BC -->|No| Reject[Reject]
+        BC -->|Yes| Retest{Retest within<br>max age?}
+        Retest -->|No| Reject
+        Retest -->|Yes| QF{Passes quality<br>filters?}
+        QF -->|No| Reject
+        QF -->|Yes| Score["Score candidate"]
+        Reject --> ForEach
+        Score --> DoneBD["Done"]
+    end
+
+    BD --> TS
+
+    subgraph TS ["4. Trade Sizing"]
+        direction TB
+        Rank["Rank by score,<br>separate L/S"] --> Select["Top MAX_POSITIONS_PER_SIDE<br>per side (default 3)"]
+        Select --> Risk["Compute remaining risk<br>(maxTotalRisk - usedRisk)"]
+        Risk --> Check{Remaining<br>risk > 0?}
+        Check -->|No| Stop[Stop]
+        Check -->|Yes| Weight["Weighted risk by score"]
+        Weight --> Norm["Normalize to notional,<br>buying power, qty floor"]
+    end
+
+    TS --> TE
+
+    subgraph TE ["5. Trade Execution"]
+        direction TB
+        Dedup["Dedup check"] --> Mode{Mode?}
+        Mode -->|EMULATION| Dry["Log dry-run entry"]
+        Mode -->|PAPER/LIVE| Order["Submit bracket order<br>(entry, stop, target)"]
+    end
+
+    TE --> PM
+
+    subgraph PM ["6. Position Monitoring"]
+        direction TB
+        Poll["Poll every 20s"] --> FE{Force-exit<br>time?}
+        FE -->|Yes| FC["Close at favorable<br>price or market"]
+        FE -->|No| Broker{Stop/target<br>hit?}
+        Broker -->|Yes| Done[Closed]
+        Broker -->|No| Poll
+        FC --> Done
+    end
+
+    PM --> EOD
+
+    subgraph EOD ["7. End of Day"]
+        direction TB
+        MC{Market<br>closed?} -->|Yes| Report["Generate ORB report"]
+        MC -->|No| PM
+    end
+
+    EOD --> End([Session Complete])

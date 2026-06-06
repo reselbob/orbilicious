@@ -285,6 +285,10 @@ Below the chart, each detail row lists:
 
 ## Developer Notes
 
+### Workflow
+
+![ORB Trading Pipeline](docs/workflow.png)
+
 ### Strategy rules
 
 - Target profit-taking (all-bars scan): Every session bar is scanned for stop/target hits, not just the latest bar. If any bar since entry touched the take-profit price, the trade is closed immediately even if the latest bar has pulled back below target. This ensures profits are captured even when a spike hits the target and then reverses.
