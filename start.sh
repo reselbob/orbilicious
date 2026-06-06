@@ -6,6 +6,7 @@ cd "$PROJECT_ROOT"
 
 NO_OPEN_BROWSER=false
 WEB_PORT_OVERRIDE=""
+DOCS_PORT=9000
 APP_ARGS=()
 
 log() {
@@ -57,30 +58,31 @@ EOF
   log "Installed Node $(node -v) and npm $(npm -v)"
 }
 
-install_typescript() {
-  if [ -x "./node_modules/.bin/tsc" ]; then
-    log "Project TypeScript compiler already present"
+install_dependencies() {
+  log "Installing ORBilicious dependencies"
+  npm install --legacy-peer-deps
+}
+
+install_gatsby_dependencies() {
+  if [ -d "docs-site/node_modules" ]; then
+    log "Gatsby dependencies already present"
     return
   fi
-
-  log "Ensuring TypeScript is available in the project"
-  npm install --save-dev typescript
+  log "Installing Gatsby documentation site dependencies"
+  (cd docs-site && npm install --legacy-peer-deps)
 }
 
-install_dependencies() {
-  log "Installing project dependencies"
-  npm install
-}
-
-compile_project() {
-  log "Compiling TypeScript project"
-  npx tsc -p tsconfig.json
+build_gatsby_site() {
+  log "Building Gatsby documentation site"
+  (cd docs-site && npm run build)
 }
 
 run_project() {
   local web_port="${WEB_PORT_OVERRIDE:-${WEB_PORT:-8787}}"
-  local entry_url="http://localhost:${web_port}"
+  local web_url="http://localhost:${web_port}"
+  local docs_url="http://localhost:${DOCS_PORT}"
   local web_pid
+  local docs_pid
 
   # Kill any process still holding the web port from a prior session
   local old_pid
@@ -91,11 +93,21 @@ run_project() {
     sleep 1
   fi
 
+  old_pid="$(lsof -ti "tcp:${DOCS_PORT}" 2>/dev/null || true)"
+  if [[ -n "${old_pid}" ]]; then
+    log "Killing existing process ${old_pid} on port ${DOCS_PORT}"
+    kill "${old_pid}" 2>/dev/null || true
+    sleep 1
+  fi
+
   cleanup() {
     local code=$?
 
     if [[ -n "${web_pid:-}" ]] && kill -0 "$web_pid" >/dev/null 2>&1; then
       kill "$web_pid" >/dev/null 2>&1 || true
+    fi
+    if [[ -n "${docs_pid:-}" ]] && kill -0 "$docs_pid" >/dev/null 2>&1; then
+      kill "$docs_pid" >/dev/null 2>&1 || true
     fi
 
     wait >/dev/null 2>&1 || true
@@ -104,22 +116,42 @@ run_project() {
 
   trap cleanup INT TERM EXIT
 
-  log "Starting compiled web server on port ${web_port}"
-  WEB_PORT="$web_port" npm run start:web &
+  log "Starting Gatsby documentation site on port ${DOCS_PORT}"
+  (cd docs-site && npx gatsby serve --port "$DOCS_PORT") &
+  docs_pid=$!
+
+  log "Starting ORBilicious web UI on port ${web_port}"
+  WEB_PORT="$web_port" npx tsx src/web/server.ts &
   web_pid=$!
 
-  if [[ "$NO_OPEN_BROWSER" == "true" ]]; then
-    log "Browser auto-open disabled (--no-open). Entry page: ${entry_url}"
-  elif require_cmd xdg-open; then
-    log "Opening entry page: ${entry_url}"
-    xdg-open "$entry_url" >/dev/null 2>&1 || true
-  else
-    log "Open this URL in your browser: ${entry_url}"
-  fi
+  box() { printf "║  %-60s ║\n" "$1"; }
+  sep() { printf "║  %-60s ║\n" ""; }
+  top() { printf "╔"; for i in $(seq 63); do printf "═"; done; printf "╗\n"; }
+  bot() { printf "╚"; for i in $(seq 63); do printf "═"; done; printf "╝\n"; }
 
-  log "Web server PID ${web_pid}"
-  log "Use the web UI Start button to launch ORBilicious so Trade Monitor stays in sync"
-  log "Press Ctrl+C to stop the web server"
+  echo ""
+  top
+  sep
+  box "ORBilicious is running"
+  sep
+  box "Web UI:           ${web_url}"
+  box "Documentation:    ${docs_url}"
+  sep
+  box "Click the Start ORBilicious button in the web UI to get"
+  box "Most Active Stocks, discover Breakout Candidates, and"
+  box "conduct trading according to the Opening Range Breakout"
+  box "(ORB) strategy."
+  sep
+  box "Press Ctrl+C to stop all services"
+  bot
+  echo ""
+
+  if [[ "$NO_OPEN_BROWSER" == "true" ]]; then
+    log "Browser auto-open disabled (--no-open)."
+  elif require_cmd xdg-open; then
+    log "Opening web UI: ${web_url}"
+    xdg-open "$web_url" >/dev/null 2>&1 || true
+  fi
 
   wait "$web_pid"
 }
@@ -179,9 +211,9 @@ main() {
   parse_args "$@"
   install_node
   install_dependencies
-  install_typescript
-  compile_project
-  run_project "${APP_ARGS[@]}"
+  install_gatsby_dependencies
+  build_gatsby_site
+  run_project
 }
 
 main "$@"
