@@ -162,7 +162,7 @@ Notes:
 - **Session mode**: Choose `EMULATION` (Alpaca data, no orders), `PAPER` (paper trading), or `LIVE` (live trading).
 - **Emulation session date**: For `EMULATION` mode, select a past trading day to run a historical backtest from that date forward.
 - **Most active stocks to scan**: Set how many most-active symbols are retrieved before breakout candidate discovery starts (default `40`). Internally, the app over-fetches most-active symbols for filtering (`4 x QUANTITY_TO_RETRIEVE`) but caps that fetch at `100` symbols.
-- **Continuous mode**: Run the strategy continuously (only available in `PAPER` and `LIVE` modes).
+- **Continuous mode**: Run the strategy continuously across multiple sessions (only available in `PAPER` and `LIVE` modes). After market close, the app stays alive and shows "Waiting for NY Market to open on {next date}" in the status area until the next market open. Before the NY open on a weekday, it shows "Waiting for NY Market to open on {today}". On weekends it shows the next Monday's date.
 - **Breakout Candidate Trade Type**: Filter which breakout directions are considered. Choose `Long` to accept only bullish breakouts, `Short` to accept only bearish breakouts, or `Both` (default) to accept either direction.
 - **Money in Account**: Total account capital available (default $25,000). Overrides `HARD_BASKET_CAP` env var.
 - **Max Amount to Risk Per Trading Day**: Maximum total stop-loss risk per day (default $1,000). Overrides `MAX_TOTAL_RISK` env var.
@@ -384,7 +384,7 @@ The list below follows the order the app actually applies rules at runtime.
 
 - _Test: `rules.test.ts` — `it('rule 7: same-day emulation after market close runs the historical branch')`_
 
-8. In current-day mode, the loop runs forever until it is allowed to exit. On weekends it does nothing except wait. Before the New York open it does nothing except wait for the market to open.
+8. In current-day mode, the loop runs forever until it is allowed to exit. On weekends it emits `"Waiting for NY Market to open on {next Monday}"` and waits. Before the New York open on a weekday it emits `"Waiting for NY Market to open on {today}"` and waits for market open. In continuous mode, after the end-of-day report is generated and the session is done, the app emits `"Waiting for NY Market to open on {next market day}"` instead of exiting.
 
 - _Test: `rules.test.ts` — `it('rules 8 and 34: current-day scheduling waits before open and exits after generating one end-of-day report')`_
 
@@ -630,7 +630,7 @@ Notes:
 ### Report modes and scheduling
 
 - **Live end-of-day mode (default):** If `SESSION_DATE` is not set, app runs current-day scheduling, starts trading logic at market open, generates one end-of-day ORB report after market close, then exits.
-- **Live continuous mode:** Start with `--continuous` (or `-c`) to keep the process running across sessions. In this mode, data gathering/trade cycles run while NY markets are open, end-of-day report generation runs once per session, and the app waits for the next session instead of exiting.
+- **Live continuous mode:** Start with `--continuous` (or `-c`) to keep the process running across sessions. In this mode, data gathering/trade cycles run while NY markets are open, end-of-day report generation runs once per session, and the app shows "Waiting for NY Market to open on {next date}" in the status area instead of exiting. Before the NY open on a weekday it shows the current date; after market close it shows the next market day; on weekends it shows the following Monday.
 - **Historical one-shot mode:** If `SESSION_DATE=YYYY-MM-DD` is set, app runs a single historical ORB report for that session date and exits.
 
 Usage:

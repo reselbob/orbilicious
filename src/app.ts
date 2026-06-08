@@ -236,6 +236,23 @@ function sessionDatesFromAnchorToToday(anchorDate: string): string[] {
     return dates;
 }
 
+function nextMarketDayDate(): string {
+    const next = new Date();
+    next.setDate(next.getDate() + 1);
+    let dayOfWeek = next.toLocaleString('en-US', {
+        timeZone: strategyConfig.sessionTimezone,
+        weekday: 'short',
+    });
+    while (['Sat', 'Sun'].includes(dayOfWeek)) {
+        next.setDate(next.getDate() + 1);
+        dayOfWeek = next.toLocaleString('en-US', {
+            timeZone: strategyConfig.sessionTimezone,
+            weekday: 'short',
+        });
+    }
+    return toNyParts(next, strategyConfig.sessionTimezone).date;
+}
+
 function dedupeAndSortBars(bars: Bar[]): Bar[] {
     const byTimestamp = new Map<string, Bar>();
     for (const bar of bars) {
@@ -943,12 +960,15 @@ export async function startApp(options?: StartAppOptions) {
 
         try {
             if (!isWeekday) {
+                const nextDate = nextMarketDayDate();
+                emitUiStatusEvent({ message: `Waiting for NY Market to open on ${nextDate}.` });
                 logger.info('Market closed (weekend); waiting for next session', {
                     sessionDate,
                     dayOfWeek,
                     currentTime: nyNow.hhmm,
                 });
             } else if (currentMinutes < marketOpenMinutes) {
+                emitUiStatusEvent({ message: `Waiting for NY Market to open on ${sessionDate}.` });
                 logger.info('Waiting for market open', { sessionDate, currentTime: nyNow.hhmm });
             } else if (currentMinutes < marketCloseMinutes) {
                 if (currentMinutes < openingRangeEndMinutes) {
@@ -1007,6 +1027,8 @@ export async function startApp(options?: StartAppOptions) {
                     });
                     return;
                 }
+                const nextDate = nextMarketDayDate();
+                emitUiStatusEvent({ message: `Waiting for NY Market to open on ${nextDate}.` });
             }
         } catch (error) {
             logger.error('Unhandled cycle failure', { sessionDate, error });
