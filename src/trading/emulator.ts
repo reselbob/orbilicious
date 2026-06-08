@@ -160,7 +160,7 @@ export class Emulator implements ITrader {
             const exitPrice = stopHit ? rawSim.stopPrice : rawSim.takeProfitPrice;
             const exitReason = stopHit
                 ? `stop-loss hit (bar ${hitBar.timestamp})`
-                : `take-profit hit (pre-retest, bar ${hitBar.timestamp})`;
+                : `take-profit hit (bar ${hitBar.timestamp})`;
             const pnl = rawSim.side === 'long'
                 ? (exitPrice - rawSim.entryPrice) * rawSim.qty
                 : (rawSim.entryPrice - exitPrice) * rawSim.qty;
@@ -185,6 +185,17 @@ export class Emulator implements ITrader {
         const barMinutes = p.hour * 60 + p.minute;
         const exitStartMinutes = minutesFromHHMM(strategyConfig.forceExitTimeHHMM);
         if (barMinutes >= exitStartMinutes) {
+            const shouldClose = rawSim.side === 'long'
+                ? latestBar.close >= rawSim.entryPrice
+                : latestBar.close <= rawSim.entryPrice;
+
+            if (!shouldClose) {
+                logger.debug('Dry-run: keeping simulated position open; close is not yet favorable for profit capture', {
+                    symbol, side: rawSim.side, entryPrice: rawSim.entryPrice, latestClose: latestBar.close,
+                });
+                return { action: 'holding' };
+            }
+
             const closeEventTimestamp = new Date().toISOString();
             const exitPrice = latestBar.close;
             const pnl = rawSim.side === 'long'
