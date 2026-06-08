@@ -310,9 +310,9 @@ ORBilicious separates emulation and live trading into two independent classes be
 
 - **`ITrader` interface** (`src/trading/trader-interface.ts`): Defines the contract for all mode-specific operations — `getAccount()`, `getPosition()`, `closePosition()`, `executeTrades()`, `computeUsedRisk()`, and `managePosition()`. The core `app.ts` functions (`evaluateSymbol`, `findBreakoutCandidates`, `executeSizedTrades`, `runCycle`) take an `ITrader` parameter and never branch on session mode directly.
 
-- **`Emulator`** (`src/trading/emulator.ts`): Used in `EMULATION` mode. Owns an in-memory `simulatedPositions` Map. `executeTrades()` logs dry-run entries and populates the map. `managePosition()` scans intraday bars for stop/target hits, handles the profit-capture window, emits trade-monitor events, and logs closes — all in-memory with no Alpaca API calls. `computeUsedRisk()` sums the stop-loss risk from all open simulated positions, enforcing `MAX_TOTAL_RISK` as a true daily cap.
+- **`Emulator`** (`src/trading/emulator.ts`): Used in `EMULATION` mode. Owns an in-memory `simulatedPositions` Map. `executeTrades()` logs dry-run entries and populates the map. `managePosition()` scans intraday bars for stop/target hits, handles the profit-capture window (closing only when the latest close is at or above entry for longs, at or below entry for shorts — i.e., a profit or break-even), emits trade-monitor events, and logs closes — all in-memory with no Alpaca API calls. `computeUsedRisk()` sums the stop-loss risk from all open simulated positions, enforcing `MAX_TOTAL_RISK` as a true daily cap.
 
-- **`LiveTrader`** (`src/trading/live-trader.ts`): Used in `PAPER` and `LIVE` modes. Delegates `getAccount()`, `getPosition()`, and `closePosition()` to `AlpacaClient` for real Alpaca API calls. `executeTrades()` submits real bracket orders via `AlpacaClient.submitBracketOrder()`. `managePosition()` checks the profit-capture window and closes via Alpaca only when favorable. `computeUsedRisk()` returns 0 (buying power limits risk on Alpaca's side).
+- **`LiveTrader`** (`src/trading/live-trader.ts`): Used in `PAPER` and `LIVE` modes. Delegates `getAccount()`, `getPosition()`, and `closePosition()` to `AlpacaClient` for real Alpaca API calls. `executeTrades()` submits real bracket orders via `AlpacaClient.submitBracketOrder()`. `managePosition()` checks the profit-capture window and closes via Alpaca only when the latest close is at or above entry for longs and at or below entry for shorts (profit or break-even). `computeUsedRisk()` returns 0 (buying power limits risk on Alpaca's side).
 
 The trader is selected once at startup in `startApp()` based on `env.sessionMode` (line 781 of `src/app.ts`):
 
@@ -408,7 +408,7 @@ The list below follows the order the app actually applies rules at runtime.
 
 - _Test: `rules.test.ts` — `it('rules 11-17: runCycle halts on trading block, and candidate evaluation handles positions, duplicates, and missing bars')`_
 
-14. Existing-position management follows this order: if the position has no entry price, it is skipped; if there are no session bars, it is skipped; if the current bar is earlier than `FORCE_EXIT_TIME`, it is skipped; at or after `FORCE_EXIT_TIME`, the position is only closed if the latest close is favorable relative to entry price, meaning `latestClose >= entryPrice` for longs or `latestClose <= entryPrice` for shorts.
+14. Existing-position management follows this order: if the position has no entry price, it is skipped; if there are no session bars, it is skipped; if the current bar is earlier than `FORCE_EXIT_TIME`, it is skipped; at or after `FORCE_EXIT_TIME`, the position is only closed if the latest close is at or better than entry (profit or break-even) — meaning `latestClose >= entryPrice` for longs or `latestClose <= entryPrice` for shorts.
 
 - _Test: `rules.test.ts` — `it('rules 11-17: runCycle halts on trading block, and candidate evaluation handles positions, duplicates, and missing bars')`_
 
