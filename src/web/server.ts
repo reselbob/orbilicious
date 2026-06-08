@@ -3604,6 +3604,14 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
             return;
         }
 
+        if (sessionMode === 'REPLAY' && emulationSessionDate === currentNyDateIso() && isNyMarketOpenNow()) {
+            sendJson(res, 400, {
+                ok: false,
+                message: "Replays for the current day will run when today's NY Market's close.",
+            });
+            return;
+        }
+
         if (sessionMode === 'REPLAY' && !emulationSessionDate) {
             sendJson(res, 400, {
                 ok: false,

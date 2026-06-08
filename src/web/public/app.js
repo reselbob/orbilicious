@@ -179,7 +179,7 @@ const fieldHelpContent = {
     sessionMode: {
         title: 'Session mode',
         subtitle: 'Choose how ORBilicious should run.',
-        text: 'EMULATION runs dry-run strategy logic (historical or live-style, depending on date/time) without placing real orders. REPLAY runs a historical replay for the selected session date. PAPER submits orders to your Alpaca paper account. LIVE uses your live Alpaca account and real orders.',
+        text: 'EMULATION runs dry-run strategy logic (historical or live-style, depending on date/time) without placing real orders. REPLAY loads a completed session from a prior trading day and displays its trades. Replay is not available for the current day while NY markets are open — wait until after market close. PAPER submits orders to your Alpaca paper account. LIVE uses your live Alpaca account and real orders.',
     },
     emulationDate: {
         title: 'Emulation session date',
@@ -1146,6 +1146,11 @@ async function submitStartOrbilicious() {
     stopBtn.disabled = true;
 
     try {
+        if (isReplayMode() && emulationDateInput.value === todayIsoDate() && areNYMarketsOpen()) {
+            alert("Replays for the current day will run when today's NY Market's close.");
+            return;
+        }
+
         const marketsOpen = areNYMarketsOpen();
         const isContinuous = continuousMode.checked;
         const showMarketClosedMessage = isContinuous && !marketsOpen;

@@ -616,7 +616,7 @@ The app reads configuration from `.env` (via `dotenv`) and supports the followin
 | `QTY` | No | `1` | Baseline strategy quantity field in config. Not used by weighted basket sizing path. |
 | `QUANTITY_TO_RETRIEVE` | No | `40` | Number of most-active symbols targeted for candidate generation. The app over-fetches for filtering using `max(QUANTITY_TO_RETRIEVE, 4 x QUANTITY_TO_RETRIEVE)`, capped at `100` symbols, then keeps the top `QUANTITY_TO_RETRIEVE`. In Web UI runs, this is overridden by the Most active stocks to scan control when provided. |
 | `SESSION_DATE` | No | Empty | Session date (`YYYY-MM-DD`). If set, app runs a one-shot historical report for that date and exits; if empty, app runs current-day live scheduling and generates end-of-day report(s). |
-| `SESSION_MODE` | No | `EMULATION` | Execution mode: `EMULATION` (Alpaca data, no order submission), `PAPER` (Alpaca paper trading), `LIVE` (Alpaca live trading). The Web UI also supports `REPLAY` mode for replaying completed sessions. |
+| `SESSION_MODE` | No | `EMULATION` | Execution mode: `EMULATION` (Alpaca data, no order submission), `PAPER` (Alpaca paper trading), `LIVE` (Alpaca live trading). The Web UI also supports `REPLAY` mode for replaying completed sessions from prior trading days. Replay for the current day is unavailable while NY markets are open — it will become available after market close. |
 | `STOP_LOSS_PROFIT_RATIO` | No | `1:4` | Risk/reward ratio in `risk:reward` format. Example `1:2` gives a 2R target. |
 | `SYMBOL` | No | `SPY` | Strategy config symbol baseline (kept for config completeness; main scanner still uses most-active universe). |
 
