@@ -806,7 +806,7 @@ export async function startApp(options?: StartAppOptions) {
     const marketCloseMinutes = minutesFromHHMM(strategyConfig.forceExitTimeHHMM);
     const currentMinutes = nowNy.hour * 60 + nowNy.minute;
     const isBeforeMarketClose = currentMinutes < marketCloseMinutes;
-    const isLiveEmulation = env.sessionMode === 'EMULATION' && env.sessionDate === nyToday && isBeforeMarketClose;
+    const isLiveEmulation = env.sessionMode === 'EMULATION' && env.sessionDate === nyToday && (isBeforeMarketClose || continuousMode);
     const isHistoricalEmulation = shouldRunHistorical && !isLiveEmulation;
 
     if (continuousMode) {
@@ -960,15 +960,14 @@ export async function startApp(options?: StartAppOptions) {
 
         try {
             if (!isWeekday) {
-                const nextDate = nextMarketDayDate();
-                emitUiStatusEvent({ message: `Waiting for NY Market to open on ${nextDate}.` });
+                emitUiStatusEvent({ message: 'NY Markets are closed. ORBilicious will get Most Active Stocks and discover Breakout Candidates once the NY Markets open.' });
                 logger.info('Market closed (weekend); waiting for next session', {
                     sessionDate,
                     dayOfWeek,
                     currentTime: nyNow.hhmm,
                 });
             } else if (currentMinutes < marketOpenMinutes) {
-                emitUiStatusEvent({ message: `Waiting for NY Market to open on ${sessionDate}.` });
+                emitUiStatusEvent({ message: 'NY Markets are closed. ORBilicious will get Most Active Stocks and discover Breakout Candidates once the NY Markets open.' });
                 logger.info('Waiting for market open', { sessionDate, currentTime: nyNow.hhmm });
             } else if (currentMinutes < marketCloseMinutes) {
                 if (currentMinutes < openingRangeEndMinutes) {
@@ -1027,8 +1026,7 @@ export async function startApp(options?: StartAppOptions) {
                     });
                     return;
                 }
-                const nextDate = nextMarketDayDate();
-                emitUiStatusEvent({ message: `Waiting for NY Market to open on ${nextDate}.` });
+                emitUiStatusEvent({ message: 'NY Markets are closed. ORBilicious will get Most Active Stocks and discover Breakout Candidates once the NY Markets open.' });
             }
         } catch (error) {
             logger.error('Unhandled cycle failure', { sessionDate, error });

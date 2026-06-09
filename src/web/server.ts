@@ -786,10 +786,8 @@ function startOrbiliciousProcess(params: {
 
             if (isWeekday && currentMinutes >= marketOpenMinutes && currentMinutes < marketCloseMinutes) {
                 appState.runtimeStatus = 'Running in real time (emulation)';
-            } else if (isWeekday && currentMinutes < marketOpenMinutes) {
-                appState.runtimeStatus = 'Waiting for market open';
             } else {
-                appState.runtimeStatus = 'Running historical emulation';
+                appState.runtimeStatus = 'Waiting for market open';
             }
         } else {
             appState.runtimeStatus = 'Running historical emulation';
