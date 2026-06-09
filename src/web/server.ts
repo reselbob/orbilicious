@@ -574,9 +574,7 @@ function refreshRuntimeStatusFromClock() {
     }
 
     if (appState.sessionMode === 'EMULATION') {
-        const isLiveEmulation = Boolean(appState.emulationSessionDate)
-            && appState.emulationSessionDate === currentNyDateIso();
-        if (appState.continuous && isLiveEmulation) {
+        if (appState.continuous) {
             appState.runtimeStatus = 'Running in real time (emulation)';
         }
         return;
