@@ -640,8 +640,9 @@ describe('Operational Rules support', () => {
     });
 
     // Rule 7: When a same-day EMULATION session starts after market close, the app
-    // should treat it as historical emulation and run the one-shot historical branch.
-    it('rule 7: same-day emulation after market close runs the historical branch', async () => {
+    // should treat it as live emulation (not historical) and enter the live polling
+    // loop, which generates the end-of-day report and exits in current-day mode.
+    it('rule 7: same-day emulation after market close enters the live loop', async () => {
         env.sessionMode = 'EMULATION';
         env.sessionDate = '2026-05-18';
         env.dryRun = true;
@@ -663,8 +664,8 @@ describe('Operational Rules support', () => {
 
         await startApp();
 
-        expect(infoMessages).to.include('Starting historical ORB report runner');
-        expect(infoMessages).to.not.include('Current-day mode complete after market close; exiting app');
+        expect(infoMessages).to.include('Current-day mode complete after market close; exiting app');
+        expect(infoMessages).to.not.include('Starting historical ORB report runner');
         expect(reportedSessions).to.deep.equal(['2026-05-18']);
     });
 
@@ -1274,6 +1275,7 @@ describe('Operational Rules support', () => {
         withMockDateSequence([
             ...Array.from({ length: 500 }, () => '2026-05-19T13:46:00Z'),
             ...Array.from({ length: 500 }, () => '2026-05-19T13:52:00Z'),
+            ...Array.from({ length: 100 }, () => '2026-05-19T14:01:00Z'),
             ...Array.from({ length: 500 }, () => '2026-05-19T20:05:00Z'),
         ]);
 

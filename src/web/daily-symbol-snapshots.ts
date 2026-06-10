@@ -65,6 +65,8 @@ type CandidateChartSvgRenderer = (params: {
     closeTimestamp?: string | null;
     openingRangeMinutes: number;
     maxBarsAfterDetermination: number;
+    breakoutTimestamp?: string | null;
+    retestTimestamp?: string | null;
 }) => string;
 
 export async function buildDailySymbolCharts(params: {
@@ -181,6 +183,8 @@ export async function buildDailySymbolCharts(params: {
                 closeTimestamp: activity?.closeTimestamp ?? outcome?.exitTimestamp ?? null,
                 openingRangeMinutes,
                 maxBarsAfterDetermination: 30,
+                breakoutTimestamp: row?.breakoutTimestamp ?? null,
+                retestTimestamp: row?.confirmationRetestTimestamp ?? null,
             });
             snapshot.chartSvg = svg;
             snapshotsBySymbol.set(symbol, snapshot);

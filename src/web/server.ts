@@ -772,8 +772,8 @@ function startOrbiliciousProcess(params: {
         const nyTodayDate = `${nyYear}-${nyMonth}-${nyDay}`;
         const isLiveEmu = emulationSessionDate === nyTodayDate;
 
-        if (isLiveEmu && continuous) {
-            // For live emulation continuous mode, check if markets are open
+        if (continuous) {
+            // Continuous EMULATION is always live — assess current market conditions
             const dayOfWeek = nyNow.getDay();
             const hours = nyNow.getHours();
             const minutes = nyNow.getMinutes();
@@ -787,6 +787,8 @@ function startOrbiliciousProcess(params: {
             } else {
                 appState.runtimeStatus = 'Waiting for market open';
             }
+        } else if (isLiveEmu) {
+            appState.runtimeStatus = 'Running in real time (emulation)';
         } else {
             appState.runtimeStatus = 'Running historical emulation';
         }
@@ -2020,6 +2022,8 @@ function renderCandidateChartSvg(params: {
     closeTimestamp?: string | null;
     openingRangeMinutes: number;
     maxBarsAfterDetermination: number;
+    breakoutTimestamp?: string | null;
+    retestTimestamp?: string | null;
 }): string {
     const {
         bars,
@@ -2033,6 +2037,8 @@ function renderCandidateChartSvg(params: {
         closeTimestamp,
         openingRangeMinutes,
         maxBarsAfterDetermination,
+        breakoutTimestamp,
+        retestTimestamp,
     } = params;
 
     if (!bars.length) {
@@ -2167,6 +2173,30 @@ function renderCandidateChartSvg(params: {
         ? xForIndex(Math.min(Math.max(entryCutoffInChart >= 0 ? entryCutoffInChart : chartBars.length - 1, 0), chartBars.length - 1))
         : null;
 
+    const breakoutMs = typeof breakoutTimestamp === 'string' && breakoutTimestamp.trim() !== ''
+        ? new Date(breakoutTimestamp).getTime()
+        : Number.NaN;
+    const hasBreakout = Number.isFinite(breakoutMs);
+    const breakoutCutoff = hasBreakout
+        ? chartBars.findIndex((bar) => new Date(bar.timestamp).getTime() >= breakoutMs)
+        : -1;
+    const xBreakout = hasBreakout
+        ? xForIndex(Math.min(Math.max(breakoutCutoff >= 0 ? breakoutCutoff : chartBars.length - 1, 0), chartBars.length - 1))
+        : null;
+    const breakoutBar = hasBreakout && breakoutCutoff >= 0 ? chartBars[Math.min(breakoutCutoff, chartBars.length - 1)] : null;
+
+    const retestMs = typeof retestTimestamp === 'string' && retestTimestamp.trim() !== ''
+        ? new Date(retestTimestamp).getTime()
+        : Number.NaN;
+    const hasRetest = Number.isFinite(retestMs);
+    const retestCutoff = hasRetest
+        ? chartBars.findIndex((bar) => new Date(bar.timestamp).getTime() >= retestMs)
+        : -1;
+    const xRetest = hasRetest
+        ? xForIndex(Math.min(Math.max(retestCutoff >= 0 ? retestCutoff : chartBars.length - 1, 0), chartBars.length - 1))
+        : null;
+    const retestBar = hasRetest && retestCutoff >= 0 ? chartBars[Math.min(retestCutoff, chartBars.length - 1)] : null;
+
     const labelBaseY = margin.top + plotHeight + 8;
     const timeLabelY = margin.top + plotHeight + 20;
     const legendY = margin.top + plotHeight + 34;
@@ -2175,6 +2205,14 @@ function renderCandidateChartSvg(params: {
     const entryMarkerSvg = xEntry == null || yEntry == null
         ? ''
         : `<polygon points="${xEntry},${yEntry - 8} ${xEntry - 6},${yEntry + 4} ${xEntry + 6},${yEntry + 4}" fill="#38bdf8" stroke="#0ea5e9" stroke-width="1" />`;
+    const breakoutY = breakoutBar ? yForPrice(breakoutBar.high) : null;
+    const breakoutMarkerSvg = xBreakout == null || breakoutY == null
+        ? ''
+        : `<polygon points="${xBreakout},${breakoutY - 12} ${xBreakout - 5},${breakoutY - 4} ${xBreakout},${breakoutY + 4} ${xBreakout + 5},${breakoutY - 4}" fill="#22d3ee" stroke="#06b6d4" stroke-width="1" />`;
+    const retestY = retestBar ? yForPrice(retestBar.high) : null;
+    const retestMarkerSvg = xRetest == null || retestY == null
+        ? ''
+        : `<circle cx="${xRetest}" cy="${retestY - 10}" r="5" fill="#c084fc" stroke="#a855f7" stroke-width="1" />`;
     const lineLegendItems = [
         { label: 'OR High/Low', color: '#facc15', dash: '4 4' },
         { label: 'Stop', color: '#f97316', dash: '6 3' },
@@ -2183,12 +2221,29 @@ function renderCandidateChartSvg(params: {
             ? [{ label: 'Close', color: '#a78bfa', dash: '2 3' }]
             : []),
     ] as const;
-    const entryLegendX = legendStartX;
-    const lineLegendStartX = legendStartX + 132;
+    const markerLegendItems = [
+        ...(hasBreakout ? [{
+            svg: `<polygon points="${legendStartX + 10},${legendY - 5} ${legendStartX + 4},${legendY + 3} ${legendStartX + 10},${legendY + 7} ${legendStartX + 16},${legendY + 3}" fill="#22d3ee" stroke="#06b6d4" stroke-width="1" />`,
+            label: 'Breakout',
+            x: legendStartX,
+        }] : []),
+        ...(hasRetest ? [{
+            svg: `<circle cx="${legendStartX + (hasBreakout ? 110 : 0) + 10}" cy="${legendY + 1}" r="4" fill="#c084fc" stroke="#a855f7" stroke-width="1" />`,
+            label: 'Retest',
+            x: legendStartX + (hasBreakout ? 110 : 0),
+        }] : []),
+    ];
+    const entryLegendWidth = 100;
+    const entryLegendX = legendStartX + markerLegendItems.length * 110;
+    const lineLegendStartX = entryLegendX + entryLegendWidth;
     const legendSvg = [
+        ...markerLegendItems.map((item) => `<g>
+            ${item.svg}
+            <text x="${item.x + 24}" y="${legendY + 4}" fill="#cbd5e1" font-size="11">${item.label}</text>
+        </g>`),
         `<g>
             <polygon points="${entryLegendX + 10},${legendY - 7} ${entryLegendX + 4},${legendY + 5} ${entryLegendX + 16},${legendY + 5}" fill="#38bdf8" stroke="#0ea5e9" stroke-width="1" />
-            <text x="${entryLegendX + 24}" y="${legendY + 4}" fill="#cbd5e1" font-size="11">Entry triangle</text>
+            <text x="${entryLegendX + 24}" y="${legendY + 4}" fill="#cbd5e1" font-size="11">Entry</text>
         </g>`,
         ...lineLegendItems.map((item, index) => {
             const itemWidth = 126;
@@ -2214,6 +2269,8 @@ function renderCandidateChartSvg(params: {
         ${overlayLine(targetPrice, '#22c55e', '6 3')}
         ${overlayLine(closePrice, '#a78bfa', '2 3')}
         ${candlesSvg}
+        ${breakoutMarkerSvg}
+        ${retestMarkerSvg}
         ${entryMarkerSvg}
         <line x1="${xDetermination}" y1="${margin.top}" x2="${xDetermination}" y2="${margin.top + plotHeight}" stroke="#60a5fa" stroke-width="1" stroke-dasharray="5 4" />
         ${xClose == null ? '' : `<line x1="${xClose}" y1="${margin.top}" x2="${xClose}" y2="${margin.top + plotHeight}" stroke="#a78bfa" stroke-width="1" stroke-dasharray="3 3" />`}

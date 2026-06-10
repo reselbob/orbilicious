@@ -72,6 +72,10 @@ export class LiveTrader implements ITrader {
         return { symbol: pos.symbol, side: pos.side, qty: pos.qty, entryPrice: pos.entryPrice };
     }
 
+    async getAllPositions(): Promise<PositionInfo[]> {
+        return [];
+    }
+
     async closePosition(symbol: string, sessionDate: string, reason?: string): Promise<void> {
         logger.info('Closing open position', { symbol, sessionDate, reason });
         await this.client.closePosition(symbol);

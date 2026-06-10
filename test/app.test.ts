@@ -3,7 +3,7 @@ import { describe, it } from 'mocha';
 import { AlpacaClient } from '../src/alpaca';
 import { buildWeightedRiskTrades, normalizeTradesToConstraints } from '../src/basket';
 import { env, strategyConfig } from '../src/config';
-import { executeSizedTrades, findBreakoutCandidates } from '../src/app';
+import { executeSizedTrades, findBreakoutCandidates, manageOpenPositions } from '../src/app';
 import { logger } from '../src/logger';
 import { Bar, Position } from '../src/types';
 import { Emulator } from '../src/trading/emulator';
@@ -270,5 +270,144 @@ describe('app trade execution', () => {
         } finally {
             env.dryRun = previousDryRun;
         }
+    });
+});
+
+describe('getAllPositions', () => {
+    it('returns all simulated positions from the Emulator', async () => {
+        const client = new AlpacaClient();
+        const emulator = new Emulator(client);
+
+        emulator.simulatedPositions.set('AAPL', {
+            side: 'long', entryPrice: 100, entryTime: '2099-01-01T14:00:00Z',
+            stopPrice: 95, takeProfitPrice: 110, qty: 10,
+        });
+        emulator.simulatedPositions.set('TSLA', {
+            side: 'short', entryPrice: 200, entryTime: '2099-01-01T14:00:00Z',
+            stopPrice: 210, takeProfitPrice: 180, qty: 5,
+        });
+
+        const positions = await emulator.getAllPositions();
+        expect(positions).to.have.length(2);
+        expect(positions.map((p) => p.symbol).sort()).to.deep.equal(['AAPL', 'TSLA']);
+        expect(positions.find((p) => p.symbol === 'AAPL')).to.include({
+            side: 'long', entryPrice: 100, qty: 10,
+        });
+        expect(positions.find((p) => p.symbol === 'TSLA')).to.include({
+            side: 'short', entryPrice: 200, qty: 5,
+        });
+    });
+
+    it('returns empty array when Emulator has no positions', async () => {
+        const client = new AlpacaClient();
+        const emulator = new Emulator(client);
+        const positions = await emulator.getAllPositions();
+        expect(positions).to.deep.equal([]);
+    });
+
+    it('returns empty array from LiveTrader', async () => {
+        const client = new AlpacaClient();
+        const liveTrader = new LiveTrader(client);
+        const positions = await liveTrader.getAllPositions();
+        expect(positions).to.deep.equal([]);
+    });
+});
+
+describe('manageOpenPositions', () => {
+    const sessionDate = '2099-06-10';
+    const entryTime = '2099-06-10T13:50:00Z'; // 9:50 AM ET in the test session
+
+    class ManagePosClient extends AlpacaClient {
+        private readonly barsMap: Map<string, Bar[]>;
+
+        constructor(barsBySymbol: Record<string, Bar[]>) {
+            super();
+            this.barsMap = new Map(Object.entries(barsBySymbol));
+        }
+
+        async getIntradayBars(symbol: string): Promise<Bar[]> {
+            return this.barsMap.get(symbol) ?? [];
+        }
+
+        async getMostActiveSymbols(): Promise<string[]> {
+            return [...this.barsMap.keys()];
+        }
+
+        async getOpenPosition(): Promise<Position | null> {
+            return null;
+        }
+    }
+
+    function makeBars(low: number, high: number, close: number): Bar[] {
+        return [{
+            symbol: 'TEST',
+            timestamp: '2099-06-10T14:30:00Z', // 10:30 AM ET — after breakout window
+            open: close,
+            high,
+            low,
+            close,
+            volume: 1000,
+        }];
+    }
+
+    it('closes a short position when take-profit is hit', async () => {
+        const client = new ManagePosClient({ TEST: makeBars(94, 101, 95) });
+        const emulator = new Emulator(client);
+        emulator.simulatedPositions.set('TEST', {
+            side: 'short', entryPrice: 100, entryTime,
+            stopPrice: 103, takeProfitPrice: 96, qty: 10,
+        });
+
+        await manageOpenPositions(client, emulator, sessionDate);
+
+        expect(emulator.simulatedPositions.has('TEST')).to.be.false;
+    });
+
+    it('closes a long position when take-profit is hit', async () => {
+        const client = new ManagePosClient({ TEST: makeBars(99, 105, 103) });
+        const emulator = new Emulator(client);
+        emulator.simulatedPositions.set('TEST', {
+            side: 'long', entryPrice: 100, entryTime,
+            stopPrice: 97, takeProfitPrice: 102, qty: 10,
+        });
+
+        await manageOpenPositions(client, emulator, sessionDate);
+
+        expect(emulator.simulatedPositions.has('TEST')).to.be.false;
+    });
+
+    it('closes a position when stop-loss is hit', async () => {
+        const client = new ManagePosClient({ TEST: makeBars(99, 106, 105) });
+        const emulator = new Emulator(client);
+        emulator.simulatedPositions.set('TEST', {
+            side: 'long', entryPrice: 100, entryTime,
+            stopPrice: 98, takeProfitPrice: 105, qty: 10,
+        });
+
+        await manageOpenPositions(client, emulator, sessionDate);
+
+        expect(emulator.simulatedPositions.has('TEST')).to.be.false;
+    });
+
+    it('holds a position when neither stop nor target is hit', async () => {
+        const client = new ManagePosClient({ TEST: makeBars(101, 102, 101.5) });
+        const emulator = new Emulator(client);
+        emulator.simulatedPositions.set('TEST', {
+            side: 'long', entryPrice: 100, entryTime,
+            stopPrice: 98, takeProfitPrice: 105, qty: 10,
+        });
+
+        await manageOpenPositions(client, emulator, sessionDate);
+
+        expect(emulator.simulatedPositions.has('TEST')).to.be.true;
+    });
+
+    it('is a no-op when there are no open positions', async () => {
+        const client = new ManagePosClient({});
+        const emulator = new Emulator(client);
+
+        await manageOpenPositions(client, emulator, sessionDate);
+
+        expect(emulator.simulatedPositions.size).to.equal(0);
     });
 });

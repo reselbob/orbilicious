@@ -786,6 +786,38 @@ export async function runCycle(
     logger.info('Completed run cycle', { sessionDate });
 }
 
+export async function manageOpenPositions(
+    client: AlpacaClient,
+    trader: ITrader,
+    sessionDate: string,
+): Promise<void> {
+    const positions = await trader.getAllPositions();
+    if (!positions.length) return;
+
+    await Promise.all(positions.map(async (position) => {
+        try {
+            const bars = await client.getIntradayBars(position.symbol, sessionDate);
+            const sessionBars = dedupeAndSortBars(bars).filter(
+                (bar) => toNyParts(bar.timestamp, strategyConfig.sessionTimezone).date === sessionDate,
+            );
+            const latestBar = sessionBars[sessionBars.length - 1];
+            if (!latestBar) return;
+
+            const result = await trader.managePosition(
+                position.symbol, position, sessionDate, sessionBars, latestBar,
+            );
+
+            if (result.action === 'closed') {
+                executedToday.add(executionKey(sessionDate, position.symbol));
+            }
+        } catch (error) {
+            logger.error('Failed managing open position after breakout window', {
+                symbol: position.symbol, sessionDate, error,
+            });
+        }
+    }));
+}
+
 export type StartAppOptions = {
     continuous?: boolean;
 };
@@ -805,8 +837,7 @@ export async function startApp(options?: StartAppOptions) {
     const nyToday = nowNy.date;
     const marketCloseMinutes = minutesFromHHMM(strategyConfig.forceExitTimeHHMM);
     const currentMinutes = nowNy.hour * 60 + nowNy.minute;
-    const isBeforeMarketClose = currentMinutes < marketCloseMinutes;
-    const isLiveEmulation = env.sessionMode === 'EMULATION' && env.sessionDate === nyToday && (isBeforeMarketClose || continuousMode);
+    const isLiveEmulation = env.sessionMode === 'EMULATION' && env.sessionDate === nyToday;
     const isHistoricalEmulation = shouldRunHistorical && !isLiveEmulation;
 
     if (continuousMode) {
@@ -927,7 +958,7 @@ export async function startApp(options?: StartAppOptions) {
 
     const marketOpenMinutes = strategyConfig.sessionOpenHour * 60 + strategyConfig.sessionOpenMinute;
     const openingRangeEndMinutes = marketOpenMinutes + strategyConfig.openingRangeMinutes;
-    const breakoutWindowEndMinutes = openingRangeEndMinutes + 1;
+    const breakoutWindowEndMinutes = openingRangeEndMinutes + strategyConfig.openingRangeMinutes;
     const isCurrentDayMode = !continuousMode;
     const reportedOpeningRangeByDate = new Set<string>();
     const reportedWaitingBreakoutsByDate = new Set<string>();
@@ -994,6 +1025,8 @@ export async function startApp(options?: StartAppOptions) {
                         });
                         breakoutScanCompleteByDate.add(sessionDate);
                     }
+                } else {
+                    await manageOpenPositions(client, trader, sessionDate);
                 }
             } else if (!reportedDates.has(sessionDate)) {
                 logger.info('Market closed; generating end-of-day ORB report', {
@@ -1007,6 +1040,9 @@ export async function startApp(options?: StartAppOptions) {
                 logger.info('Completed live end-of-day ORB report', { sessionDate });
 
                 if (isCurrentDayMode) {
+                    if (isLiveEmulation) {
+                        emitUiStatusEvent({ message: 'NY Markets are closed. ORBilicious will get Most Active Stocks and discover Breakout Candidates once the NY Markets open.' });
+                    }
                     logger.info('Current-day mode complete after market close; exiting app', {
                         sessionDate,
                         currentTime: nyNow.hhmm,

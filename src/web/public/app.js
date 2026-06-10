@@ -368,8 +368,6 @@ function isLiveEmulation() {
     if (!emulationDate) return false;
     const today = todayIsoDate();
     if (emulationDate !== today) return false;
-    // After market close, the backend switches to historical mode
-    if (!areNYMarketsOpen() && !isBeforeNyMarketOpen()) return false;
     return true;
 }
 
@@ -395,15 +393,16 @@ function syncEmulationControls() {
         liveEmulationWarningText.textContent = latestOrbUiMessage;
     } else if (isRunningHistorical) {
         liveEmulationWarningText.textContent = 'Running against historic data.';
-    }
-
-    // Update message based on continuous mode
-    if (isLiveEmu && isContinuous && !hasOrbUiMessage) {
+    } else if (isLiveEmu && !hasOrbUiMessage) {
         const marketsOpen = areNYMarketsOpen();
         if (marketsOpen) {
-            liveEmulationWarningText.textContent = 'Emulation is running live and in continuous mode, but no trades will actually be executed against your account.';
+            liveEmulationWarningText.textContent = isContinuous
+                ? 'Emulation is running live and in continuous mode, but no trades will actually be executed against your account.'
+                : 'Emulation is running live. No trades will actually be executed against your account.';
         } else {
-            liveEmulationWarningText.textContent = 'Emulation is running live and in continuous mode, but no trades will be executed until the NY Markets open.';
+            liveEmulationWarningText.textContent = isContinuous
+                ? 'Emulation is running live and in continuous mode, but no trades will be executed until the NY Markets open.'
+                : 'NY Markets are closed. ORBilicious will get Most Active Stocks and discover Breakout Candidates once the NY Markets open.';
         }
     } else if (isLiveEmu && !hasOrbUiMessage) {
         const marketsOpen = areNYMarketsOpen();

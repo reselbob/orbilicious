@@ -28,6 +28,8 @@ export interface ITrader {
 
     getPosition(symbol: string): Promise<PositionInfo | null>;
 
+    getAllPositions(): Promise<PositionInfo[]>;
+
     closePosition(symbol: string, sessionDate: string, reason?: string): Promise<void>;
 
     executeTrades(trades: SizedTrade[], sessionDate: string): Promise<void>;

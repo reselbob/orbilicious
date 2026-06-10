@@ -80,7 +80,17 @@ export class Emulator implements ITrader {
     async getPosition(symbol: string): Promise<PositionInfo | null> {
         const sim = this.simulatedPositions.get(symbol);
         if (!sim) return null;
-        return { symbol, side: sim.side, qty: sim.qty, entryPrice: sim.entryPrice };
+        return { symbol, side: sim.side, qty: sim.qty, entryPrice: sim.entryPrice, entryTime: sim.entryTime };
+    }
+
+    async getAllPositions(): Promise<PositionInfo[]> {
+        return [...this.simulatedPositions.entries()].map(([symbol, sim]) => ({
+            symbol,
+            side: sim.side,
+            qty: sim.qty,
+            entryPrice: sim.entryPrice,
+            entryTime: sim.entryTime,
+        }));
     }
 
     async closePosition(symbol: string, _sessionDate: string, _reason?: string): Promise<void> {
