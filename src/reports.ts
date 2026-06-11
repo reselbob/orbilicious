@@ -1144,7 +1144,7 @@ export class Reports {
         Reports.writeHtmlReport(htmlReportPath, html);
         Reports.writeHtmlReport(pdfSourceHtmlPath, html);
         await Reports.renderHtmlToPdf(pdfSourceHtmlPath, pdfReportPath);
-        fs.unlinkSync(pdfSourceHtmlPath);
+        Reports.unlinkIfExists(pdfSourceHtmlPath);
 
         logger.info("Generated running ORB summary reports", {
             startDate,
@@ -1315,7 +1315,7 @@ export class Reports {
         Reports.writeHtmlReport(htmlReportPath, html);
         Reports.writeHtmlReport(pdfSourceHtmlPath, html);
         await Reports.renderHtmlToPdf(pdfSourceHtmlPath, pdfReportPath);
-        fs.unlinkSync(pdfSourceHtmlPath);
+        Reports.unlinkIfExists(pdfSourceHtmlPath);
 
         logger.info("Generated weekly ORB summary reports", {
             weekStartDate,
@@ -1362,6 +1362,11 @@ export class Reports {
     private static writeHtmlReport(filePath: string, html: string) {
         fs.mkdirSync(path.dirname(filePath), { recursive: true });
         fs.writeFileSync(filePath, html, "utf8");
+    }
+    private static unlinkIfExists(filePath: string) {
+        if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+        }
     }
 
     private static async renderHtmlToPdf(htmlPath: string, pdfPath: string) {
@@ -2583,7 +2588,7 @@ export class Reports {
             Reports.writeHtmlReport(htmlReportPath, htmlDrilldownReport);
             Reports.writeHtmlReport(pdfSourceHtmlPath, htmlReport);
             await Reports.renderHtmlToPdf(pdfSourceHtmlPath, pdfReportPath);
-            fs.unlinkSync(pdfSourceHtmlPath);
+            Reports.unlinkIfExists(pdfSourceHtmlPath);
             logger.info("PDF report written", { sessionDate, pdfReportPath });
         }
 

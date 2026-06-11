@@ -119,6 +119,10 @@ export class LiveTrader implements ITrader {
         return 0;
     }
 
+    getCumulativeRealizedLoss(): number {
+        return 0;
+    }
+
     async managePosition(
         symbol: string,
         position: PositionInfo,

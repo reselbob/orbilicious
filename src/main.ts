@@ -25,6 +25,14 @@ async function stampReadmeVersion() {
     }
 }
 
+process.on('uncaughtException', (error) => {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code === 'EPIPE') {
+        try { process.stderr.write('EPIPE: stdout pipe broken (parent server exited). Shutting down.\n'); } catch { /* stderr may also be broken */ }
+        process.exit(1);
+    }
+});
+
 stampReadmeVersion().then(() =>
     startApp({ continuous: continuousMode }).catch((error) => {
         logger.error('Fatal application error', {

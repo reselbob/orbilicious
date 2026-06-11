@@ -62,6 +62,8 @@ type AppState = {
     breakoutMinRelativeStrengthPct: number;
     breakoutTrendTimeframeMinutes: number;
     breakoutTrendLookbackBars: number;
+    atrStopMultiple: number;
+    minStopPct: number;
 };
 
 type StartRequest = {
@@ -80,6 +82,8 @@ type StartRequest = {
     breakoutMinRelativeStrengthPct?: number;
     breakoutTrendTimeframeMinutes?: number;
     breakoutTrendLookbackBars?: number;
+    atrStopMultiple?: number;
+    minStopPct?: number;
 };
 
 type ReportKind = 'today' | 'week' | 'month';
@@ -341,6 +345,8 @@ const appState: AppState = {
     breakoutMinRelativeStrengthPct: env.breakoutMinRelativeStrengthPct,
     breakoutTrendTimeframeMinutes: env.breakoutTrendTimeframeMinutes,
     breakoutTrendLookbackBars: env.breakoutTrendLookbackBars,
+    atrStopMultiple: env.atrStopMultiple,
+    minStopPct: env.minStopPct,
 };
 
 let appProcess: ChildProcessWithoutNullStreams | null = null;
@@ -689,6 +695,8 @@ function startOrbiliciousProcess(params: {
     breakoutMinRelativeStrengthPct: number;
     breakoutTrendTimeframeMinutes: number;
     breakoutTrendLookbackBars: number;
+    atrStopMultiple: number;
+    minStopPct: number;
 }) {
     const {
         continuous,
@@ -706,6 +714,8 @@ function startOrbiliciousProcess(params: {
         breakoutMinRelativeStrengthPct,
         breakoutTrendTimeframeMinutes,
         breakoutTrendLookbackBars,
+        atrStopMultiple,
+        minStopPct,
     } = params;
     const entry = resolveAppEntryPoint();
     const args = [...entry.args];
@@ -757,6 +767,8 @@ function startOrbiliciousProcess(params: {
         appState.breakoutMinRelativeStrengthPct = breakoutMinRelativeStrengthPct;
         appState.breakoutTrendTimeframeMinutes = breakoutTrendTimeframeMinutes;
         appState.breakoutTrendLookbackBars = breakoutTrendLookbackBars;
+        appState.atrStopMultiple = atrStopMultiple;
+        appState.minStopPct = minStopPct;
         appState.pid = null;
         addActivityLine('system', `Loaded replay from canonical daily session record for ${emulationSessionDate}.`);
         return;
@@ -832,6 +844,8 @@ function startOrbiliciousProcess(params: {
     appState.breakoutMinRelativeStrengthPct = breakoutMinRelativeStrengthPct;
     appState.breakoutTrendTimeframeMinutes = breakoutTrendTimeframeMinutes;
     appState.breakoutTrendLookbackBars = breakoutTrendLookbackBars;
+    appState.atrStopMultiple = atrStopMultiple;
+    appState.minStopPct = minStopPct;
     persistCanonicalDailySession();
 
     const child = spawn(entry.command, args, {
@@ -851,6 +865,8 @@ function startOrbiliciousProcess(params: {
             BREAKOUT_MIN_RELATIVE_STRENGTH_PCT: String(breakoutMinRelativeStrengthPct),
             BREAKOUT_TREND_TIMEFRAME_MINUTES: String(breakoutTrendTimeframeMinutes),
             BREAKOUT_TREND_LOOKBACK_BARS: String(breakoutTrendLookbackBars),
+            ATR_STOP_MULTIPLE: String(atrStopMultiple),
+            MIN_STOP_PCT: String(minStopPct),
             ...(realTimeData ? { ALPACA_DATA_FEED: 'sip' } : {}),
         },
         stdio: 'pipe',
@@ -3648,6 +3664,18 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
             2,
             20,
         );
+        const atrStopMultiple = normalizedPositiveNumber(
+            payload.atrStopMultiple,
+            appState.atrStopMultiple ?? env.atrStopMultiple,
+            0.5,
+            10,
+        );
+        const minStopPct = normalizedPositiveNumber(
+            payload.minStopPct,
+            appState.minStopPct ?? env.minStopPct,
+            0.001,
+            0.1,
+        );
 
         if ((sessionMode === 'EMULATION' || sessionMode === 'REPLAY') && emulationSessionDate && !isValidSessionDate(emulationSessionDate)) {
             sendJson(res, 400, {
@@ -3710,6 +3738,8 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
             breakoutMinRelativeStrengthPct,
             breakoutTrendTimeframeMinutes,
             breakoutTrendLookbackBars,
+            atrStopMultiple,
+            minStopPct,
         });
 
         sendJson(res, 202, {

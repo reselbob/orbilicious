@@ -67,10 +67,15 @@ function minutesFromHHMM(hhmm: string): number {
 export class Emulator implements ITrader {
     readonly dryRun = true;
     readonly simulatedPositions = new Map<string, SimulatedPosition>();
+    private cumulativeRealizedLoss = 0;
     private readonly client: AlpacaClient;
 
     constructor(client: AlpacaClient) {
         this.client = client;
+    }
+
+    getCumulativeRealizedLoss(): number {
+        return this.cumulativeRealizedLoss;
     }
 
     async getAccount(): Promise<AccountInfo> {
@@ -176,6 +181,7 @@ export class Emulator implements ITrader {
                 : (rawSim.entryPrice - exitPrice) * rawSim.qty;
 
             this.simulatedPositions.delete(symbol);
+            if (pnl < 0) this.cumulativeRealizedLoss += Math.abs(pnl);
             logger.info('Dry-run: simulated position closed', {
                 symbol, side: rawSim.side, exitReason, exitPrice,
                 entryPrice: rawSim.entryPrice, pnl,
@@ -212,6 +218,7 @@ export class Emulator implements ITrader {
                 ? (exitPrice - rawSim.entryPrice) * rawSim.qty
                 : (rawSim.entryPrice - exitPrice) * rawSim.qty;
             this.simulatedPositions.delete(symbol);
+            if (pnl < 0) this.cumulativeRealizedLoss += Math.abs(pnl);
             logger.info('Dry-run: simulated position closed (profit-capture window)', {
                 symbol, side: rawSim.side, exitPrice, entryPrice: rawSim.entryPrice, pnl,
             });

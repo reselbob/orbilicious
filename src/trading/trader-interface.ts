@@ -36,5 +36,7 @@ export interface ITrader {
 
     computeUsedRisk(): number;
 
+    getCumulativeRealizedLoss(): number;
+
     managePosition(symbol: string, position: PositionInfo, sessionDate: string, sessionBars: Bar[], latestBar: Bar): Promise<PositionActionResult>;
 }

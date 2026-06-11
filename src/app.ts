@@ -606,7 +606,7 @@ export async function evaluateSymbol(
                 return null;
             }
 
-            const bars = await client.getIntradayBars(symbol, sessionDate);
+            const bars = barsMap?.get(symbol) ?? await client.getIntradayBars(symbol, sessionDate);
             const sessionBars = dedupeAndSortBars(bars).filter(
                 (bar) => toNyParts(bar.timestamp, strategyConfig.sessionTimezone).date === sessionDate
             );
@@ -748,10 +748,11 @@ export async function runCycle(
     const effectiveBuyingPower = Math.min(account.buyingPower, env.hardBasketCap);
 
     const usedRisk = trader.computeUsedRisk();
-    const remainingRisk = Math.max(0, env.maxTotalRisk - usedRisk);
+    const realizedLoss = trader.getCumulativeRealizedLoss();
+    const remainingRisk = Math.max(0, env.maxTotalRisk - realizedLoss - usedRisk);
 
     if (remainingRisk <= 0) {
-        logger.info('Cumulative risk budget exhausted', { usedRisk, maxTotalRisk: env.maxTotalRisk, selectedCount: selected.length });
+        logger.info('Cumulative risk budget exhausted', { usedRisk, realizedLoss, maxTotalRisk: env.maxTotalRisk, selectedCount: selected.length });
         return;
     }
 
@@ -775,6 +776,7 @@ export async function runCycle(
         hardBasketCap: env.hardBasketCap,
         maxTotalRisk: env.maxTotalRisk,
         usedRisk,
+        realizedLoss,
         remainingRisk,
         candidateCount: candidates.length,
         selectedCount: selected.length,
