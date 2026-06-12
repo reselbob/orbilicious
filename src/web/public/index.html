@@ -877,6 +877,36 @@
                                                             class="form-control" min="2" max="20" step="1" value="3" />
                                                     </div>
                                                 </div>
+
+                                                <div class="row g-2 align-items-end">
+                                                    <div class="col-12 col-md-4">
+                                                        <div class="help-label-row mb-1">
+                                                            <label class="form-label mb-0"
+                                                                for="atrStopMultiple">ATR stop
+                                                                multiple</label>
+                                                            <button class="btn btn-outline-secondary field-help-btn"
+                                                                type="button" data-help-key="atrStopMultiple"
+                                                                aria-label="Help for ATR stop multiple"
+                                                                title="Help for ATR stop multiple">?</button>
+                                                        </div>
+                                                        <input id="atrStopMultiple" type="number"
+                                                            class="form-control" min="0.5" max="10" step="0.5"
+                                                            value="1" />
+                                                    </div>
+                                                    <div class="col-12 col-md-4">
+                                                        <div class="help-label-row mb-1">
+                                                            <label class="form-label mb-0"
+                                                                for="minStopPct">Min stop (%)</label>
+                                                            <button class="btn btn-outline-secondary field-help-btn"
+                                                                type="button" data-help-key="minStopPct"
+                                                                aria-label="Help for min stop percent"
+                                                                title="Help for min stop percent">?</button>
+                                                        </div>
+                                                        <input id="minStopPct" type="number"
+                                                            class="form-control" min="0.1" max="10" step="0.1"
+                                                            value="0.75" />
+                                                    </div>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
@@ -913,7 +943,7 @@
                                         </div>
                                     </div>
 
-                                    <div class="mb-3 d-flex gap-2 align-items-center">
+                                    <div class="mb-3 d-flex gap-4 align-items-center flex-wrap">
                                         <span class="help-label-row">
                                             <label class="form-label mb-0" for="stopProfitRatio">Stop/Profit Limit
                                                 Ratio 1:</label>
@@ -924,6 +954,16 @@
                                         </span>
                                         <input type="number" id="stopProfitRatio" class="form-control" min="1" max="20"
                                             value="4" style="width: 70px;" />
+                                        <span class="help-label-row">
+                                            <label class="form-label mb-0" for="maxRiskPctPerSymbol">Maximum % of Max Risk
+                                                per Trading Day</label>
+                                            <button class="btn btn-outline-secondary field-help-btn" type="button"
+                                                data-help-key="maxRiskPctPerSymbol"
+                                                aria-label="Help for Maximum % of Max Risk per Trading Day"
+                                                title="Help for Maximum % of Max Risk per Trading Day">?</button>
+                                        </span>
+                                        <input type="number" id="maxRiskPctPerSymbol" class="form-control" min="1" max="1000"
+                                            step="1" value="20" style="width: 80px;" />
                                     </div>
 
                                     <div class="small text-muted mb-2">Current status</div>
@@ -1212,6 +1252,12 @@
                     <dd id="confirmBreakoutTrendTimeframeMinutes">-</dd>
                     <dt>Trend lookback bars</dt>
                     <dd id="confirmBreakoutTrendLookbackBars">-</dd>
+                    <dt>ATR stop multiple</dt>
+                    <dd id="confirmAtrStopMultiple">-</dd>
+                    <dt>Min stop (%)</dt>
+                    <dd id="confirmMinStopPct">-</dd>
+                    <dt>Max risk % per symbol</dt>
+                    <dd id="confirmMaxRiskPctPerSymbol">-</dd>
                 </dl>
             </div>
             <div class="p-3 border-top d-flex justify-content-between">

@@ -11,8 +11,8 @@
     "test:coverage-fast": "TS_NODE_PROJECT=tsconfig.test.json nyc mocha -r ts-node/register \"test/**/*.test.ts\" --exclude \"test/reporting.test.ts\"",
     "coverage:report": "nyc report --reporter=text --reporter=html",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "full-start": "(cd docs-site && npm run build && npm run serve) & sleep 2 && tsx src/web/server.ts",
-    "full-stop": "pkill -f 'gatsby serve' 2>/dev/null; pkill -f 'node dist/web/server' 2>/dev/null; pkill -f 'tsx src/web/server' 2>/dev/null; echo 'All services stopped.'",
+"full-start": "fuser -k 8787/tcp 2>/dev/null; sleep 0.5; (cd docs-site && npm run build && npm run serve) & sleep 2 && tsx src/web/server.ts",
+"full-stop": "pkill -f 'gatsby serve' 2>/dev/null; pkill -f 'src/web/server.ts' 2>/dev/null; fuser -k 8787/tcp 2>/dev/null; echo 'All services stopped.'",
     "clean": "rm -rf logs/orbilicious-*.log logs/trades logs/*.gz"
   },
   "repository": {

@@ -863,6 +863,7 @@ export class Reports {
             filteredBreakoutCandidates,
             env.maxTotalRisk,
             env.takeProfitMultiple,
+            env.maxRiskPctPerSymbol,
         );
         const emulatedTrades = normalizeTradesToConstraints(
             atrSizedTrades,

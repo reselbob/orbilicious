@@ -493,18 +493,52 @@
 <li><strong>Breakout Candidate Trade Type</strong>: Filter which breakout directions are considered. Choose <code>Long</code> to accept only bullish breakouts, <code>Short</code> to accept only bearish breakouts, or <code>Both</code> (default) to accept either direction.</li>
 <li><strong>Money in Account</strong>: Total account capital available (default $25,000). Overrides <code>HARD_BASKET_CAP</code> env var.</li>
 <li><strong>Max Amount to Risk Per Trading Day</strong>: Maximum total stop-loss risk per day (default $1,000). Overrides <code>MAX_TOTAL_RISK</code> env var.</li>
+<li><strong>Stop/Profit Limit Ratio 1:</strong> Reward-to-risk ratio for profit targets (default <code>4</code> = 4R). Overrides <code>STOP_LOSS_PROFIT_RATIO</code> env var.</li>
+<li><strong>Maximum % of Max Risk per Trading Day</strong>: Caps any single position's risk as a percentage of the daily budget (default <code>20%</code>). At 20% of a $1,000 budget, no single trade risks more than $200. Set higher (e.g. <code>200%</code>) to effectively disable the cap and let high-scoring breakouts concentrate the budget. Override via <code>MAX_RISK_PCT_PER_SYMBOL</code> env var.</li>
 <li><strong>Current status</strong>: Real-time execution state (running, stopped, error details).</li>
 <li><strong>Backtest progress</strong>: For historical runs, shows current date, total dates, and completion.</li>
 </ul>
 <h4 id="how-to-use-the-breakout-confirmation-and-quality-filters" style="position:relative;"><a href="#how-to-use-the-breakout-confirmation-and-quality-filters" aria-label="how to use the breakout confirmation and quality filters permalink" class="anchor before"><span aria-hidden="true">#</span></a>How to use the Breakout Confirmation and Quality Filters</h4>
 <p><img src="docs/breakout-quality-filter.png" alt="Breakout Confirmation and Quality Filters"></p>
 <p>Use these controls together to reduce false breakouts while keeping enough opportunities for your session goals.</p>
+<p>Each parameter is described below with a behavioral-impact example:</p>
 <ul>
-<li><strong>Breakout Confirmation Candle (minutes)</strong> controls how long the breakout candle is. The breakout must close outside the opening range on this timeframe.</li>
-<li><strong>Breakout Quality Filters</strong> turns quality gating on or off. Quality gating means a breakout must pass all enabled quality checks before it is considered tradeable (volume expansion, relative strength/weakness, and higher-timeframe trend alignment).</li>
-<li><strong>Min Volume Expansion</strong> requires breakout-candle volume to exceed recent confirmation-candle volume by a minimum ratio.</li>
-<li><strong>Min Relative Strength (%)</strong> requires the breakout close to clear the opening-range boundary by a minimum percentage.</li>
-<li><strong>Trend Timeframe (minutes)</strong> and <strong>Trend Lookback Bars</strong> define higher-timeframe trend alignment.</li>
+<li>
+<p><strong>Breakout Confirmation Candle (minutes)</strong> controls how long the breakout candle is. The breakout must close outside the opening range on this timeframe.<br>
+<em>Example: Raise from <code>5</code> to <code>10</code> to require a longer breakout bar — fewer brief spikes qualify as breakouts, reducing whipsaw entries but potentially missing fast-break moves that reverse within 5 minutes.</em></p>
+</li>
+<li>
+<p><strong>Breakout Quality Filters</strong> turns quality gating on or off. Quality gating means a breakout must pass all enabled quality checks before it is considered tradeable (volume expansion, relative strength/weakness, and higher-timeframe trend alignment).<br>
+<em>Example: Toggle from <code>off</code> to <code>on</code> to reject breakouts that lack volume confirmation or trend support — candidate count drops sharply, but remaining entries have stronger institutional backing and lower reversal rates.</em></p>
+</li>
+<li>
+<p><strong>Min Volume Expansion</strong> requires breakout-candle volume to exceed recent confirmation-candle volume by a minimum ratio.<br>
+<em>Example: Raise from <code>1.2</code> to <code>1.8</code> to require nearly double the volume — only breakouts with heavy participation survive, reducing noise entries on low-volume drift, but valid breakouts on moderate volume are excluded.</em></p>
+</li>
+<li>
+<p><strong>Min Relative Strength (%)</strong> requires the breakout close to clear the opening-range boundary by a minimum percentage.<br>
+<em>Example: Raise from <code>0.25</code> to <code>0.50</code> to reject breakouts that barely nudge past the opening range — prevents entries on marginal moves that often reverse, but also skips early entries into strong trends that start with a small edge.</em></p>
+</li>
+<li>
+<p><strong>Trend Timeframe (minutes)</strong> sets the aggregation period for higher-timeframe trend alignment.<br>
+<em>Example: Raise from <code>5</code> to <code>15</code> to use 15-minute bars for trend context — trend signals become smoother and less reactive to short-term noise, but the trend assessment updates more slowly during fast intraday reversals.</em></p>
+</li>
+<li>
+<p><strong>Trend Lookback Bars</strong> sets how many higher-timeframe bars define the trend context.<br>
+<em>Example: Raise from <code>3</code> to <code>5</code> to require more bars of trend confirmation — reduces false trend signals from single-bar spikes in the higher timeframe, but delays entry when a new trend forms quickly.</em></p>
+</li>
+<li>
+<p><strong>ATR stop multiple</strong> scales the 1-minute Average True Range to set the stop-loss distance from entry. A higher multiplier (e.g. <code>2.0</code>) gives trades more room to breathe through intraday volatility but increases per-trade loss. Default <code>1.0</code>. Override via <code>ATR_STOP_MULTIPLE</code> env var.<br>
+<em>Example: Raise from <code>1.0</code> to <code>2.0</code> to double the stop-loss distance — fewer premature stop-outs on normal volatility, but each position risks twice as much capital per share, which reduces position size under the daily risk budget.</em></p>
+</li>
+<li>
+<p><strong>Min stop (%)</strong> sets a hard floor on stop distance as a percentage of entry price. Prevents stops from being placed too tight when ATR is unusually low. Default <code>0.75%</code>. Override via <code>MIN_STOP_PCT</code> env var.<br>
+<em>Example: Raise from <code>0.75%</code> to <code>1.5%</code> to ensure no stop is placed tighter than 1.5% of entry — protects against stop-outs on low-ATR stocks that would otherwise have a microscopic stop, but increases the minimum loss for every trade.</em></p>
+</li>
+<li>
+<p><strong>Maximum % of Max Risk per Trading Day</strong> limits how much of the daily risk budget any single position can consume. The per-symbol cap is <code>maxTotalRisk × (maxRiskPctPerSymbol / 100)</code>. Default <code>20%</code>. Override via <code>MAX_RISK_PCT_PER_SYMBOL</code> env var.<br>
+<em>Example: Lower from <code>20%</code> to <code>10%</code> to prevent any one trade from risking more than $100 of a $1000 budget — forces diversification across more symbols and prevents an ultra-high-scoring breakout from consuming the whole budget, but reduces position size on your highest-conviction idea.</em></p>
+</li>
 </ul>
 <p>Retest freshness is also enforced by environment setting: <code>BREAKOUT_RETEST_MAX_AGE_MINUTES</code> (default <code>1</code>). In the current NY session, entries are skipped when the confirmation retest is older than this threshold. Set it to <code>0</code> to disable staleness filtering. In EMULATION mode the staleness check is bypassed entirely so all session breakouts are evaluated.</p>
 <p><code>BREAKOUT_QUALITY_FILTERS_ENABLED</code> is the single source of truth for both the Web UI's initial checkbox state and the runtime strategy behavior.</p>
@@ -996,6 +1030,7 @@ Expected outcome: candidate list shrinks meaningfully, entries align better with
 <li><strong>Duplicate route removal</strong>: The <code>/api/alpaca/set-realtime-feed</code> endpoint existed twice in the route handler chain. The duplicate was removed.</li>
 <li><strong>Realtime feed state sync</strong>: <code>initialRealtimeFeedEnabled</code> is read from the <code>ALPACA_DATA_FEED</code> environment variable at startup and sent to the UI via status endpoint. The "Run in real time" checkbox automatically syncs to this value.</li>
 <li><strong>Orphan process cleanup</strong>: SIGTERM and SIGINT handlers kill the spawned child trading process before the server exits, preventing orphaned workers.</li>
+<li><strong>EPIPE child-process exit</strong>: If the spawned child trading process loses its stdout pipe (e.g., the parent server restarts), it catches the <code>EPIPE</code> error and exits cleanly via <code>process.exit(1)</code> rather than remaining alive as a zombie process that generates repeated EPIPE crashes. See <code>src/main.ts</code>.</li>
 <li><strong>Trade log date isolation</strong>: Trade log files (<code>logs/trades/trades-YYYY-MM-DD.log</code>) are keyed by the entry or exit timestamp date rather than the system clock, so historical backtest trades write to the correct date file.</li>
 </ul>
 <h3 id="logging" style="position:relative;"><a href="#logging" aria-label="logging permalink" class="anchor before"><span aria-hidden="true">#</span></a>Logging</h3>
@@ -1119,7 +1154,7 @@ Expected outcome: candidate list shrinks meaningfully, entries align better with
 <td><code>ATR_STOP_MULTIPLE</code></td>
 <td>No</td>
 <td><code>1</code></td>
-<td>ATR multiplier used as one candidate stop-distance component in sizing fallback.</td>
+<td>ATR multiplier used as one candidate stop-distance component in sizing fallback. Settable via the Web UI <strong>ATR stop multiple</strong> control.</td>
 </tr>
 <tr>
 <td><code>BREAKOUT_CONFIRMATION_CANDLE_MINUTES</code></td>
@@ -1206,6 +1241,12 @@ Expected outcome: candidate list shrinks meaningfully, entries align better with
 <td>Per-position notional cap applied before final basket scaling.</td>
 </tr>
 <tr>
+<td><code>MAX_RISK_PCT_PER_SYMBOL</code></td>
+<td>No</td>
+<td><code>20</code></td>
+<td>Maximum percent of <code>MAX_TOTAL_RISK</code> any single position can consume. Default <code>20</code> caps each position at 20% of the daily budget (e.g., $200 of a $1000 budget). Set to <code>200</code> to effectively disable the per-symbol cap. Settable via the Web UI <strong>Maximum % of Max Risk per Trading Day</strong> control.</td>
+</tr>
+<tr>
 <td><code>MAX_TOTAL_RISK</code></td>
 <td>No</td>
 <td><code>1000</code></td>
@@ -1215,7 +1256,7 @@ Expected outcome: candidate list shrinks meaningfully, entries align better with
 <td><code>MIN_STOP_PCT</code></td>
 <td>No</td>
 <td><code>0.0075</code></td>
-<td>Minimum stop distance as a fraction of entry price (example: <code>0.0075</code> = 0.75%).</td>
+<td>Minimum stop distance as a fraction of entry price (example: <code>0.0075</code> = 0.75%). Settable via the Web UI <strong>Min stop (%)</strong> control.</td>
 </tr>
 <tr>
 <td><code>NODE_ENV</code></td>

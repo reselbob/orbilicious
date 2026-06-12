@@ -6,6 +6,9 @@ const MAX_PROFIT_FILTERS = {
     breakoutMinRelativeStrengthPct: 0.15,
     breakoutTrendTimeframeMinutes: 5,
     breakoutTrendLookbackBars: 3,
+    atrStopMultiple: 1,
+    minStopPct: 0.75,
+    maxRiskPctPerSymbol: 20,
 };
 
 function setMaximizeProfitStatus(message, tone = 'muted') {
@@ -48,6 +51,15 @@ function setMaximizeProfitFilters() {
             breakoutMinRelativeStrengthPctInput.value = filters.breakoutMinRelativeStrengthPct;
             breakoutTrendTimeframeMinutesInput.value = filters.breakoutTrendTimeframeMinutes;
             breakoutTrendLookbackBarsInput.value = filters.breakoutTrendLookbackBars;
+            if (typeof filters.atrStopMultiple === 'number') {
+                atrStopMultipleInput.value = String(filters.atrStopMultiple);
+            }
+            if (typeof filters.minStopPct === 'number') {
+                minStopPctInput.value = String(filters.minStopPct);
+            }
+            if (typeof filters.maxRiskPctPerSymbol === 'number') {
+                maxRiskPctPerSymbolInput.value = String(filters.maxRiskPctPerSymbol);
+            }
             requestAnimationFrame(() => applyBreakoutQualityInputsEnabled());
             if (data.usedFallback) {
                 setMaximizeProfitStatus('Applied fallback max-profit filters (dynamic analysis unavailable).', 'warning');
@@ -64,6 +76,9 @@ function setMaximizeProfitFilters() {
             breakoutMinRelativeStrengthPctInput.value = MAX_PROFIT_FILTERS.breakoutMinRelativeStrengthPct;
             breakoutTrendTimeframeMinutesInput.value = MAX_PROFIT_FILTERS.breakoutTrendTimeframeMinutes;
             breakoutTrendLookbackBarsInput.value = MAX_PROFIT_FILTERS.breakoutTrendLookbackBars;
+            atrStopMultipleInput.value = String(MAX_PROFIT_FILTERS.atrStopMultiple);
+            minStopPctInput.value = String(MAX_PROFIT_FILTERS.minStopPct);
+            maxRiskPctPerSymbolInput.value = String(MAX_PROFIT_FILTERS.maxRiskPctPerSymbol);
             requestAnimationFrame(() => applyBreakoutQualityInputsEnabled());
             setMaximizeProfitStatus(`Applied local fallback max-profit filters: ${err.message}`, 'danger');
         });
@@ -126,6 +141,9 @@ const breakoutMinVolumeExpansionInput = document.getElementById('breakoutMinVolu
 const breakoutMinRelativeStrengthPctInput = document.getElementById('breakoutMinRelativeStrengthPct');
 const breakoutTrendTimeframeMinutesInput = document.getElementById('breakoutTrendTimeframeMinutes');
 const breakoutTrendLookbackBarsInput = document.getElementById('breakoutTrendLookbackBars');
+const atrStopMultipleInput = document.getElementById('atrStopMultiple');
+const minStopPctInput = document.getElementById('minStopPct');
+const maxRiskPctPerSymbolInput = document.getElementById('maxRiskPctPerSymbol');
 const startConfirmationPane = document.getElementById('startConfirmationPane');
 const confirmStartBtn = document.getElementById('confirmStartBtn');
 const cancelStartBtn = document.getElementById('cancelStartBtn');
@@ -143,6 +161,9 @@ const confirmBreakoutMinVolumeExpansion = document.getElementById('confirmBreako
 const confirmBreakoutMinRelativeStrengthPct = document.getElementById('confirmBreakoutMinRelativeStrengthPct');
 const confirmBreakoutTrendTimeframeMinutes = document.getElementById('confirmBreakoutTrendTimeframeMinutes');
 const confirmBreakoutTrendLookbackBars = document.getElementById('confirmBreakoutTrendLookbackBars');
+const confirmAtrStopMultiple = document.getElementById('confirmAtrStopMultiple');
+const confirmMinStopPct = document.getElementById('confirmMinStopPct');
+const confirmMaxRiskPctPerSymbol = document.getElementById('confirmMaxRiskPctPerSymbol');
 const fieldHelpPopover = document.getElementById('fieldHelpPopover');
 const fieldHelpTitle = document.getElementById('fieldHelpTitle');
 const fieldHelpSubtitle = document.getElementById('fieldHelpSubtitle');
@@ -250,6 +271,21 @@ const fieldHelpContent = {
         title: 'Trend Lookback Bars',
         subtitle: 'How many higher-timeframe bars define trend context.',
         text: 'Higher values smooth trend checks; lower values react faster but can be noisier.',
+    },
+    atrStopMultiple: {
+        title: 'ATR Stop Multiple',
+        subtitle: 'Multiplier applied to ATR(1m) to set stop-loss distance.',
+        text: 'Higher values (e.g. 2.0) give trades more room to breathe through intraday noise but risk larger losses. Lower values (e.g. 1.0) are tighter but prone to stop-outs on normal volatility.',
+    },
+    minStopPct: {
+        title: 'Minimum Stop Percentage',
+        subtitle: 'Hard floor on stop-loss distance as a percentage of entry price.',
+        text: 'Ensures the stop is never placed too tight regardless of ATR. E.g., 1.5% means the stop is at least 1.5% away from entry. Higher values reduce stop-outs but increase per-trade risk.',
+    },
+    maxRiskPctPerSymbol: {
+        title: 'Maximum % of Max Risk per Trading Day',
+        subtitle: 'Per-symbol cap on risk allocation.',
+        text: 'Limits how much of the daily risk budget any single position can consume. Default 20% caps any single position at 20% of the daily budget (e.g., $200 of a $1000 budget). Set higher (e.g., 200%) to effectively disable the cap for concentrated bets on high-scoring breakouts.',
     },
 };
 
@@ -998,6 +1034,9 @@ function showStartConfirmationPane() {
     const breakoutMinRelativeStrengthPct = getBreakoutMinRelativeStrengthPct();
     const breakoutTrendTimeframeMinutes = getBreakoutTrendTimeframeMinutes();
     const breakoutTrendLookbackBars = getBreakoutTrendLookbackBars();
+    const atrStopMultiple = getAtrStopMultiple();
+    const minStopPct = getMinStopPct();
+    const maxRiskPctPerSymbol = getMaxRiskPctPerSymbol();
 
     confirmSessionMode.textContent = session;
     confirmEmulationDate.textContent = emulationDate;
@@ -1013,6 +1052,9 @@ function showStartConfirmationPane() {
     confirmBreakoutMinRelativeStrengthPct.textContent = `${breakoutMinRelativeStrengthPct.toFixed(2)}%`;
     confirmBreakoutTrendTimeframeMinutes.textContent = `${breakoutTrendTimeframeMinutes}m`;
     confirmBreakoutTrendLookbackBars.textContent = String(breakoutTrendLookbackBars);
+    confirmAtrStopMultiple.textContent = String(atrStopMultiple);
+    confirmMinStopPct.textContent = `${minStopPct.toFixed(2)}%`;
+    confirmMaxRiskPctPerSymbol.textContent = `${maxRiskPctPerSymbol}%`;
 
     startConfirmationPane.classList.remove('d-none');
 }
@@ -1111,6 +1153,15 @@ function syncDropdownsFromServer(payload) {
     if (typeof payload.breakoutTrendLookbackBars === 'number') {
         breakoutTrendLookbackBarsInput.value = String(payload.breakoutTrendLookbackBars);
     }
+    if (typeof payload.atrStopMultiple === 'number') {
+        atrStopMultipleInput.value = String(payload.atrStopMultiple);
+    }
+    if (typeof payload.minStopPct === 'number') {
+        minStopPctInput.value = String(payload.minStopPct);
+    }
+    if (typeof payload.maxRiskPctPerSymbol === 'number') {
+        maxRiskPctPerSymbolInput.value = String(payload.maxRiskPctPerSymbol);
+    }
     applyBreakoutQualityInputsEnabled();
     syncEmulationControls();
 }
@@ -1173,6 +1224,9 @@ async function submitStartOrbilicious() {
                 breakoutMinRelativeStrengthPct: getBreakoutMinRelativeStrengthPct(),
                 breakoutTrendTimeframeMinutes: getBreakoutTrendTimeframeMinutes(),
                 breakoutTrendLookbackBars: getBreakoutTrendLookbackBars(),
+                atrStopMultiple: getAtrStopMultiple(),
+                minStopPct: getMinStopPct(),
+                maxRiskPctPerSymbol: getMaxRiskPctPerSymbol(),
             }),
         });
 
@@ -1824,6 +1878,18 @@ function getBreakoutTrendLookbackBars() {
     return Math.floor(clampNumber(breakoutTrendLookbackBarsInput.value, 3, 2, 20));
 }
 
+function getAtrStopMultiple() {
+    return clampNumber(atrStopMultipleInput.value, 1, 0.5, 10);
+}
+
+function getMinStopPct() {
+    return clampNumber(minStopPctInput.value, 0.75, 0.1, 10);
+}
+
+function getMaxRiskPctPerSymbol() {
+    return Math.floor(clampNumber(maxRiskPctPerSymbolInput.value, 20, 1, 1000));
+}
+
 function applyBreakoutQualityInputsEnabled() {
     const enabled = getBreakoutQualityFiltersEnabled();
     breakoutConfirmationCandleMinutesInput.disabled = !enabled;
@@ -1831,6 +1897,8 @@ function applyBreakoutQualityInputsEnabled() {
     breakoutMinRelativeStrengthPctInput.disabled = !enabled;
     breakoutTrendTimeframeMinutesInput.disabled = !enabled;
     breakoutTrendLookbackBarsInput.disabled = !enabled;
+    atrStopMultipleInput.disabled = !enabled;
+    minStopPctInput.disabled = !enabled;
 }
 
 function updateBrowserLocalTime() {

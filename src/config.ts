@@ -134,6 +134,7 @@ export const env = {
     breakoutTrendLookbackBars: num('BREAKOUT_TREND_LOOKBACK_BARS', 3),
     maxPositionsPerSide: num('MAX_POSITIONS_PER_SIDE', 3),
     maxPositionNotional: num('MAX_POSITION_NOTIONAL', 5000),
+    maxRiskPctPerSymbol: num('MAX_RISK_PCT_PER_SYMBOL', 20),
     atrStopMultiple: num('ATR_STOP_MULTIPLE', 1),
     minStopPct: num('MIN_STOP_PCT', 0.0075),
     stopLossProfitRatio: stopLossProfitRatio.raw,

@@ -109,7 +109,8 @@ function applyScale(trade: SizedTrade, scale: number): SizedTrade | null {
 export function buildWeightedRiskTrades(
     candidates: BreakoutCandidate[],
     maxTotalRisk: number,
-    takeProfitMultiple = 4
+    takeProfitMultiple = 4,
+    maxRiskPctPerSymbol = 20
 ): SizedTrade[] {
     const positiveScoreCandidates = candidates.filter((c) => c.score > MIN_SCORE);
     if (!positiveScoreCandidates.length) return [];
@@ -117,9 +118,14 @@ export function buildWeightedRiskTrades(
     const totalScore = positiveScoreCandidates.reduce((sum, c) => sum + c.score, 0);
     if (totalScore <= 0) return [];
 
+    const maxPerSymbolRisk = maxTotalRisk * (maxRiskPctPerSymbol / 100);
+
     return positiveScoreCandidates
         .map((candidate) => {
-            const assignedRiskDollars = maxTotalRisk * (candidate.score / totalScore);
+            const assignedRiskDollars = Math.min(
+                maxTotalRisk * (candidate.score / totalScore),
+                maxPerSymbolRisk
+            );
 
             const wickAnchoredStopPrice = candidate.preBreakoutWickPrice;
 

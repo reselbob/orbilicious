@@ -759,7 +759,8 @@ export async function runCycle(
     const weightedTrades = buildWeightedRiskTrades(
         selected,
         remainingRisk,
-        env.takeProfitMultiple
+        env.takeProfitMultiple,
+        env.maxRiskPctPerSymbol
     );
 
     const normalizedTrades = normalizeTradesToConstraints(

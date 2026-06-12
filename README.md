@@ -166,6 +166,8 @@ Notes:
 - **Breakout Candidate Trade Type**: Filter which breakout directions are considered. Choose `Long` to accept only bullish breakouts, `Short` to accept only bearish breakouts, or `Both` (default) to accept either direction.
 - **Money in Account**: Total account capital available (default $25,000). Overrides `HARD_BASKET_CAP` env var.
 - **Max Amount to Risk Per Trading Day**: Maximum total stop-loss risk per day (default $1,000). Overrides `MAX_TOTAL_RISK` env var.
+- **Stop/Profit Limit Ratio 1:** Reward-to-risk ratio for profit targets (default `4` = 4R). Overrides `STOP_LOSS_PROFIT_RATIO` env var.
+- **Maximum % of Max Risk per Trading Day**: Caps any single position's risk as a percentage of the daily budget (default `20%`). At 20% of a $1,000 budget, no single trade risks more than $200. Set higher (e.g. `200%`) to effectively disable the cap and let high-scoring breakouts concentrate the budget. Override via `MAX_RISK_PCT_PER_SYMBOL` env var.
 - **Current status**: Real-time execution state (running, stopped, error details).
 - **Backtest progress**: For historical runs, shows current date, total dates, and completion.
 
@@ -175,11 +177,34 @@ Notes:
 
 Use these controls together to reduce false breakouts while keeping enough opportunities for your session goals.
 
-- **Breakout Confirmation Candle (minutes)** controls how long the breakout candle is. The breakout must close outside the opening range on this timeframe.
-- **Breakout Quality Filters** turns quality gating on or off. Quality gating means a breakout must pass all enabled quality checks before it is considered tradeable (volume expansion, relative strength/weakness, and higher-timeframe trend alignment).
-- **Min Volume Expansion** requires breakout-candle volume to exceed recent confirmation-candle volume by a minimum ratio.
-- **Min Relative Strength (%)** requires the breakout close to clear the opening-range boundary by a minimum percentage.
-- **Trend Timeframe (minutes)** and **Trend Lookback Bars** define higher-timeframe trend alignment.
+Each parameter is described below with a behavioral-impact example:
+
+- **Breakout Confirmation Candle (minutes)** controls how long the breakout candle is. The breakout must close outside the opening range on this timeframe.  
+  _Example: Raise from `5` to `10` to require a longer breakout bar — fewer brief spikes qualify as breakouts, reducing whipsaw entries but potentially missing fast-break moves that reverse within 5 minutes._
+
+- **Breakout Quality Filters** turns quality gating on or off. Quality gating means a breakout must pass all enabled quality checks before it is considered tradeable (volume expansion, relative strength/weakness, and higher-timeframe trend alignment).  
+  _Example: Toggle from `off` to `on` to reject breakouts that lack volume confirmation or trend support — candidate count drops sharply, but remaining entries have stronger institutional backing and lower reversal rates._
+
+- **Min Volume Expansion** requires breakout-candle volume to exceed recent confirmation-candle volume by a minimum ratio.  
+  _Example: Raise from `1.2` to `1.8` to require nearly double the volume — only breakouts with heavy participation survive, reducing noise entries on low-volume drift, but valid breakouts on moderate volume are excluded._
+
+- **Min Relative Strength (%)** requires the breakout close to clear the opening-range boundary by a minimum percentage.  
+  _Example: Raise from `0.25` to `0.50` to reject breakouts that barely nudge past the opening range — prevents entries on marginal moves that often reverse, but also skips early entries into strong trends that start with a small edge._
+
+- **Trend Timeframe (minutes)** sets the aggregation period for higher-timeframe trend alignment.  
+  _Example: Raise from `5` to `15` to use 15-minute bars for trend context — trend signals become smoother and less reactive to short-term noise, but the trend assessment updates more slowly during fast intraday reversals._
+
+- **Trend Lookback Bars** sets how many higher-timeframe bars define the trend context.  
+  _Example: Raise from `3` to `5` to require more bars of trend confirmation — reduces false trend signals from single-bar spikes in the higher timeframe, but delays entry when a new trend forms quickly._
+
+- **ATR stop multiple** scales the 1-minute Average True Range to set the stop-loss distance from entry. A higher multiplier (e.g. `2.0`) gives trades more room to breathe through intraday volatility but increases per-trade loss. Default `1.0`. Override via `ATR_STOP_MULTIPLE` env var.  
+  _Example: Raise from `1.0` to `2.0` to double the stop-loss distance — fewer premature stop-outs on normal volatility, but each position risks twice as much capital per share, which reduces position size under the daily risk budget._
+
+- **Min stop (%)** sets a hard floor on stop distance as a percentage of entry price. Prevents stops from being placed too tight when ATR is unusually low. Default `0.75%`. Override via `MIN_STOP_PCT` env var.  
+  _Example: Raise from `0.75%` to `1.5%` to ensure no stop is placed tighter than 1.5% of entry — protects against stop-outs on low-ATR stocks that would otherwise have a microscopic stop, but increases the minimum loss for every trade._
+
+- **Maximum % of Max Risk per Trading Day** limits how much of the daily risk budget any single position can consume. The per-symbol cap is `maxTotalRisk × (maxRiskPctPerSymbol / 100)`. Default `20%`. Override via `MAX_RISK_PCT_PER_SYMBOL` env var.  
+  _Example: Lower from `20%` to `10%` to prevent any one trade from risking more than $100 of a $1000 budget — forces diversification across more symbols and prevents an ultra-high-scoring breakout from consuming the whole budget, but reduces position size on your highest-conviction idea._
 
 Retest freshness is also enforced by environment setting: `BREAKOUT_RETEST_MAX_AGE_MINUTES` (default `1`). In the current NY session, entries are skipped when the confirmation retest is older than this threshold. Set it to `0` to disable staleness filtering. In EMULATION mode the staleness check is bypassed entirely so all session breakouts are evaluated.
 
@@ -537,6 +562,7 @@ The following improvements address reliability and crash safety in the web appli
 - **Duplicate route removal**: The `/api/alpaca/set-realtime-feed` endpoint existed twice in the route handler chain. The duplicate was removed.
 - **Realtime feed state sync**: `initialRealtimeFeedEnabled` is read from the `ALPACA_DATA_FEED` environment variable at startup and sent to the UI via status endpoint. The "Run in real time" checkbox automatically syncs to this value.
 - **Orphan process cleanup**: SIGTERM and SIGINT handlers kill the spawned child trading process before the server exits, preventing orphaned workers.
+- **EPIPE child-process exit**: If the spawned child trading process loses its stdout pipe (e.g., the parent server restarts), it catches the `EPIPE` error and exits cleanly via `process.exit(1)` rather than remaining alive as a zombie process that generates repeated EPIPE crashes. See `src/main.ts`.
 - **Trade log date isolation**: Trade log files (`logs/trades/trades-YYYY-MM-DD.log`) are keyed by the entry or exit timestamp date rather than the system clock, so historical backtest trades write to the correct date file.
 
 ### Logging
@@ -593,7 +619,7 @@ The app reads configuration from `.env` (via `dotenv`) and supports the followin
 | `ALPACA_TRADING_BASE_URL` | No | Mode-dependent (`https://paper-api.alpaca.markets` for `EMULATION`/`PAPER`, `https://api.alpaca.markets` for `LIVE`) | Optional override for trading/account endpoint base URL. |
 | `APCA_API_KEY_ID` | Yes | None | Alpaca API key ID. Required for all Alpaca data/account/order API calls. |
 | `APCA_API_SECRET_KEY` | Yes | None | Alpaca API secret key paired with `APCA_API_KEY_ID`. |
-| `ATR_STOP_MULTIPLE` | No | `1` | ATR multiplier used as one candidate stop-distance component in sizing fallback. |
+| `ATR_STOP_MULTIPLE` | No | `1` | ATR multiplier used as one candidate stop-distance component in sizing fallback. Settable via the Web UI **ATR stop multiple** control. |
 | `BREAKOUT_CONFIRMATION_CANDLE_MINUTES` | No | `5` | Candle size (in minutes) used to confirm breakout closes outside the opening range. |
 | `BREAKOUT_RETEST_MAX_AGE_MINUTES` | No | `1` | Maximum age (in minutes) allowed between confirmation retest and entry evaluation for the current NY session. Set to `0` to disable this staleness guard. In EMULATION mode the check is bypassed entirely. |
 | `BREAKOUT_QUALITY_FILTERS_ENABLED` | No | `false` | Enables breakout quality filters and also controls the Web UI's initial Breakout Quality Filters checkbox state. |
@@ -608,8 +634,9 @@ The app reads configuration from `.env` (via `dotenv`) and supports the followin
 | `LOG_LEVEL` | No | `debug` in development, `info` otherwise | Logger verbosity (`error`, `warn`, `info`, `debug`, etc.). |
 | `MAX_POSITIONS_PER_SIDE` | No | `3` | Max number of selected long candidates and short candidates each (top-N per side). |
 | `MAX_POSITION_NOTIONAL` | No | `5000` | Per-position notional cap applied before final basket scaling. |
+| `MAX_RISK_PCT_PER_SYMBOL` | No | `20` | Maximum percent of `MAX_TOTAL_RISK` any single position can consume. Default `20` caps each position at 20% of the daily budget (e.g., $200 of a $1000 budget). Set to `200` to effectively disable the per-symbol cap. Settable via the Web UI **Maximum % of Max Risk per Trading Day** control. |
 | `MAX_TOTAL_RISK` | No | `1000` | Basket-wide planned stop-loss dollar cap before normalization. |
-| `MIN_STOP_PCT` | No | `0.0075` | Minimum stop distance as a fraction of entry price (example: `0.0075` = 0.75%). |
+| `MIN_STOP_PCT` | No | `0.0075` | Minimum stop distance as a fraction of entry price (example: `0.0075` = 0.75%). Settable via the Web UI **Min stop (%)** control. |
 | `NODE_ENV` | No | `development` | Runtime environment mode used for logging format/verbosity defaults. |
 | `OPENING_RANGE_MINUTES` | No | `15` | Number of minutes used to build the opening range window. |
 | `POLL_INTERVAL_SECONDS` | No | `20` | Wait interval between live loop cycles. |

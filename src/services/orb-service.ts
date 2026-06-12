@@ -36,6 +36,9 @@ export type OptimalFilters = {
     breakoutMinRelativeStrengthPct: number;
     breakoutTrendTimeframeMinutes: number;
     breakoutTrendLookbackBars: number;
+    atrStopMultiple: number;
+    minStopPct: number;
+    maxRiskPctPerSymbol: number;
 };
 
 /**
@@ -53,6 +56,9 @@ export class OrbService {
             breakoutMinRelativeStrengthPct: 0.15,
             breakoutTrendTimeframeMinutes: 5,
             breakoutTrendLookbackBars: 3,
+            atrStopMultiple: 2,
+            minStopPct: 1.5,
+            maxRiskPctPerSymbol: 20,
         };
     }
 
@@ -104,6 +110,9 @@ export class OrbService {
             breakoutMinRelativeStrengthPct: Number(breakoutMinRelativeStrengthPct.toFixed(2)),
             breakoutTrendTimeframeMinutes,
             breakoutTrendLookbackBars,
+            atrStopMultiple: 2,
+            minStopPct: 1.5,
+            maxRiskPctPerSymbol: 20,
         };
     }
 

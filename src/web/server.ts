@@ -64,6 +64,7 @@ type AppState = {
     breakoutTrendLookbackBars: number;
     atrStopMultiple: number;
     minStopPct: number;
+    maxRiskPctPerSymbol: number;
 };
 
 type StartRequest = {
@@ -84,6 +85,7 @@ type StartRequest = {
     breakoutTrendLookbackBars?: number;
     atrStopMultiple?: number;
     minStopPct?: number;
+    maxRiskPctPerSymbol?: number;
 };
 
 type ReportKind = 'today' | 'week' | 'month';
@@ -346,7 +348,8 @@ const appState: AppState = {
     breakoutTrendTimeframeMinutes: env.breakoutTrendTimeframeMinutes,
     breakoutTrendLookbackBars: env.breakoutTrendLookbackBars,
     atrStopMultiple: env.atrStopMultiple,
-    minStopPct: env.minStopPct,
+    minStopPct: env.minStopPct * 100,
+    maxRiskPctPerSymbol: env.maxRiskPctPerSymbol,
 };
 
 let appProcess: ChildProcessWithoutNullStreams | null = null;
@@ -697,6 +700,7 @@ function startOrbiliciousProcess(params: {
     breakoutTrendLookbackBars: number;
     atrStopMultiple: number;
     minStopPct: number;
+    maxRiskPctPerSymbol: number;
 }) {
     const {
         continuous,
@@ -716,6 +720,7 @@ function startOrbiliciousProcess(params: {
         breakoutTrendLookbackBars,
         atrStopMultiple,
         minStopPct,
+        maxRiskPctPerSymbol,
     } = params;
     const entry = resolveAppEntryPoint();
     const args = [...entry.args];
@@ -769,6 +774,7 @@ function startOrbiliciousProcess(params: {
         appState.breakoutTrendLookbackBars = breakoutTrendLookbackBars;
         appState.atrStopMultiple = atrStopMultiple;
         appState.minStopPct = minStopPct;
+        appState.maxRiskPctPerSymbol = maxRiskPctPerSymbol;
         appState.pid = null;
         addActivityLine('system', `Loaded replay from canonical daily session record for ${emulationSessionDate}.`);
         return;
@@ -846,6 +852,7 @@ function startOrbiliciousProcess(params: {
     appState.breakoutTrendLookbackBars = breakoutTrendLookbackBars;
     appState.atrStopMultiple = atrStopMultiple;
     appState.minStopPct = minStopPct;
+    appState.maxRiskPctPerSymbol = maxRiskPctPerSymbol;
     persistCanonicalDailySession();
 
     const child = spawn(entry.command, args, {
@@ -866,7 +873,8 @@ function startOrbiliciousProcess(params: {
             BREAKOUT_TREND_TIMEFRAME_MINUTES: String(breakoutTrendTimeframeMinutes),
             BREAKOUT_TREND_LOOKBACK_BARS: String(breakoutTrendLookbackBars),
             ATR_STOP_MULTIPLE: String(atrStopMultiple),
-            MIN_STOP_PCT: String(minStopPct),
+            MIN_STOP_PCT: String(minStopPct / 100),
+            MAX_RISK_PCT_PER_SYMBOL: String(maxRiskPctPerSymbol),
             ...(realTimeData ? { ALPACA_DATA_FEED: 'sip' } : {}),
         },
         stdio: 'pipe',
@@ -3672,9 +3680,15 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
         );
         const minStopPct = normalizedPositiveNumber(
             payload.minStopPct,
-            appState.minStopPct ?? env.minStopPct,
-            0.001,
+            appState.minStopPct ?? env.minStopPct * 100,
             0.1,
+            10,
+        );
+        const maxRiskPctPerSymbol = normalizedPositiveNumber(
+            payload.maxRiskPctPerSymbol,
+            appState.maxRiskPctPerSymbol ?? env.maxRiskPctPerSymbol,
+            1,
+            1000,
         );
 
         if ((sessionMode === 'EMULATION' || sessionMode === 'REPLAY') && emulationSessionDate && !isValidSessionDate(emulationSessionDate)) {
@@ -3740,6 +3754,7 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
             breakoutTrendLookbackBars,
             atrStopMultiple,
             minStopPct,
+            maxRiskPctPerSymbol,
         });
 
         sendJson(res, 202, {
