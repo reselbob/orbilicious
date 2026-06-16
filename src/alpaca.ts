@@ -4,6 +4,7 @@ import { env, strategyConfig } from './config';
 import { logger } from './logger';
 import { toNyParts } from './time';
 import { Bar, Position } from './types';
+import { SizedTrade } from './basket';
 import { AlpacaWebSocketClient } from './alpaca-ws';
 import type {
     OrbReportResult,
@@ -80,7 +81,7 @@ export class AlpacaClient {
 
     async generateOrbReport(
         sessionDate?: Date | string,
-        options?: { usesHistoricData?: boolean; generateArtifacts?: boolean }
+        options?: { usesHistoricData?: boolean; generateArtifacts?: boolean; runtimeTrades?: SizedTrade[]; runtimeTradeHistory?: { symbol: string; side: 'long' | 'short'; qty: number; entryPrice: number; exitPrice?: number; exitTime?: string; pnl?: number; status: string }[] }
     ): Promise<OrbReportResult> {
         const normalizedDate = normalizeSessionDate(sessionDate);
         const { Reports } = await import('./reports');

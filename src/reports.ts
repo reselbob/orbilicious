@@ -625,6 +625,8 @@ export class Reports {
     private static async computeOrbReportData(
         client: AlpacaClient,
         sessionDate: string,
+        runtimeTrades?: SizedTrade[],
+        runtimeTradeHistory?: { symbol: string; side: 'long' | 'short'; qty: number; entryPrice: number; exitPrice?: number; exitTime?: string; pnl?: number; status: string }[],
     ): Promise<OrbReportComputation> {
         const universeSymbols = await Reports.getFixedUniverseSymbols(client);
         const openingRangeBars = 15;
@@ -859,23 +861,7 @@ export class Reports {
             candidateAllowedByTradeType(candidate.side),
         );
 
-        const atrSizedTrades = buildWeightedRiskTrades(
-            filteredBreakoutCandidates,
-            env.maxTotalRisk,
-            env.takeProfitMultiple,
-            env.maxRiskPctPerSymbol,
-        );
-        const emulatedTrades = normalizeTradesToConstraints(
-            atrSizedTrades,
-            env.maxTotalRisk,
-            env.hardBasketCap,
-            env.maxPositionNotional,
-        );
-        const tradeBySymbol = new Map(
-            emulatedTrades.map((trade) => [trade.symbol, trade]),
-        );
         const sessionBarsBySymbol = new Map<string, Bar[]>();
-
         for (const { symbol, bars } of barResults) {
             const sessionBars = bars.filter(
                 (bar) =>
@@ -886,68 +872,132 @@ export class Reports {
             sessionBarsBySymbol.set(symbol, sessionBars);
         }
 
-        const totalCandidatesBoughtAtStart = filteredBreakoutCandidates.length;
-        const numberOfCandidatesSoldLong = filteredBreakoutCandidates.filter(
-            (trade) => trade.side === "buy",
-        ).length;
-        const numberOfCandidatesBoughtShort = filteredBreakoutCandidates.filter(
-            (trade) => trade.side === "sell",
-        ).length;
-        const totalCostOfBreakoutCandidatePurchases = emulatedTrades.reduce(
-            (sum, trade) => sum + trade.estimatedNotional,
-            0,
-        );
-        const totalAmountOfCashAtStopLossRisk = emulatedTrades.reduce(
-            (sum, trade) => sum + trade.plannedRiskDollars,
-            0,
-        );
-        const closedOutcomeBySymbol = new Map<string, TradeOutcome>();
-        const finalOutcomeBySymbol = new Map<string, TradeOutcome>();
+        let emulatedTrades: SizedTrade[];
+        let totalCandidatesBoughtAtStart: number;
+        let numberOfCandidatesSoldLong: number;
+        let numberOfCandidatesBoughtShort: number;
+        let totalCostOfBreakoutCandidatePurchases: number;
+        let totalAmountOfCashAtStopLossRisk: number;
+        let closedOutcomeBySymbol: Map<string, TradeOutcome>;
+        let finalOutcomeBySymbol: Map<string, TradeOutcome>;
+        let totalProfitLossToDate: number;
 
-        evaluationRows.forEach((row) => {
-            const trade = tradeBySymbol.get(row.symbol);
-            if (!trade || !row.confirmationRetestTimestamp) return;
-
-            const sessionBars = sessionBarsBySymbol.get(row.symbol) ?? [];
-            const entryTimeMs = new Date(row.confirmationRetestTimestamp!).getTime();
-            const barsAfterEntry = sessionBars.filter(
-                (bar) =>
-                    new Date(bar.timestamp).getTime() > entryTimeMs - 60000,
+        if (runtimeTrades && runtimeTradeHistory) {
+            emulatedTrades = runtimeTrades;
+            totalCandidatesBoughtAtStart = runtimeTrades.length;
+            numberOfCandidatesSoldLong = runtimeTrades.filter(t => t.side === 'buy').length;
+            numberOfCandidatesBoughtShort = runtimeTrades.filter(t => t.side === 'sell').length;
+            totalCostOfBreakoutCandidatePurchases = runtimeTrades.reduce(
+                (sum, t) => sum + t.estimatedNotional, 0,
             );
+            totalAmountOfCashAtStopLossRisk = runtimeTrades.reduce(
+                (sum, t) => sum + t.plannedRiskDollars, 0,
+            );
+            closedOutcomeBySymbol = new Map<string, TradeOutcome>();
+            finalOutcomeBySymbol = new Map<string, TradeOutcome>();
 
-            const outcome = Reports.emulateExit(trade, barsAfterEntry);
-            if (outcome.status !== "pending") {
-                closedOutcomeBySymbol.set(row.symbol, outcome);
-                finalOutcomeBySymbol.set(row.symbol, outcome);
-                return;
+            for (const rec of runtimeTradeHistory) {
+                const side = rec.side === 'long' ? 'buy' : 'sell';
+                const outcome: TradeOutcome = {
+                    symbol: rec.symbol,
+                    side,
+                    entryPrice: rec.entryPrice,
+                    stopPrice: 0,
+                    takeProfitPrice: 0,
+                    qty: rec.qty,
+                    status: rec.status === 'closed' ? (rec.pnl && rec.pnl >= 0 ? 'profit' : 'loss') : 'pending',
+                    exitPrice: rec.exitPrice ?? null,
+                    exitTimestamp: rec.exitTime ?? null,
+                    pnl: rec.pnl ?? 0,
+                };
+                if (rec.status === 'closed') {
+                    closedOutcomeBySymbol.set(rec.symbol, outcome);
+                }
+                finalOutcomeBySymbol.set(rec.symbol, outcome);
             }
 
-            const finalBar = sessionBars[sessionBars.length - 1];
-            if (!finalBar) return;
+            totalProfitLossToDate = runtimeTradeHistory.reduce(
+                (sum, rec) => sum + (rec.pnl ?? 0), 0,
+            );
+        } else {
+            const atrSizedTrades = buildWeightedRiskTrades(
+                filteredBreakoutCandidates,
+                env.maxTotalRisk,
+                env.takeProfitMultiple,
+                env.maxRiskPctPerSymbol,
+            );
+            emulatedTrades = normalizeTradesToConstraints(
+                atrSizedTrades,
+                env.maxTotalRisk,
+                env.hardBasketCap,
+                env.maxPositionNotional,
+            );
+            const tradeBySymbol = new Map(
+                emulatedTrades.map((trade) => [trade.symbol, trade]),
+            );
+            totalCandidatesBoughtAtStart = filteredBreakoutCandidates.length;
+            numberOfCandidatesSoldLong = filteredBreakoutCandidates.filter(
+                (trade) => trade.side === "buy",
+            ).length;
+            numberOfCandidatesBoughtShort = filteredBreakoutCandidates.filter(
+                (trade) => trade.side === "sell",
+            ).length;
+            totalCostOfBreakoutCandidatePurchases = emulatedTrades.reduce(
+                (sum, trade) => sum + trade.estimatedNotional,
+                0,
+            );
+            totalAmountOfCashAtStopLossRisk = emulatedTrades.reduce(
+                (sum, trade) => sum + trade.plannedRiskDollars,
+                0,
+            );
+            closedOutcomeBySymbol = new Map<string, TradeOutcome>();
+            finalOutcomeBySymbol = new Map<string, TradeOutcome>();
 
-            const pnlAtClose =
-                trade.side === "buy"
-                    ? (finalBar.close - trade.price) * trade.qty
-                    : (trade.price - finalBar.close) * trade.qty;
+            evaluationRows.forEach((row) => {
+                const trade = tradeBySymbol.get(row.symbol);
+                if (!trade || !row.confirmationRetestTimestamp) return;
 
-            finalOutcomeBySymbol.set(row.symbol, {
-                symbol: trade.symbol,
-                side: trade.side,
-                entryPrice: trade.price,
-                stopPrice: trade.stopPrice,
-                takeProfitPrice: trade.takeProfitPrice,
-                qty: trade.qty,
-                status: "pending",
-                exitPrice: finalBar.close,
-                exitTimestamp: finalBar.timestamp,
-                pnl: pnlAtClose,
+                const sessionBars = sessionBarsBySymbol.get(row.symbol) ?? [];
+                const entryTimeMs = new Date(row.confirmationRetestTimestamp!).getTime();
+                const barsAfterEntry = sessionBars.filter(
+                    (bar) =>
+                        new Date(bar.timestamp).getTime() > entryTimeMs - 60000,
+                );
+
+                const outcome = Reports.emulateExit(trade, barsAfterEntry);
+                if (outcome.status !== "pending") {
+                    closedOutcomeBySymbol.set(row.symbol, outcome);
+                    finalOutcomeBySymbol.set(row.symbol, outcome);
+                    return;
+                }
+
+                const finalBar = sessionBars[sessionBars.length - 1];
+                if (!finalBar) return;
+
+                const pnlAtClose =
+                    trade.side === "buy"
+                        ? (finalBar.close - trade.price) * trade.qty
+                        : (trade.price - finalBar.close) * trade.qty;
+
+                finalOutcomeBySymbol.set(row.symbol, {
+                    symbol: trade.symbol,
+                    side: trade.side,
+                    entryPrice: trade.price,
+                    stopPrice: trade.stopPrice,
+                    takeProfitPrice: trade.takeProfitPrice,
+                    qty: trade.qty,
+                    status: "pending",
+                    exitPrice: finalBar.close,
+                    exitTimestamp: finalBar.timestamp,
+                    pnl: pnlAtClose,
+                });
             });
-        });
 
-        const totalProfitLossToDate = [...finalOutcomeBySymbol.values()].reduce(
-            (sum, outcome) => sum + outcome.pnl,
-            0,
-        );
+            totalProfitLossToDate = [...finalOutcomeBySymbol.values()].reduce(
+                (sum, outcome) => sum + outcome.pnl,
+                0,
+            );
+        }
 
         const finalOutcomes = [...finalOutcomeBySymbol.values()];
 
@@ -1945,9 +1995,9 @@ export class Reports {
     public static async generateOrbReport(
         client: AlpacaClient,
         sessionDate: string,
-        options?: { usesHistoricData?: boolean; generateArtifacts?: boolean },
+        options?: { usesHistoricData?: boolean; generateArtifacts?: boolean; runtimeTrades?: SizedTrade[]; runtimeTradeHistory?: { symbol: string; side: 'long' | 'short'; qty: number; entryPrice: number; exitPrice?: number; exitTime?: string; pnl?: number; status: string }[] },
     ): Promise<OrbReportResult> {
-        const reportData = await Reports.computeOrbReportData(client, sessionDate);
+        const reportData = await Reports.computeOrbReportData(client, sessionDate, options?.runtimeTrades, options?.runtimeTradeHistory);
         const {
             symbols,
             evaluationRows,

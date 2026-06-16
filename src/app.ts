@@ -695,7 +695,7 @@ export async function executeSizedTrades(
     trader: ITrader,
     sessionDate: string,
     trades: SizedTrade[]
-) {
+): Promise<SizedTrade[]> {
     const totalPlannedRisk = trades.reduce((sum, t) => sum + t.plannedRiskDollars, 0);
     const totalEstimatedNotional = trades.reduce((sum, t) => sum + t.estimatedNotional, 0);
 
@@ -721,10 +721,11 @@ export async function executeSizedTrades(
     }
 
     if (!tradesToExecute.length) {
-        return;
+        return [];
     }
 
     await trader.executeTrades(tradesToExecute, sessionDate);
+    return tradesToExecute;
 }
 
 export async function runCycle(
@@ -732,14 +733,14 @@ export async function runCycle(
     trader: ITrader,
     sessionDate: string,
     options?: { mostActiveSymbolLimit?: number },
-) {
+): Promise<SizedTrade[]> {
     logger.info('Starting run cycle', { sessionDate });
 
     const account = await trader.getAccount();
 
     if (account.tradingBlocked) {
         logger.warn('Trading is blocked on account', { sessionDate });
-        return;
+        return [];
     }
 
     const candidates = await findBreakoutCandidates(client, trader, sessionDate, options);
@@ -753,7 +754,7 @@ export async function runCycle(
 
     if (remainingRisk <= 0) {
         logger.info('Cumulative risk budget exhausted', { usedRisk, realizedLoss, maxTotalRisk: env.maxTotalRisk, selectedCount: selected.length });
-        return;
+        return [];
     }
 
     const weightedTrades = buildWeightedRiskTrades(
@@ -785,8 +786,9 @@ export async function runCycle(
         normalizedTradeCount: normalizedTrades.length,
     });
 
-    await executeSizedTrades(trader, sessionDate, normalizedTrades);
+    const executed = await executeSizedTrades(trader, sessionDate, normalizedTrades);
     logger.info('Completed run cycle', { sessionDate });
+    return executed;
 }
 
 export async function manageOpenPositions(
@@ -966,6 +968,7 @@ export async function startApp(options?: StartAppOptions) {
     const reportedOpeningRangeByDate = new Set<string>();
     const reportedWaitingBreakoutsByDate = new Set<string>();
     const breakoutScanCompleteByDate = new Set<string>();
+    const allRuntimeTrades: SizedTrade[] = [];
 
     logger.info('Starting ORB normalized weighted-risk runner (daily schedule)', {
         sessionDateMode: 'current-day',
@@ -1019,7 +1022,8 @@ export async function startApp(options?: StartAppOptions) {
                 }
 
                 if (!breakoutScanCompleteByDate.has(sessionDate)) {
-                    await runCycle(client, trader, sessionDate);
+                    const trades = await runCycle(client, trader, sessionDate);
+                    if (trades.length > 0) allRuntimeTrades.push(...trades);
                     if (currentMinutes >= breakoutWindowEndMinutes) {
                         logger.info('Breakout window closed; initial scan complete', {
                             sessionDate,
@@ -1032,13 +1036,16 @@ export async function startApp(options?: StartAppOptions) {
                     await manageOpenPositions(client, trader, sessionDate);
                 }
             } else if (!reportedDates.has(sessionDate)) {
+                await manageOpenPositions(client, trader, sessionDate);
+
                 logger.info('Market closed; generating end-of-day ORB report', {
                     sessionDate,
                     currentTime: nyNow.hhmm,
                     forceExitTime: strategyConfig.forceExitTimeHHMM,
                 });
 
-                await client.generateOrbReport(sessionDate, { generateArtifacts: false });
+                const tradeHistory = trader.getTradeHistory();
+                await client.generateOrbReport(sessionDate, { generateArtifacts: false, runtimeTrades: allRuntimeTrades, runtimeTradeHistory: tradeHistory });
                 reportedDates.add(sessionDate);
                 logger.info('Completed live end-of-day ORB report', { sessionDate });
 

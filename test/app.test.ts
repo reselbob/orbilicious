@@ -1,9 +1,9 @@
 import { expect } from 'chai';
 import { describe, it } from 'mocha';
 import { AlpacaClient } from '../src/alpaca';
-import { buildWeightedRiskTrades, normalizeTradesToConstraints } from '../src/basket';
+import { SizedTrade, buildWeightedRiskTrades, normalizeTradesToConstraints } from '../src/basket';
 import { env, strategyConfig } from '../src/config';
-import { executeSizedTrades, findBreakoutCandidates, manageOpenPositions } from '../src/app';
+import { executeSizedTrades, findBreakoutCandidates, manageOpenPositions, runCycle } from '../src/app';
 import { logger } from '../src/logger';
 import { Bar, Position } from '../src/types';
 import { Emulator } from '../src/trading/emulator';
@@ -270,6 +270,178 @@ describe('app trade execution', () => {
         } finally {
             env.dryRun = previousDryRun;
         }
+    });
+});
+
+describe('runCycle returns trades', () => {
+    it('returns empty array when risk budget is exhausted', async () => {
+        const sessionDate = '2099-06-15';
+        class EmptyCycleClient extends AlpacaClient {
+            async getMostActiveSymbols(): Promise<string[]> { return ['AAPL']; }
+            async getIntradayBars(): Promise<Bar[]> { return []; }
+            async getIntradayBarsBatch(): Promise<Map<string, Bar[]>> { return new Map(); }
+            async getOpenPosition(): Promise<Position | null> { return null; }
+            async getAccount(): Promise<{ buyingPower: number; tradingBlocked: boolean }> {
+                return { buyingPower: 0, tradingBlocked: false };
+            }
+            async getMostActiveSymbolDetails(): Promise<never[]> { return []; }
+        }
+        const previousMaxTotalRisk = env.maxTotalRisk;
+        env.maxTotalRisk = 0;
+        try {
+            const client = new EmptyCycleClient();
+            const emulator = new Emulator(client);
+            const result = await runCycle(client, emulator, sessionDate);
+            expect(result).to.deep.equal([]);
+        } finally {
+            env.maxTotalRisk = previousMaxTotalRisk;
+        }
+    });
+});
+
+describe('executeSizedTrades returns executed trades', () => {
+    it('returns the trades that were actually executed', async () => {
+        const sessionDate = '2099-06-15';
+        class NoopEmulator extends Emulator {
+            async executeTrades(_trades: SizedTrade[], _sessionDate: string): Promise<void> {
+                // no-op — skip parent logic for this test
+            }
+        }
+        const client = new AlpacaClient();
+        const emulator = new NoopEmulator(client);
+        const trades: SizedTrade[] = [
+            {
+                symbol: 'AAPL', side: 'buy', price: 100, qty: 10,
+                stopPrice: 95, takeProfitPrice: 110,
+                assignedRiskDollars: 50, stopDistancePerShare: 5, stopLossPct: 0.05,
+                plannedRiskDollars: 50, estimatedNotional: 1000,
+                reason: 'test', score: 1, relativeBreakPct: 5, totalVolume: 10000,
+                openingRangeHigh: 101, openingRangeLow: 99, atr1m: 0.5,
+            },
+        ];
+        const result = await executeSizedTrades(emulator, sessionDate, trades);
+        expect(result).to.have.length(1);
+        expect(result[0].symbol).to.equal('AAPL');
+    });
+
+    it('returns empty array when all trades were already executed', async () => {
+        const sessionDate = '2099-06-15';
+        class NoopEmulator extends Emulator {
+            async executeTrades(_trades: SizedTrade[], _sessionDate: string): Promise<void> {
+                // no-op
+            }
+        }
+        const client = new AlpacaClient();
+        const emulator = new NoopEmulator(client);
+        const trades: SizedTrade[] = [
+            {
+                symbol: 'AAPL', side: 'buy', price: 100, qty: 10,
+                stopPrice: 95, takeProfitPrice: 110,
+                assignedRiskDollars: 50, stopDistancePerShare: 5, stopLossPct: 0.05,
+                plannedRiskDollars: 50, estimatedNotional: 1000,
+                reason: 'test', score: 1, relativeBreakPct: 5, totalVolume: 10000,
+                openingRangeHigh: 101, openingRangeLow: 99, atr1m: 0.5,
+            },
+        ];
+        // First call — trades get executed
+        await executeSizedTrades(emulator, sessionDate, trades);
+        // Second call — same symbol/date pair, should be skipped
+        const result = await executeSizedTrades(emulator, sessionDate, trades);
+        expect(result).to.have.length(0);
+    });
+});
+
+describe('getTradeHistory', () => {
+    it('returns empty array from LiveTrader', () => {
+        const client = new AlpacaClient();
+        const liveTrader = new LiveTrader(client);
+        expect(liveTrader.getTradeHistory()).to.deep.equal([]);
+    });
+
+    it('returns empty array from Emulator with no trades', () => {
+        const client = new AlpacaClient();
+        const emulator = new Emulator(client);
+        expect(emulator.getTradeHistory()).to.deep.equal([]);
+    });
+
+    it('records entry in tradeHistory when executeTrades is called', async () => {
+        const client = new AlpacaClient();
+        const emulator = new Emulator(client);
+        const trade: SizedTrade = {
+            symbol: 'AAPL', side: 'buy', price: 100, qty: 10,
+            stopPrice: 95, takeProfitPrice: 110,
+            assignedRiskDollars: 50, stopDistancePerShare: 5, stopLossPct: 0.05,
+            plannedRiskDollars: 50, estimatedNotional: 1000,
+            reason: 'test', score: 1, relativeBreakPct: 5, totalVolume: 10000,
+            openingRangeHigh: 101, openingRangeLow: 99, atr1m: 0.5,
+        };
+        await emulator.executeTrades([trade], '2099-06-15');
+
+        const history = emulator.getTradeHistory();
+        expect(history).to.have.length(1);
+        expect(history[0]).to.include({
+            symbol: 'AAPL', side: 'long', qty: 10,
+            entryPrice: 100, status: 'open',
+        });
+        expect(history[0].entryTime).to.be.a('string');
+        expect(history[0].stopPrice).to.equal(95);
+        expect(history[0].takeProfitPrice).to.equal(110);
+    });
+
+    it('updates tradeHistory entry on stop-loss close', async () => {
+        const sessionDate = '2099-06-15';
+        const entryTime = '2099-06-15T13:50:00Z';
+        const client = new AlpacaClient();
+        const emulator = new Emulator(client);
+        emulator.simulatedPositions.set('TEST', {
+            side: 'long', entryPrice: 100, entryTime,
+            stopPrice: 98, takeProfitPrice: 105, qty: 10,
+        });
+        emulator.tradeHistory.push({
+            symbol: 'TEST', side: 'long', qty: 10,
+            entryPrice: 100, entryTime, stopPrice: 98, takeProfitPrice: 105,
+            status: 'open',
+        });
+
+        const bars: Bar[] = [{
+            symbol: 'TEST', timestamp: '2099-06-15T14:30:00Z',
+            open: 97, high: 97, low: 97, close: 97, volume: 1000,
+        }];
+        await emulator.managePosition('TEST', { symbol: 'TEST', side: 'long', qty: 10, entryPrice: 100, entryTime }, sessionDate, bars, bars[0]);
+
+        const history = emulator.getTradeHistory();
+        expect(history).to.have.length(1);
+        expect(history[0].status).to.equal('closed');
+        expect(history[0].exitPrice).to.equal(98);
+        expect(history[0].pnl).to.equal(-20);
+    });
+
+    it('updates tradeHistory entry on take-profit close', async () => {
+        const sessionDate = '2099-06-15';
+        const entryTime = '2099-06-15T13:50:00Z';
+        const client = new AlpacaClient();
+        const emulator = new Emulator(client);
+        emulator.simulatedPositions.set('TEST', {
+            side: 'long', entryPrice: 100, entryTime,
+            stopPrice: 95, takeProfitPrice: 105, qty: 10,
+        });
+        emulator.tradeHistory.push({
+            symbol: 'TEST', side: 'long', qty: 10,
+            entryPrice: 100, entryTime, stopPrice: 95, takeProfitPrice: 105,
+            status: 'open',
+        });
+
+        const bars: Bar[] = [{
+            symbol: 'TEST', timestamp: '2099-06-15T14:30:00Z',
+            open: 106, high: 106, low: 106, close: 106, volume: 1000,
+        }];
+        await emulator.managePosition('TEST', { symbol: 'TEST', side: 'long', qty: 10, entryPrice: 100, entryTime }, sessionDate, bars, bars[0]);
+
+        const history = emulator.getTradeHistory();
+        expect(history).to.have.length(1);
+        expect(history[0].status).to.equal('closed');
+        expect(history[0].exitPrice).to.equal(105);
+        expect(history[0].pnl).to.equal(50);
     });
 });
 

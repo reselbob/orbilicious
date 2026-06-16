@@ -3,6 +3,7 @@
 // dispatch.
 import { AlpacaClient } from '../alpaca';
 import { runCycle } from '../app';
+import { SizedTrade } from '../basket';
 import { ITrader } from '../trading/trader-interface';
 import { Emulator } from '../trading/emulator';
 import { LiveTrader } from '../trading/live-trader';
@@ -27,7 +28,7 @@ export type RunTradingCycleFn = (
     trader: ITrader,
     sessionDate: string,
     options?: RunTradingCycleOptions,
-) => Promise<void>;
+) => Promise<SizedTrade[]>;
 
 export type OptimalFilters = {
     breakoutConfirmationCandleMinutes: number;

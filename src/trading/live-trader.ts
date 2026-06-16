@@ -10,6 +10,7 @@ import {
     PositionInfo,
     AccountInfo,
     PositionActionResult,
+    TradeRecord,
 } from './trader-interface';
 
 type TradeMonitorEvent = {
@@ -76,6 +77,10 @@ export class LiveTrader implements ITrader {
         return [];
     }
 
+    getTradeHistory(): TradeRecord[] {
+        return [];
+    }
+
     async closePosition(symbol: string, sessionDate: string, reason?: string): Promise<void> {
         logger.info('Closing open position', { symbol, sessionDate, reason });
         await this.client.closePosition(symbol);
@@ -133,8 +138,10 @@ export class LiveTrader implements ITrader {
         const p = toNyParts(latestBar.timestamp, strategyConfig.sessionTimezone);
         const barMinutes = p.hour * 60 + p.minute;
         const exitStartMinutes = minutesFromHHMM(strategyConfig.forceExitTimeHHMM);
+        const nyNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+        const currentMinutes = nyNow.getHours() * 60 + nyNow.getMinutes();
 
-        if (barMinutes < exitStartMinutes) {
+        if (barMinutes < exitStartMinutes && currentMinutes < exitStartMinutes) {
             logger.debug('Skipping profit-capture close outside end-of-day window', {
                 symbol, side: position.side, entryPrice: position.entryPrice,
                 latestClose: latestBar.close, latestTimestamp: latestBar.timestamp,

@@ -10,6 +10,7 @@ import {
     PositionInfo,
     AccountInfo,
     PositionActionResult,
+    TradeRecord,
 } from './trader-interface';
 
 export interface SimulatedPosition {
@@ -67,6 +68,7 @@ function minutesFromHHMM(hhmm: string): number {
 export class Emulator implements ITrader {
     readonly dryRun = true;
     readonly simulatedPositions = new Map<string, SimulatedPosition>();
+    readonly tradeHistory: TradeRecord[] = [];
     private cumulativeRealizedLoss = 0;
     private readonly client: AlpacaClient;
 
@@ -98,6 +100,10 @@ export class Emulator implements ITrader {
         }));
     }
 
+    getTradeHistory(): TradeRecord[] {
+        return this.tradeHistory;
+    }
+
     async closePosition(symbol: string, _sessionDate: string, _reason?: string): Promise<void> {
         this.simulatedPositions.delete(symbol);
     }
@@ -120,14 +126,26 @@ export class Emulator implements ITrader {
                 reason: 'dry-run simulated entry',
             });
 
+            const simSide = trade.side === 'buy' ? 'long' : 'short';
             this.simulatedPositions.set(trade.symbol, {
-                side: trade.side === 'buy' ? 'long' : 'short',
+                side: simSide,
                 entryPrice: trade.price,
                 entryTime: openEventTimestamp,
                 stopPrice: trade.stopPrice,
                 stopLossPct: trade.stopLossPct,
                 takeProfitPrice: trade.takeProfitPrice,
                 qty: trade.qty,
+            });
+
+            this.tradeHistory.push({
+                symbol: trade.symbol,
+                side: simSide,
+                qty: trade.qty,
+                entryPrice: trade.price,
+                entryTime: openEventTimestamp,
+                stopPrice: trade.stopPrice,
+                takeProfitPrice: trade.takeProfitPrice,
+                status: 'open',
             });
 
             logTradeOpen(trade.symbol, trade.price, openEventTimestamp);
@@ -182,6 +200,7 @@ export class Emulator implements ITrader {
 
             this.simulatedPositions.delete(symbol);
             if (pnl < 0) this.cumulativeRealizedLoss += Math.abs(pnl);
+            this.recordClose(symbol, exitPrice, closeEventTimestamp, pnl);
             logger.info('Dry-run: simulated position closed', {
                 symbol, side: rawSim.side, exitReason, exitPrice,
                 entryPrice: rawSim.entryPrice, pnl,
@@ -200,7 +219,9 @@ export class Emulator implements ITrader {
         const p = toNyParts(latestBar.timestamp, strategyConfig.sessionTimezone);
         const barMinutes = p.hour * 60 + p.minute;
         const exitStartMinutes = minutesFromHHMM(strategyConfig.forceExitTimeHHMM);
-        if (barMinutes >= exitStartMinutes) {
+        const nyNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+        const currentMinutes = nyNow.getHours() * 60 + nyNow.getMinutes();
+        if (barMinutes >= exitStartMinutes || currentMinutes >= exitStartMinutes) {
             const shouldClose = rawSim.side === 'long'
                 ? latestBar.close >= rawSim.entryPrice
                 : latestBar.close <= rawSim.entryPrice;
@@ -219,6 +240,7 @@ export class Emulator implements ITrader {
                 : (rawSim.entryPrice - exitPrice) * rawSim.qty;
             this.simulatedPositions.delete(symbol);
             if (pnl < 0) this.cumulativeRealizedLoss += Math.abs(pnl);
+            this.recordClose(symbol, exitPrice, closeEventTimestamp, pnl);
             logger.info('Dry-run: simulated position closed (profit-capture window)', {
                 symbol, side: rawSim.side, exitPrice, entryPrice: rawSim.entryPrice, pnl,
             });
@@ -241,5 +263,15 @@ export class Emulator implements ITrader {
         });
 
         return { action: 'holding' };
+    }
+
+    private recordClose(symbol: string, exitPrice: number, exitTime: string, pnl: number): void {
+        const existing = this.tradeHistory.find(t => t.symbol === symbol && t.status === 'open');
+        if (existing) {
+            existing.exitPrice = exitPrice;
+            existing.exitTime = exitTime;
+            existing.pnl = pnl;
+            existing.status = 'closed';
+        }
     }
 }

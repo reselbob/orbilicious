@@ -21,6 +21,20 @@ export interface PositionActionResult {
     closeReason?: string;
 }
 
+export interface TradeRecord {
+    symbol: string;
+    side: 'long' | 'short';
+    qty: number;
+    entryPrice: number;
+    entryTime: string;
+    stopPrice: number;
+    takeProfitPrice: number;
+    exitPrice?: number;
+    exitTime?: string;
+    pnl?: number;
+    status: 'open' | 'closed';
+}
+
 export interface ITrader {
     readonly dryRun: boolean;
 
@@ -29,6 +43,8 @@ export interface ITrader {
     getPosition(symbol: string): Promise<PositionInfo | null>;
 
     getAllPositions(): Promise<PositionInfo[]>;
+
+    getTradeHistory(): TradeRecord[];
 
     closePosition(symbol: string, sessionDate: string, reason?: string): Promise<void>;
 

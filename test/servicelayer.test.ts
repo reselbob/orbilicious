@@ -1,6 +1,7 @@
 import { expect } from 'chai';
 import { describe, it } from 'mocha';
 import { AlpacaClient } from '../src/alpaca';
+import { SizedTrade } from '../src/basket';
 import { OrbService } from '../src/services/orb-service';
 import { ITrader } from '../src/trading/trader-interface';
 import { LiveTrader } from '../src/trading/live-trader';
@@ -103,8 +104,9 @@ describe('service layer', () => {
             runnerTrader: ITrader,
             sessionDate: string,
             options?: { mostActiveSymbolLimit?: number },
-        ) => {
+        ): Promise<SizedTrade[]> => {
             runnerCalls.push({ client: runnerClient, trader: runnerTrader, sessionDate, options });
+            return [];
         };
 
         const service = new OrbService(client, runner);
@@ -119,7 +121,7 @@ describe('service layer', () => {
 
     it('delegates daily report generation to AlpacaClient', async () => {
         const client = new StubAlpacaClient();
-        const service = new OrbService(client, async () => { });
+        const service = new OrbService(client, async () => []);
 
         const result = await service.generateDailyReport('2099-01-08', {
             usesHistoricData: true,
@@ -135,7 +137,7 @@ describe('service layer', () => {
 
     it('delegates weekly summary generation to AlpacaClient', async () => {
         const client = new StubAlpacaClient();
-        const service = new OrbService(client, async () => { });
+        const service = new OrbService(client, async () => []);
         const anchorDate = new Date('2099-01-09T14:30:00Z');
 
         const result = await service.generateWeeklySummaryReport(anchorDate);
@@ -147,7 +149,7 @@ describe('service layer', () => {
 
     it('delegates running summary generation to AlpacaClient', async () => {
         const client = new StubAlpacaClient();
-        const service = new OrbService(client, async () => { });
+        const service = new OrbService(client, async () => []);
         const anchorDate = new Date('2099-01-01T14:30:00Z');
 
         const result = await service.generateRunningSummaryReport(anchorDate);
@@ -160,7 +162,7 @@ describe('service layer', () => {
     it('reports real-time data feed as supported when AlpacaClient probe succeeds', async () => {
         const client = new StubAlpacaClient();
         client.sipFeedSupported = true;
-        const service = new OrbService(client, async () => { });
+        const service = new OrbService(client, async () => []);
 
         const result = await service.checkRealtimeDataFeedSupported();
 
@@ -170,7 +172,7 @@ describe('service layer', () => {
     it('reports real-time data feed as unsupported when AlpacaClient probe fails', async () => {
         const client = new StubAlpacaClient();
         client.sipFeedSupported = false;
-        const service = new OrbService(client, async () => { });
+        const service = new OrbService(client, async () => []);
 
         const result = await service.checkRealtimeDataFeedSupported();
 
