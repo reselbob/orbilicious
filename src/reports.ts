@@ -882,7 +882,7 @@ export class Reports {
         let finalOutcomeBySymbol: Map<string, TradeOutcome>;
         let totalProfitLossToDate: number;
 
-        if (runtimeTrades && runtimeTradeHistory) {
+        if (runtimeTrades?.length > 0 && runtimeTradeHistory?.length > 0) {
             emulatedTrades = runtimeTrades;
             totalCandidatesBoughtAtStart = runtimeTrades.length;
             numberOfCandidatesSoldLong = runtimeTrades.filter(t => t.side === 'buy').length;

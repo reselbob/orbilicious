@@ -1126,7 +1126,7 @@ function syncDropdownsFromServer(payload) {
     if (typeof payload.sessionMode === 'string') {
         sessionMode.value = payload.sessionMode;
     }
-    if (typeof payload.emulationSessionDate === 'string' && payload.emulationSessionDate) {
+    if (typeof payload.emulationSessionDate === 'string' && payload.emulationSessionDate === todayIsoDate()) {
         emulationDateInput.value = payload.emulationSessionDate;
     }
     if (typeof payload.candidateTradeType === 'string' && candidateTradeType) {
@@ -1276,6 +1276,7 @@ async function stopOrbilicious() {
             return;
         }
 
+        emulationDateInput.value = todayIsoDate();
         await refreshStatus();
         await refreshTrades();
     } catch (error) {
