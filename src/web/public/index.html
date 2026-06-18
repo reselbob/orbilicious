@@ -1069,7 +1069,15 @@
                         <div class="card-header">Reports</div>
                         <div class="card-body">
                             <div class="row g-2 align-items-end mb-3">
-                                <div class="col-12 col-md-3">
+                                <div class="col-12 col-md-2">
+                                    <label class="form-label" for="sessionModeSelect">Session Mode</label>
+                                    <select id="sessionModeSelect" class="form-select">
+                                        <option value="EMULATION">EMULATION</option>
+                                        <option value="PAPER">PAPER</option>
+                                        <option value="LIVE">LIVE</option>
+                                    </select>
+                                </div>
+                                <div class="col-12 col-md-2">
                                     <label class="form-label" for="reportSelect">Report Type</label>
                                     <select id="reportSelect" class="form-select">
                                         <option value="today">Today's trading activity</option>
@@ -1081,7 +1089,7 @@
                                     <label class="form-label" for="reportAnchorDate">Report Date</label>
                                     <input id="reportAnchorDate" type="date" class="form-control" />
                                 </div>
-                                <div class="col-6 col-md-3 d-grid">
+                                <div class="col-6 col-md-2 d-grid">
                                     <button id="generateReportBtn" class="btn btn-success w-100">Generate
                                         Report</button>
                                 </div>

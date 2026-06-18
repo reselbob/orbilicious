@@ -2095,6 +2095,14 @@ emulationDateInput.addEventListener('change', syncEmulationControls);
 continuousMode.addEventListener('change', syncEmulationControls);
 breakoutQualityFiltersEnabledInput.addEventListener('change', applyBreakoutQualityInputsEnabled);
 
+sessionModeSelect.addEventListener('change', () => {
+    const mode = sessionModeSelect.value;
+    if (mode === 'PAPER' || mode === 'LIVE') {
+        alert('Not implemented.');
+        sessionModeSelect.value = 'EMULATION';
+    }
+});
+
 realTimeDataFeed.addEventListener('change', async () => {
     const enabled = realTimeDataFeed.checked;
 
