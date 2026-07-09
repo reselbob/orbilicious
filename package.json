@@ -11,8 +11,8 @@
     "test:coverage-fast": "TS_NODE_PROJECT=tsconfig.test.json nyc mocha -r ts-node/register \"test/**/*.test.ts\" --exclude \"test/reporting.test.ts\"",
     "coverage:report": "nyc report --reporter=text --reporter=html",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-"full-start": "fuser -k 8787/tcp 2>/dev/null; sleep 0.5; (cd docs-site && npm run build && npm run serve) & sleep 2 && tsx src/web/server.ts",
-"full-stop": "pkill -f 'gatsby serve' 2>/dev/null; pkill -f 'src/web/server.ts' 2>/dev/null; fuser -k 8787/tcp 2>/dev/null; echo 'All services stopped.'",
+    "full-start": "fuser -k 8787/tcp 2>/dev/null; sleep 0.5; (cd docs-site && npm run build && npm run serve) & sleep 2 && tsx src/web/server.ts",
+    "full-stop": "pkill -f 'gatsby serve' 2>/dev/null; pkill -f 'src/web/server.ts' 2>/dev/null; fuser -k 8787/tcp 2>/dev/null; echo 'All services stopped.'",
     "clean": "rm -rf logs/orbilicious-*.log logs/trades logs/*.gz"
   },
   "repository": {
@@ -28,6 +28,7 @@
   "homepage": "https://github.com/reselbob/orbilicious#readme",
   "dependencies": {
     "dotenv": "^17.4.2",
+    "pdfkit": "^0.19.1",
     "puppeteer": "^25.0.2",
     "winston": "^3.19.0",
     "winston-daily-rotate-file": "^5.0.0"

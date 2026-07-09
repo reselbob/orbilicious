@@ -988,6 +988,12 @@ function stopOrbiliciousProcess(): boolean {
     }
 
     if (!appProcess || !appState.isRunning) {
+        appState.isRunning = false;
+        appState.pid = null;
+        appState.runtimeStatus = 'Stopped';
+        appState.orbUiMessage = null;
+        appState.emulationSessionDate = null;
+        appState.backtestProgress = null;
         return false;
     }
 
@@ -3768,9 +3774,10 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, pathname: st
     if (req.method === 'POST' && pathname === '/api/orbilicious/stop') {
         const didSendSignal = stopOrbiliciousProcess();
         if (!didSendSignal) {
-            sendJson(res, 409, {
-                ok: false,
-                message: 'ORBilicious is not running',
+            appState.isRunning = false;
+            sendJson(res, 200, {
+                ok: true,
+                message: 'ORBilicious is already stopped',
                 state: appState,
             });
             return;

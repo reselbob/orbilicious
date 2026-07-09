@@ -2,6 +2,8 @@
 reports
 data
 
+*.pdf
+
 # Logs
 logs
 *.log

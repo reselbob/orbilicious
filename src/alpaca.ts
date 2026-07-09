@@ -3,7 +3,7 @@
 import { env, strategyConfig } from './config';
 import { logger } from './logger';
 import { toNyParts } from './time';
-import { Bar, Position } from './types';
+import { Bar, CalendarEntry, Position } from './types';
 import { SizedTrade } from './basket';
 import { AlpacaWebSocketClient } from './alpaca-ws';
 import type {
@@ -277,6 +277,23 @@ export class AlpacaClient {
             map.set(symbol, bars);
         }
         return map;
+    }
+
+    async getMarketCalendar(start: string, end: string): Promise<CalendarEntry[]> {
+        const url = `${env.tradingBaseUrl}/v2/calendar?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
+
+        logger.debug('Fetching market calendar', { start, end, connectionType: 'HTTP' });
+
+        const res = await fetch(url, { headers: headers() });
+        if (!res.ok) {
+            const body = await res.text();
+            logger.error('Market calendar request failed', { status: res.status, body, connectionType: 'HTTP' });
+            throw new Error(`Market calendar request failed: ${res.status} ${body}`);
+        }
+
+        const json = await res.json() as CalendarEntry[];
+        logger.info('Fetched market calendar', { count: json.length, connectionType: 'HTTP' });
+        return json;
     }
 
     private async getIntradayBarsViaHttp(symbol: string, sessionDate: string, start: string, end: string, feedOverride?: string): Promise<Bar[]> {

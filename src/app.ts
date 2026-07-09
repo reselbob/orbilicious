@@ -969,6 +969,7 @@ export async function startApp(options?: StartAppOptions) {
     const reportedWaitingBreakoutsByDate = new Set<string>();
     const breakoutScanCompleteByDate = new Set<string>();
     const allRuntimeTrades: SizedTrade[] = [];
+    const checkedCalendarDates = new Map<string, boolean>();
 
     logger.info('Starting ORB normalized weighted-risk runner (daily schedule)', {
         sessionDateMode: 'current-day',
@@ -999,6 +1000,21 @@ export async function startApp(options?: StartAppOptions) {
             if (!isWeekday) {
                 emitUiStatusEvent({ message: 'NY Markets are closed. ORBilicious will get Most Active Stocks and discover Breakout Candidates once the NY Markets open.' });
                 logger.info('Market closed (weekend); waiting for next session', {
+                    sessionDate,
+                    dayOfWeek,
+                    currentTime: nyNow.hhmm,
+                });
+            } else if (!checkedCalendarDates.has(sessionDate)) {
+                try {
+                    const calendar = await client.getMarketCalendar(sessionDate, sessionDate);
+                    const isTradingDay = calendar.some((entry) => entry.date === sessionDate);
+                    checkedCalendarDates.set(sessionDate, isTradingDay);
+                } catch {
+                    checkedCalendarDates.set(sessionDate, true);
+                }
+            } else if (!checkedCalendarDates.get(sessionDate)) {
+                emitUiStatusEvent({ message: 'NY Markets are closed today for a market holiday. ORBilicious will resume on the next trading day.' });
+                logger.info('Market closed (holiday); waiting for next session', {
                     sessionDate,
                     dayOfWeek,
                     currentTime: nyNow.hhmm,

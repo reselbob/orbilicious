@@ -38,6 +38,12 @@ export interface Signal {
     reason: string;
 }
 
+export interface CalendarEntry {
+    date: string;
+    open: string;
+    close: string;
+}
+
 export interface StrategyConfig {
     symbol: string;
     openingRangeMinutes: number;
