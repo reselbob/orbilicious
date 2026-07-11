@@ -54,5 +54,7 @@ export interface ITrader {
 
     getCumulativeRealizedLoss(): number;
 
+    resetCumulativeRealizedLoss?(): void;
+
     managePosition(symbol: string, position: PositionInfo, sessionDate: string, sessionBars: Bar[], latestBar: Bar): Promise<PositionActionResult>;
 }

@@ -80,6 +80,10 @@ export class Emulator implements ITrader {
         return this.cumulativeRealizedLoss;
     }
 
+    resetCumulativeRealizedLoss(): void {
+        this.cumulativeRealizedLoss = 0;
+    }
+
     async getAccount(): Promise<AccountInfo> {
         return this.client.getAccount();
     }

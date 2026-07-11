@@ -968,6 +968,7 @@ export async function startApp(options?: StartAppOptions) {
     const reportedOpeningRangeByDate = new Set<string>();
     const reportedWaitingBreakoutsByDate = new Set<string>();
     const breakoutScanCompleteByDate = new Set<string>();
+    const riskResetCompleteByDate = new Set<string>();
     const allRuntimeTrades: SizedTrade[] = [];
     const checkedCalendarDates = new Map<string, boolean>();
 
@@ -1035,6 +1036,12 @@ export async function startApp(options?: StartAppOptions) {
                 } else if (!reportedWaitingBreakoutsByDate.has(sessionDate)) {
                     await emitWaitingForBreakoutsUiStatus(client, sessionDate);
                     reportedWaitingBreakoutsByDate.add(sessionDate);
+                }
+
+                if (!riskResetCompleteByDate.has(sessionDate)) {
+                    trader.resetCumulativeRealizedLoss?.();
+                    riskResetCompleteByDate.add(sessionDate);
+                    logger.info('Daily risk budget reset for new session', { sessionDate });
                 }
 
                 if (!breakoutScanCompleteByDate.has(sessionDate)) {
