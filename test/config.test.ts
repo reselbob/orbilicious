@@ -103,9 +103,9 @@ describe('config integration', () => {
 
         expect(mod.env.breakoutConfirmationCandleMinutes).to.equal(5);
         expect(mod.env.breakoutRetestMaxAgeMinutes).to.equal(1);
-        expect(mod.env.breakoutQualityFiltersEnabled).to.equal(false);
-        expect(mod.env.breakoutMinVolumeExpansion).to.equal(1.2);
-        expect(mod.env.breakoutMinRelativeStrengthPct).to.equal(0.25);
+        expect(mod.env.breakoutQualityFiltersEnabled).to.equal(true);
+        expect(mod.env.breakoutMinVolumeExpansion).to.equal(1.5);
+        expect(mod.env.breakoutMinRelativeStrengthPct).to.equal(0.5);
         expect(mod.env.breakoutTrendTimeframeMinutes).to.equal(5);
         expect(mod.env.breakoutTrendLookbackBars).to.equal(3);
     });
@@ -130,6 +130,67 @@ describe('config integration', () => {
         expect(mod.env.breakoutMinRelativeStrengthPct).to.equal(0.4);
         expect(mod.env.breakoutTrendTimeframeMinutes).to.equal(15);
         expect(mod.env.breakoutTrendLookbackBars).to.equal(4);
+    });
+
+    it('defaults MAX_TOTAL_RISK to 750', () => {
+        withBaseConfigEnv();
+        delete process.env.MAX_TOTAL_RISK;
+
+        clearConfigModuleCache();
+        const mod = require('../src/config');
+
+        expect(mod.env.maxTotalRisk).to.equal(750);
+    });
+
+    it('defaults QUANTITY_TO_RETRIEVE to 30', () => {
+        withBaseConfigEnv();
+        delete process.env.QUANTITY_TO_RETRIEVE;
+
+        clearConfigModuleCache();
+        const mod = require('../src/config');
+
+        expect(mod.env.quantityToRetrieve).to.equal(30);
+    });
+
+    it('defaults MAX_POSITIONS_PER_SIDE to 2', () => {
+        withBaseConfigEnv();
+        delete process.env.MAX_POSITIONS_PER_SIDE;
+
+        clearConfigModuleCache();
+        const mod = require('../src/config');
+
+        expect(mod.env.maxPositionsPerSide).to.equal(2);
+    });
+
+    it('defaults ATR_STOP_MULTIPLE to 1.5', () => {
+        withBaseConfigEnv();
+        delete process.env.ATR_STOP_MULTIPLE;
+
+        clearConfigModuleCache();
+        const mod = require('../src/config');
+
+        expect(mod.env.atrStopMultiple).to.equal(1.5);
+    });
+
+    it('defaults MIN_STOP_PCT to 0.0125', () => {
+        withBaseConfigEnv();
+        delete process.env.MIN_STOP_PCT;
+
+        clearConfigModuleCache();
+        const mod = require('../src/config');
+
+        expect(mod.env.minStopPct).to.equal(0.0125);
+    });
+
+    it('defaults STOP_LOSS_PROFIT_RATIO to 1:3', () => {
+        withBaseConfigEnv();
+        delete process.env.STOP_LOSS_PROFIT_RATIO;
+
+        clearConfigModuleCache();
+        const mod = require('../src/config');
+
+        expect(mod.env.stopLossProfitRatio).to.equal('1:3');
+        expect(mod.env.takeProfitMultiple).to.equal(3);
     });
 
     it('defaults ALPACA_WS_BASE_URL to wss://stream.data.alpaca.markets', () => {

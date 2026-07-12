@@ -1,93 +1,4 @@
-// Optimal/max-profit settings for breakout confirmation and quality filters
-const MAX_PROFIT_FILTERS = {
-    breakoutConfirmationCandleMinutes: 5,
-    breakoutQualityFiltersEnabled: true,
-    breakoutMinVolumeExpansion: 1.1,
-    breakoutMinRelativeStrengthPct: 0.15,
-    breakoutTrendTimeframeMinutes: 5,
-    breakoutTrendLookbackBars: 3,
-    atrStopMultiple: 1,
-    minStopPct: 0.75,
-    maxRiskPctPerSymbol: 20,
-};
 
-function setMaximizeProfitStatus(message, tone = 'muted') {
-    const statusEl = document.getElementById('maximizeProfitStatus');
-    if (!statusEl) return;
-    statusEl.textContent = message;
-    statusEl.classList.remove('text-muted', 'text-success', 'text-warning', 'text-danger');
-    if (tone === 'success') statusEl.classList.add('text-success');
-    else if (tone === 'warning') statusEl.classList.add('text-warning');
-    else if (tone === 'danger') statusEl.classList.add('text-danger');
-    else statusEl.classList.add('text-muted');
-}
-
-function setMaximizeProfitFilters() {
-    const sessionDate = emulationDateInput && emulationDateInput.value ? emulationDateInput.value : '';
-    const symbol = 'SPY';
-
-    // Maximize Profit Probability always enables breakout quality filters.
-    breakoutQualityFiltersEnabledInput.checked = true;
-    breakoutQualityFiltersEnabledInput.dispatchEvent(new Event('input', { bubbles: true }));
-    breakoutQualityFiltersEnabledInput.dispatchEvent(new Event('change', { bubbles: true }));
-
-    setMaximizeProfitStatus('Loading dynamic filter values...', 'muted');
-
-    fetch(`/api/optimal-filters?symbol=${encodeURIComponent(symbol)}&sessionDate=${encodeURIComponent(sessionDate)}`)
-        .then(async (res) => {
-            const data = await res.json().catch(() => ({ ok: false, message: 'Invalid server response.' }));
-            if (!res.ok || !data.ok || !data.filters) {
-                throw new Error(data.message || `Request failed (${res.status}).`);
-            }
-            return data;
-        })
-        .then((data) => {
-            const filters = data.filters;
-            breakoutConfirmationCandleMinutesInput.value = filters.breakoutConfirmationCandleMinutes;
-            breakoutQualityFiltersEnabledInput.checked = true;
-            breakoutQualityFiltersEnabledInput.dispatchEvent(new Event('input', { bubbles: true }));
-            breakoutQualityFiltersEnabledInput.dispatchEvent(new Event('change', { bubbles: true }));
-            breakoutMinVolumeExpansionInput.value = filters.breakoutMinVolumeExpansion;
-            breakoutMinRelativeStrengthPctInput.value = filters.breakoutMinRelativeStrengthPct;
-            breakoutTrendTimeframeMinutesInput.value = filters.breakoutTrendTimeframeMinutes;
-            breakoutTrendLookbackBarsInput.value = filters.breakoutTrendLookbackBars;
-            if (typeof filters.atrStopMultiple === 'number') {
-                atrStopMultipleInput.value = String(filters.atrStopMultiple);
-            }
-            if (typeof filters.minStopPct === 'number') {
-                minStopPctInput.value = String(filters.minStopPct);
-            }
-            if (typeof filters.maxRiskPctPerSymbol === 'number') {
-                maxRiskPctPerSymbolInput.value = String(filters.maxRiskPctPerSymbol);
-            }
-            requestAnimationFrame(() => applyBreakoutQualityInputsEnabled());
-            if (data.usedFallback) {
-                setMaximizeProfitStatus('Applied fallback max-profit filters (dynamic analysis unavailable).', 'warning');
-            } else {
-                setMaximizeProfitStatus('Applied dynamic max-profit filters from market data.', 'success');
-            }
-        })
-        .catch((err) => {
-            breakoutConfirmationCandleMinutesInput.value = MAX_PROFIT_FILTERS.breakoutConfirmationCandleMinutes;
-            breakoutQualityFiltersEnabledInput.checked = true;
-            breakoutQualityFiltersEnabledInput.dispatchEvent(new Event('input', { bubbles: true }));
-            breakoutQualityFiltersEnabledInput.dispatchEvent(new Event('change', { bubbles: true }));
-            breakoutMinVolumeExpansionInput.value = MAX_PROFIT_FILTERS.breakoutMinVolumeExpansion;
-            breakoutMinRelativeStrengthPctInput.value = MAX_PROFIT_FILTERS.breakoutMinRelativeStrengthPct;
-            breakoutTrendTimeframeMinutesInput.value = MAX_PROFIT_FILTERS.breakoutTrendTimeframeMinutes;
-            breakoutTrendLookbackBarsInput.value = MAX_PROFIT_FILTERS.breakoutTrendLookbackBars;
-            atrStopMultipleInput.value = String(MAX_PROFIT_FILTERS.atrStopMultiple);
-            minStopPctInput.value = String(MAX_PROFIT_FILTERS.minStopPct);
-            maxRiskPctPerSymbolInput.value = String(MAX_PROFIT_FILTERS.maxRiskPctPerSymbol);
-            requestAnimationFrame(() => applyBreakoutQualityInputsEnabled());
-            setMaximizeProfitStatus(`Applied local fallback max-profit filters: ${err.message}`, 'danger');
-        });
-}
-
-const maximizeProfitBtn = document.getElementById('maximizeProfitBtn');
-if (maximizeProfitBtn) {
-    maximizeProfitBtn.addEventListener('click', setMaximizeProfitFilters);
-}
 const statusBox = document.getElementById('statusBox');
 const startBtn = document.getElementById('startBtn');
 const stopBtn = document.getElementById('stopBtn');
@@ -192,11 +103,6 @@ let activeTradeChartAnchor = null;
 let activeTradeChartKey = '';
 
 const fieldHelpContent = {
-    maximizeProfit: {
-        title: 'Maximize Profit',
-        subtitle: 'Set optimal filter values for profit',
-        text: 'Clicking this button automatically adjusts all Breakout Confirmation and Quality Filters to values that maximize the probability of capturing the largest possible profits, based on historical analysis and best practices. You can further fine-tune these values if desired before starting ORBilicious.',
-    },
     sessionMode: {
         title: 'Session mode',
         subtitle: 'Choose how ORBilicious should run.',
@@ -418,13 +324,15 @@ function syncEmulationControls() {
     const isContinuous = continuousMode.checked;
     const hasOrbUiMessage = typeof latestOrbUiMessage === 'string' && latestOrbUiMessage.trim() !== '';
     const isWaitingForMarketOpen = latestRuntimeStatus === 'Waiting for market open';
-    const shouldShowWarning = isReplay || isLiveEmu || isRunningHistorical || (isHistoricalMode && hasOrbUiMessage) || isWaitingForMarketOpen;
+    const shouldShowWarning = !latestIsRunning || isReplay || isLiveEmu || isRunningHistorical || (isHistoricalMode && hasOrbUiMessage) || isWaitingForMarketOpen;
     liveEmulationWarning.classList.toggle('d-none', !shouldShowWarning);
 
-    if (isReplay) {
+    if (!latestIsRunning) {
+        liveEmulationWarningText.textContent = 'Click the Start ORBilicious button to start';
+    } else if (isReplay) {
         liveEmulationWarningText.textContent = 'Replay mode runs a historical session replay for the selected date.';
     } else if (isWaitingForMarketOpen) {
-        liveEmulationWarningText.textContent = 'Waiting for markets to open.';
+        liveEmulationWarningText.textContent = 'NY Markets are closed. ORBilicious will get Most Active Stocks and discover Breakout Candidates once the NY Markets open.';
     } else if (isHistoricalMode && hasOrbUiMessage) {
         liveEmulationWarningText.textContent = latestOrbUiMessage;
     } else if (isRunningHistorical) {
@@ -439,13 +347,6 @@ function syncEmulationControls() {
             liveEmulationWarningText.textContent = isContinuous
                 ? 'Emulation is running live and in continuous mode, but no trades will be executed until the NY Markets open.'
                 : 'NY Markets are closed. ORBilicious will get Most Active Stocks and discover Breakout Candidates once the NY Markets open.';
-        }
-    } else if (isLiveEmu && !hasOrbUiMessage) {
-        const marketsOpen = areNYMarketsOpen();
-        if (marketsOpen) {
-            liveEmulationWarningText.textContent = 'Emulation is running live, but no trades will actually be executed against your account.';
-        } else {
-            liveEmulationWarningText.textContent = 'Emulation is running live, but no trades will be executed until the NY Markets open.';
         }
     }
 
@@ -1834,8 +1735,12 @@ function populateDropdownRange(selectElement, start, end, increment, formatter) 
 function initializeAccountAndRiskSpinners() {
     populateDropdownRange(moneyInAccountSelect, 500, 100000, 500, (v) => `$${v.toLocaleString()}`);
     populateDropdownRange(maxRiskPerSessionSelect, 500, 20000, 500, (v) => `$${v.toLocaleString()}`);
+    const opt750 = document.createElement('option');
+    opt750.value = '750';
+    opt750.textContent = '$750';
+    maxRiskPerSessionSelect.insertBefore(opt750, maxRiskPerSessionSelect.options[1]);
     moneyInAccountSelect.value = '25000';
-    maxRiskPerSessionSelect.value = '1000';
+    maxRiskPerSessionSelect.value = '750';
 }
 
 function getMoneyInAccount() {
@@ -1847,12 +1752,12 @@ function getMaxRiskPerSession() {
 }
 
 function getStopProfitRatio() {
-    const value = stopProfitRatioSpinner.value ? parseFloat(stopProfitRatioSpinner.value) : 4;
+    const value = stopProfitRatioSpinner.value ? parseFloat(stopProfitRatioSpinner.value) : 3;
     return Math.max(1, Math.min(20, value));
 }
 
 function getMostActiveSymbolLimit() {
-    return Math.floor(clampNumber(mostActiveSymbolLimitInput.value, 40, 1, 200));
+    return Math.floor(clampNumber(mostActiveSymbolLimitInput.value, 30, 1, 200));
 }
 
 function getBreakoutConfirmationCandleMinutes() {
@@ -1864,11 +1769,11 @@ function getBreakoutQualityFiltersEnabled() {
 }
 
 function getBreakoutMinVolumeExpansion() {
-    return clampNumber(breakoutMinVolumeExpansionInput.value, 1.2, 0.5, 10);
+    return clampNumber(breakoutMinVolumeExpansionInput.value, 1.5, 0.5, 10);
 }
 
 function getBreakoutMinRelativeStrengthPct() {
-    return clampNumber(breakoutMinRelativeStrengthPctInput.value, 0.25, 0, 5);
+    return clampNumber(breakoutMinRelativeStrengthPctInput.value, 0.5, 0, 5);
 }
 
 function getBreakoutTrendTimeframeMinutes() {
@@ -1880,11 +1785,11 @@ function getBreakoutTrendLookbackBars() {
 }
 
 function getAtrStopMultiple() {
-    return clampNumber(atrStopMultipleInput.value, 1, 0.5, 10);
+    return clampNumber(atrStopMultipleInput.value, 1.5, 0.5, 10);
 }
 
 function getMinStopPct() {
-    return clampNumber(minStopPctInput.value, 0.75, 0.1, 10);
+    return clampNumber(minStopPctInput.value, 1.25, 0.1, 10);
 }
 
 function getMaxRiskPctPerSymbol() {

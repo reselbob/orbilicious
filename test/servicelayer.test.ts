@@ -91,6 +91,34 @@ class StubAlpacaClient extends AlpacaClient {
 }
 
 describe('service layer', () => {
+    it('returns default optimal filters matching recommended configuration', () => {
+        const client = new StubAlpacaClient();
+        const service = new OrbService(client, async () => []);
+        const filters = service.getDefaultOptimalFilters();
+
+        expect(filters.breakoutQualityFiltersEnabled).to.equal(true);
+        expect(filters.breakoutMinVolumeExpansion).to.equal(1.5);
+        expect(filters.breakoutMinRelativeStrengthPct).to.equal(0.5);
+        expect(filters.atrStopMultiple).to.equal(1.5);
+        expect(filters.minStopPct).to.equal(1.25);
+        expect(filters.breakoutConfirmationCandleMinutes).to.equal(5);
+        expect(filters.breakoutTrendTimeframeMinutes).to.equal(5);
+        expect(filters.breakoutTrendLookbackBars).to.equal(3);
+        expect(filters.maxRiskPctPerSymbol).to.equal(20);
+    });
+
+    it('returns optimal filters with expected type structure', () => {
+        const client = new StubAlpacaClient();
+        const service = new OrbService(client, async () => []);
+        const filters = service.getDefaultOptimalFilters();
+
+        expect(typeof filters.breakoutQualityFiltersEnabled).to.equal('boolean');
+        expect(typeof filters.breakoutMinVolumeExpansion).to.equal('number');
+        expect(typeof filters.breakoutMinRelativeStrengthPct).to.equal('number');
+        expect(typeof filters.atrStopMultiple).to.equal('number');
+        expect(typeof filters.minStopPct).to.equal('number');
+        expect(typeof filters.breakoutConfirmationCandleMinutes).to.equal('number');
+    });
     it('delegates trading cycle execution to injected runner', async () => {
         const client = new StubAlpacaClient();
         const runnerCalls: Array<{

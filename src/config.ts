@@ -103,7 +103,7 @@ function candidateTradeType(name: string, fallback: CandidateTradeType): Candida
     throw new Error(`Invalid candidate trade type for ${name}: ${value}`);
 }
 
-const stopLossProfitRatio = ratio('STOP_LOSS_PROFIT_RATIO', '1:4');
+const stopLossProfitRatio = ratio('STOP_LOSS_PROFIT_RATIO', '1:3');
 const configuredSessionMode = sessionMode('SESSION_MODE', 'EMULATION');
 const configuredCandidateTradeType = candidateTradeType('CANDIDATE_TRADE_TYPE', 'LONG_AND_SHORT');
 const defaultTradingBaseUrlByMode = configuredSessionMode === 'LIVE'
@@ -122,21 +122,21 @@ export const env = {
     sessionDate: dateStr('SESSION_DATE', ''),
     candidateTradeType: configuredCandidateTradeType,
     pollIntervalSeconds: num('POLL_INTERVAL_SECONDS', 20),
-    maxTotalRisk: num('MAX_TOTAL_RISK', 1000),
+    maxTotalRisk: num('MAX_TOTAL_RISK', 750),
     hardBasketCap: num('HARD_BASKET_CAP', 25000),
-    quantityToRetrieve: num('QUANTITY_TO_RETRIEVE', 40),
+    quantityToRetrieve: num('QUANTITY_TO_RETRIEVE', 30),
     breakoutConfirmationCandleMinutes: num('BREAKOUT_CONFIRMATION_CANDLE_MINUTES', 5),
     breakoutRetestMaxAgeMinutes: num('BREAKOUT_RETEST_MAX_AGE_MINUTES', 1),
-    breakoutQualityFiltersEnabled: bool('BREAKOUT_QUALITY_FILTERS_ENABLED', false),
-    breakoutMinVolumeExpansion: num('BREAKOUT_MIN_VOLUME_EXPANSION', 1.2),
-    breakoutMinRelativeStrengthPct: num('BREAKOUT_MIN_RELATIVE_STRENGTH_PCT', 0.25),
+    breakoutQualityFiltersEnabled: bool('BREAKOUT_QUALITY_FILTERS_ENABLED', true),
+    breakoutMinVolumeExpansion: num('BREAKOUT_MIN_VOLUME_EXPANSION', 1.5),
+    breakoutMinRelativeStrengthPct: num('BREAKOUT_MIN_RELATIVE_STRENGTH_PCT', 0.5),
     breakoutTrendTimeframeMinutes: num('BREAKOUT_TREND_TIMEFRAME_MINUTES', 5),
     breakoutTrendLookbackBars: num('BREAKOUT_TREND_LOOKBACK_BARS', 3),
-    maxPositionsPerSide: num('MAX_POSITIONS_PER_SIDE', 3),
+    maxPositionsPerSide: num('MAX_POSITIONS_PER_SIDE', 2),
     maxPositionNotional: num('MAX_POSITION_NOTIONAL', 5000),
     maxRiskPctPerSymbol: num('MAX_RISK_PCT_PER_SYMBOL', 20),
-    atrStopMultiple: num('ATR_STOP_MULTIPLE', 1),
-    minStopPct: num('MIN_STOP_PCT', 0.0075),
+    atrStopMultiple: num('ATR_STOP_MULTIPLE', 1.5),
+    minStopPct: num('MIN_STOP_PCT', 0.0125),
     stopLossProfitRatio: stopLossProfitRatio.raw,
     stopLossRiskPart: stopLossProfitRatio.risk,
     takeProfitPart: stopLossProfitRatio.reward,

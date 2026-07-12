@@ -2,12 +2,13 @@ flowchart LR
     Start([Start]) --> Mode{Session<br>mode?}
     Mode -->|EMULATION| Em[Emulator]
     Mode -->|PAPER/LIVE| Live[LiveTrader]
-    Em & Live --> Scan
+    Em & Live --> Reset["Reset daily risk budget<br>(cumulativeRealizedLoss = 0)"]
+    Reset --> Scan
 
     subgraph Scan ["1. Symbol Scan"]
         direction TB
         Fetch["Fetch most active stocks<br>(4x desired, cap 100)"] --> Price["Filter: price >= $1"]
-        Price --> Top["Keep top QUANTITY_TO_RETRIEVE"]
+        Price --> Top["Keep top QUANTITY_TO_RETRIEVE<br>(default 30)"]
         Top --> Bars["Get 1-min intraday bars<br>from Alpaca REST"]
     end
 
@@ -26,7 +27,8 @@ flowchart LR
         BC -->|No| Reject[Reject]
         BC -->|Yes| Retest{Retest within<br>max age?}
         Retest -->|No| Reject
-        Retest -->|Yes| QF{Passes quality<br>filters?}
+        Retest -->|Yes| QFDefault["Quality filters ON by default<br>(MinVol 1.5, RelStr 0.50%,<br>ATR stop 1.5, MinStop 1.25%)"]
+        QFDefault --> QF{Passes quality<br>filters?}
         QF -->|No| Reject
         QF -->|Yes| Score["Score candidate"]
         Reject --> ForEach
@@ -37,11 +39,11 @@ flowchart LR
 
     subgraph TS ["4. Trade Sizing"]
         direction TB
-        Rank["Rank by score,<br>separate L/S"] --> Select["Top MAX_POSITIONS_PER_SIDE<br>per side (default 3)"]
-        Select --> Risk["Compute remaining risk<br>(maxTotalRisk - usedRisk)"]
+        Rank["Rank by score,<br>separate L/S"] --> Select["Top MAX_POSITIONS_PER_SIDE<br>per side (default 2)"]
+        Select --> Risk["Compute remaining risk<br>(maxTotalRisk - usedRisk)<br>MAX_TOTAL_RISK resets daily"]
         Risk --> Check{Remaining<br>risk > 0?}
         Check -->|No| Stop[Stop]
-        Check -->|Yes| Weight["Weighted risk by score"]
+        Check -->|Yes| Weight["Weighted risk by score<br>3R profit target (1:3 ratio)"]
         Weight --> Norm["Normalize to notional,<br>buying power, qty floor"]
     end
 

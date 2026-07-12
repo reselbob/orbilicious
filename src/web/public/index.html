@@ -747,7 +747,7 @@
                                                             </span>
                                                             <input id="mostActiveSymbolLimit" type="number"
                                                                 class="form-control form-control-sm" min="1" max="200"
-                                                                step="1" value="40" style="width: 90px;" />
+                                                                        step="1" value="30" style="width: 90px;" />
                                                         </div>
                                                         <div class="form-text">Controls how many most-active symbols are
                                                             retrieved before breakout candidate discovery begins.</div>
@@ -770,18 +770,7 @@
                                                 <div class="help-label-row mb-2 d-flex align-items-center gap-2">
                                                     <span class="help-field-title">Breakout Confirmation and Quality
                                                         Filters</span>
-                                                    <button id="maximizeProfitBtn" type="button"
-                                                        class="btn btn-success btn-sm ms-2"
-                                                        title="Set all filters for maximum profit probability">
-                                                        Maximize Profit Probability
-                                                    </button>
-                                                    <button class="btn btn-outline-secondary field-help-btn btn-sm"
-                                                        type="button" data-help-key="maximizeProfit"
-                                                        aria-label="Help for Maximize Profit Probability"
-                                                        title="Help for Maximize Profit Probability">?</button>
                                                 </div>
-                                                <div id="maximizeProfitStatus" class="small text-muted mb-2"
-                                                    aria-live="polite"></div>
 
                                                 <div class="row g-2 align-items-end mb-2">
                                                     <div class="col-12 col-md-6">
@@ -802,7 +791,7 @@
                                                     <div class="col-12 col-md-6 d-flex align-items-center">
                                                         <div class="form-check mb-0 mt-3 mt-md-0">
                                                             <input class="form-check-input" type="checkbox"
-                                                                id="breakoutQualityFiltersEnabled" />
+                                                                id="breakoutQualityFiltersEnabled" checked />
                                                             <span class="help-label-row">
                                                                 <label class="form-check-label"
                                                                     for="breakoutQualityFiltersEnabled">Enable breakout
@@ -831,7 +820,7 @@
                                                         </div>
                                                         <input id="breakoutMinVolumeExpansion" type="number"
                                                             class="form-control" min="0.5" max="10" step="0.1"
-                                                            value="1.2" />
+                                                            value="1.5" />
                                                     </div>
                                                     <div class="col-12 col-md-4">
                                                         <div class="help-label-row mb-1">
@@ -847,7 +836,7 @@
                                                         </div>
                                                         <input id="breakoutMinRelativeStrengthPct" type="number"
                                                             class="form-control" min="0" max="5" step="0.05"
-                                                            value="0.25" />
+                                                            value="0.50" />
                                                     </div>
                                                     <div class="col-12 col-md-2">
                                                         <div class="help-label-row mb-1">
@@ -891,7 +880,7 @@
                                                         </div>
                                                         <input id="atrStopMultiple" type="number"
                                                             class="form-control" min="0.5" max="10" step="0.5"
-                                                            value="1" />
+                                                            value="1.5" />
                                                     </div>
                                                     <div class="col-12 col-md-4">
                                                         <div class="help-label-row mb-1">
@@ -904,7 +893,7 @@
                                                         </div>
                                                         <input id="minStopPct" type="number"
                                                             class="form-control" min="0.1" max="10" step="0.1"
-                                                            value="0.75" />
+                                                            value="1.25" />
                                                     </div>
                                                 </div>
                                             </div>
@@ -953,7 +942,7 @@
                                                 title="Help for Stop/Profit Limit Ratio">?</button>
                                         </span>
                                         <input type="number" id="stopProfitRatio" class="form-control" min="1" max="20"
-                                            value="4" style="width: 70px;" />
+                                            value="3" style="width: 70px;" />
                                         <span class="help-label-row">
                                             <label class="form-label mb-0" for="maxRiskPctPerSymbol">Maximum % of Max Risk
                                                 per Trading Day</label>

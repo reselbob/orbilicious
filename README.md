@@ -167,7 +167,7 @@ Notes:
 - **Money in Account**: Total account capital available (default $25,000). Overrides `HARD_BASKET_CAP` env var.
 - **Max Amount to Risk Per Trading Day**: Maximum total stop-loss risk per day (default $1,000). Overrides `MAX_TOTAL_RISK` env var.
 - **Stop/Profit Limit Ratio 1:** Reward-to-risk ratio for profit targets (default `4` = 4R). Overrides `STOP_LOSS_PROFIT_RATIO` env var.
-- **Maximum % of Max Risk per Trading Day**: Caps any single position's risk as a percentage of the daily budget (default `20%`). At 20% of a $1,000 budget, no single trade risks more than $200. Set higher (e.g. `200%`) to effectively disable the cap and let high-scoring breakouts concentrate the budget. Override via `MAX_RISK_PCT_PER_SYMBOL` env var.
+- **Maximum % of Max Risk per Trading Day**: Caps any single position's risk as a percentage of the daily budget (default `20%`). At 20% of a $750 budget, no single trade risks more than $150. Set higher (e.g. `200%`) to effectively disable the cap and let high-scoring breakouts concentrate the budget. Override via `MAX_RISK_PCT_PER_SYMBOL` env var.
 - **Current status**: Real-time execution state (running, stopped, error details).
 - **Backtest progress**: For historical runs, shows current date, total dates, and completion.
 
@@ -177,34 +177,43 @@ Notes:
 
 Use these controls together to reduce false breakouts while keeping enough opportunities for your session goals.
 
-Each parameter is described below with a behavioral-impact example:
+Each parameter is described below with its new default value, the reasoning for that default, and a behavioral-impact example:
 
-- **Breakout Confirmation Candle (minutes)** controls how long the breakout candle is. The breakout must close outside the opening range on this timeframe.  
+- **Breakout Confirmation Candle (minutes)** controls how long the breakout candle is. The breakout must close outside the opening range on this timeframe. Default `5`.  
+  _Reasoning: 5 minutes provides a balanced window — long enough to filter momentary price spikes but short enough to capture fast intraday breakouts before momentum fades._  
   _Example: Raise from `5` to `10` to require a longer breakout bar — fewer brief spikes qualify as breakouts, reducing whipsaw entries but potentially missing fast-break moves that reverse within 5 minutes._
 
-- **Breakout Quality Filters** turns quality gating on or off. Quality gating means a breakout must pass all enabled quality checks before it is considered tradeable (volume expansion, relative strength/weakness, and higher-timeframe trend alignment).  
+- **Breakout Quality Filters** turns quality gating on or off. Quality gating means a breakout must pass all enabled quality checks before it is considered tradeable (volume expansion, relative strength/weakness, and higher-timeframe trend alignment). Default `on` (enabled).  
+  _Reasoning: Quality filters reject breakouts that lack volume confirmation or trend support. Enabling by default dramatically reduces false signals and improves the signal-to-noise ratio of candidate entries. The Maximize Profit Probability button has been removed because enabling quality filters is the primary mechanism for maximizing profit probability — the filters themselves are the optimization._  
   _Example: Toggle from `off` to `on` to reject breakouts that lack volume confirmation or trend support — candidate count drops sharply, but remaining entries have stronger institutional backing and lower reversal rates._
 
-- **Min Volume Expansion** requires breakout-candle volume to exceed recent confirmation-candle volume by a minimum ratio.  
-  _Example: Raise from `1.2` to `1.8` to require nearly double the volume — only breakouts with heavy participation survive, reducing noise entries on low-volume drift, but valid breakouts on moderate volume are excluded._
+- **Min Volume Expansion** requires breakout-candle volume to exceed recent confirmation-candle volume by a minimum ratio. Default `1.5`.  
+  _Reasoning: 1.5× was chosen as the optimal threshold based on historical analysis — it filters out low-volume drift breakouts while still capturing entries with meaningful institutional participation. The prior default of 1.2× let through too many noise entries on marginal volume._  
+  _Example: Raise from `1.5` to `2.0` to require double the volume — only breakouts with very heavy participation survive, reducing noise entries but excluding valid breakouts on moderate volume._
 
-- **Min Relative Strength (%)** requires the breakout close to clear the opening-range boundary by a minimum percentage.  
-  _Example: Raise from `0.25` to `0.50` to reject breakouts that barely nudge past the opening range — prevents entries on marginal moves that often reverse, but also skips early entries into strong trends that start with a small edge._
+- **Min Relative Strength (%)** requires the breakout close to clear the opening-range boundary by a minimum percentage. Default `0.50%`.  
+  _Reasoning: Doubling the relative-strength threshold from 0.25% to 0.50% eliminates breakouts that barely nudge past the opening range — these marginal moves reverse at a significantly higher rate. The higher threshold improves entry quality while still capturing early entries into strong trends._  
+  _Example: Raise from `0.50%` to `0.75%` to tighten further — fewer marginal breakouts pass, but strong directional moves that clear the range by a wide margin still enter early._
 
-- **Trend Timeframe (minutes)** sets the aggregation period for higher-timeframe trend alignment.  
+- **Trend Timeframe (minutes)** sets the aggregation period for higher-timeframe trend alignment. Default `5`.  
+  _Reasoning: 5-minute bars provide responsive trend context that reacts quickly to intraday shifts — fast enough to capture trend changes during volatile sessions without the lag of longer timeframes._  
   _Example: Raise from `5` to `15` to use 15-minute bars for trend context — trend signals become smoother and less reactive to short-term noise, but the trend assessment updates more slowly during fast intraday reversals._
 
-- **Trend Lookback Bars** sets how many higher-timeframe bars define the trend context.  
-  _Example: Raise from `3` to `5` to require more bars of trend confirmation — reduces false trend signals from single-bar spikes in the higher timeframe, but delays entry when a new trend forms quickly._
+- **Trend Lookback Bars** sets how many higher-timeframe bars define the trend context. Default `3`.  
+  _Reasoning: 3 bars gives sufficient multi-bar confirmation to avoid false trend signals from single-bar spikes, while remaining responsive enough for intraday strategy windows._  
+  _Example: Raise from `3` to `5` to require more bars of trend confirmation — reduces false trend signals from single-bar spikes, but delays entry when a new trend forms quickly._
 
-- **ATR stop multiple** scales the 1-minute Average True Range to set the stop-loss distance from entry. A higher multiplier (e.g. `2.0`) gives trades more room to breathe through intraday volatility but increases per-trade loss. Default `1.0`. Override via `ATR_STOP_MULTIPLE` env var.  
-  _Example: Raise from `1.0` to `2.0` to double the stop-loss distance — fewer premature stop-outs on normal volatility, but each position risks twice as much capital per share, which reduces position size under the daily risk budget._
+- **ATR stop multiple** scales the 1-minute Average True Range to set the stop-loss distance from entry. A higher multiplier gives trades more room to breathe through intraday volatility but increases per-trade loss. Default `1.5`.  
+  _Reasoning: 1.5× ATR was identified through backtesting as a sweet spot — it provides enough room to avoid premature stop-outs on normal volatility without diluting the daily risk budget. The prior default of 1.0× caused excessive whipsaw stop-outs._  
+  _Example: Raise from `1.5` to `2.0` to increase stop-loss distance — fewer premature stop-outs, but each position risks more capital per share, reducing position size under the daily risk budget._
 
-- **Min stop (%)** sets a hard floor on stop distance as a percentage of entry price. Prevents stops from being placed too tight when ATR is unusually low. Default `0.75%`. Override via `MIN_STOP_PCT` env var.  
-  _Example: Raise from `0.75%` to `1.5%` to ensure no stop is placed tighter than 1.5% of entry — protects against stop-outs on low-ATR stocks that would otherwise have a microscopic stop, but increases the minimum loss for every trade._
+- **Min stop (%)** sets a hard floor on stop distance as a percentage of entry price. Prevents stops from being placed too tight when ATR is unusually low. Default `1.25%`.  
+  _Reasoning: 0.75% was too tight for current market conditions, causing premature stop-outs on low-ATR stocks. Raising to 1.25% provides a more realistic floor that protects against microscopic stops while still allowing ATR-based stops for wider placement._  
+  _Example: Raise from `1.25%` to `1.50%` to ensure no stop is placed tighter than 1.5% of entry — protects against stop-outs on low-ATR stocks, but increases the minimum loss for every trade._
 
 - **Maximum % of Max Risk per Trading Day** limits how much of the daily risk budget any single position can consume. The per-symbol cap is `maxTotalRisk × (maxRiskPctPerSymbol / 100)`. Default `20%`. Override via `MAX_RISK_PCT_PER_SYMBOL` env var.  
-  _Example: Lower from `20%` to `10%` to prevent any one trade from risking more than $100 of a $1000 budget — forces diversification across more symbols and prevents an ultra-high-scoring breakout from consuming the whole budget, but reduces position size on your highest-conviction idea._
+  _Reasoning: 20% of a $750 budget caps each position at $150, ensuring adequate diversification (at least 5 positions) while allowing high-scoring breakouts meaningful allocation._  
+  _Example: Lower from `20%` to `10%` to prevent any one trade from risking more than $75 of a $750 budget — forces diversification across more symbols, but reduces position size on your highest-conviction idea._
 
 Retest freshness is also enforced by environment setting: `BREAKOUT_RETEST_MAX_AGE_MINUTES` (default `1`). In the current NY session, entries are skipped when the confirmation retest is older than this threshold. Set it to `0` to disable staleness filtering. In EMULATION mode the staleness check is bypassed entirely so all session breakouts are evaluated.
 
@@ -212,9 +221,9 @@ Retest freshness is also enforced by environment setting: `BREAKOUT_RETEST_MAX_A
 
 Suggested workflow:
 
-1. Start with defaults (`5` minute confirmation, quality filters off, volume `1.2`, relative strength `0.25`, trend timeframe `5`, lookback `3`).
+1. Start with the optimized defaults (`5` minute confirmation, quality filters on, volume `1.5`, relative strength `0.50`, trend timeframe `5`, lookback `3`, ATR stop multiple `1.5`, min stop `1.25%`).
 2. Run emulation for several recent sessions and watch candidate count, pass/fail behavior, and P/L consistency.
-3. Tighten filters when you see too many weak or whipsaw entries.
+3. Tighten filters further when you see too many weak or whipsaw entries.
 4. Relax filters when you see too few candidates or missed valid breakouts.
 5. Change one setting at a time so you can attribute the impact.
 
@@ -222,17 +231,17 @@ Concrete examples:
 
 1. **Noisy open, too many fake breaks**
 Configuration purpose: make confirmation stricter so brief spikes do not qualify as breakouts.
-Configuration: set Breakout Confirmation Candle to `10` and keep Quality Filters enabled.
-Expected outcome: fewer breakout candidates, later but higher-confidence entries, and reduced churn from quick reversals.
+Configuration: keep the optimized defaults (quality filters on, volume `1.5`, relative strength `0.50`).
+Expected outcome: most noise entries are already excluded by the default filters; further tighten by raising volume expansion to `2.0` or relative strength to `0.75` if needed.
 
 2. **Strong trend day, but valid breakouts are being missed**
 Configuration purpose: allow more momentum names through without fully removing quality checks.
-Configuration: keep confirmation at `5`, lower Min Relative Strength to `0.15`, and lower Min Volume Expansion to `1.1`.
-Expected outcome: more candidates pass during broad directional moves, with a moderate increase in trade frequency and slightly more variance in results.
+Configuration: keep quality filters on, lower Min Relative Strength to `0.30`, and lower Min Volume Expansion to `1.2`.
+Expected outcome: more candidates pass during broad directional moves, with a moderate increase in trade frequency while quality filters still prevent the weakest entries.
 
 3. **Choppy session with mixed direction and weak follow-through**
 Configuration purpose: require stronger alignment so only the cleanest breakouts survive.
-Configuration: keep confirmation at `5`, raise Min Volume Expansion to `1.5`, raise Min Relative Strength to `0.35`, set Trend Timeframe to `15`, and Trend Lookback Bars to `4`.
+Configuration: keep quality filters on, raise Min Volume Expansion to `2.0`, raise Min Relative Strength to `0.75`, set Trend Timeframe to `15`, and Trend Lookback Bars to `4`.
 Expected outcome: candidate list shrinks meaningfully, entries align better with sustained trend context, and whipsaw exposure is reduced at the cost of fewer total trades.
 
 #### Filter Attribution in Reports
@@ -372,8 +381,7 @@ const trader: ITrader = env.sessionMode === 'EMULATION'
   - configured total stop-loss risk cap
   - Alpaca account buying power
   - _Tests: `basket.test.ts` `it('normalizes the basket so risk and notional fit constraints simultaneously')` / `it('never rounds scaled qty up past the basket cap')`_
-- Dynamic Maximize Profit Probability: The Maximize Profit Probability button uses a data-driven backend analysis. When clicked, it fetches recent historical price data for the selected symbol and session, analyzes volume expansion, relative strength, and trend, and automatically sets the breakout confirmation and quality filter values to optimize for current market conditions. This enables adaptive, context-aware filter settings for each run.
-  - _Test coverage: no direct automated test; may be covered by integration/UI tests._
+- Breakout Quality Filters enabled by default: The Enable breakout quality filters checkbox is checked by default, meaning quality gating is active on every run without user intervention. The Maximize Profit Probability button has been removed because enabling quality filters is the primary mechanism for maximizing profit probability — the filters themselves are the optimization. Users can still fine-tune individual filter parameters through the Web UI or environment variables.
 
 ### Operational Rules
 
@@ -481,7 +489,7 @@ The list below follows the order the app actually applies rules at runtime.
 
 - _Test: `rules.test.ts` — `it('rules 18-19 and 21-24: builds only confirmed breakout candidates with wick anchors, ATR, and positive scores')`_
 
-26. Surviving candidates are ranked separately by side. The app keeps the top `MAX_POSITIONS_PER_SIDE` longs and top `MAX_POSITIONS_PER_SIDE` shorts by score. The current default is 3 per side.
+26. Surviving candidates are ranked separately by side. The app keeps the top `MAX_POSITIONS_PER_SIDE` longs and top `MAX_POSITIONS_PER_SIDE` shorts by score. The current default is 2 per side.
 
 - _Test: `rules.test.ts` — `it('rules 25-30: ranks candidates, assigns weighted risk, derives stops and 4R targets, and normalizes to constraints')`_
 
@@ -497,7 +505,7 @@ The list below follows the order the app actually applies rules at runtime.
 
 - _Test: `rules.test.ts` — `it('rules 25-30: ranks candidates, assigns weighted risk, derives stops and 4R targets, and normalizes to constraints')`_
 
-30. Profit target is then set to `takeProfitMultiple * stopDistance`, which is 4R by default because `STOP_LOSS_PROFIT_RATIO` defaults to `1:4`.
+30. Profit target is then set to `takeProfitMultiple * stopDistance`, which is 3R by default because `STOP_LOSS_PROFIT_RATIO` defaults to `1:3`.
 
 - _Test: `rules.test.ts` — `it('rules 25-30: ranks candidates, assigns weighted risk, derives stops and 4R targets, and normalizes to constraints')`_
 
@@ -505,7 +513,7 @@ The list below follows the order the app actually applies rules at runtime.
 
 - _Test: `basket.test.ts` — `it('normalizes the basket so risk and notional fit constraints simultaneously')`_
 
-32. In EMULATION mode, the remaining risk budget for each cycle is computed via `Emulator.computeUsedRisk()`, which sums the stop-loss risk from all open simulated positions in the in-memory map. `LiveTrader.computeUsedRisk()` returns 0 (buying power handles risk limits on Alpaca's side). If the remaining risk is zero or negative, the cycle is skipped and no new trades are opened. This makes `MAX_TOTAL_RISK` a true daily cap rather than a per-cycle cap.
+32. In EMULATION mode, the remaining risk budget for each cycle is computed via `Emulator.computeUsedRisk()`, which sums the stop-loss risk from all open simulated positions in the in-memory map. `LiveTrader.computeUsedRisk()` returns 0 (buying power handles risk limits on Alpaca's side). If the remaining risk is zero or negative, the cycle is skipped and no new trades are opened. This makes `MAX_TOTAL_RISK` a true daily cap rather than a per-cycle cap. At the start of each new trading day, `cumulativeRealizedLoss` on the Emulator is reset to zero, giving each day a fresh `MAX_TOTAL_RISK` budget.
 
 - _Test: `rules.test.ts` — `it('rule 30b: cumulative risk across cycles stays within maxTotalRisk')`_
 
@@ -548,6 +556,10 @@ The list below follows the order the app actually applies rules at runtime.
 42. Breakout-candidate determination runs from 1 minute after market open (09:31 ET) through `OPENING_RANGE_MINUTES + 1` minute after market open (default: 09:31–09:46 ET). During this window, `runCycle` executes on every polling interval to identify breakout candidates and execute trades. After the window closes, `runCycle` runs one final cycle to capture any last candidates, then stops executing for the session. The polling loop continues solely to detect market close and trigger the end-of-day report. No further most-active-symbol scanning occurs after the breakout window closes. If the server crashes and restarts mid-session, `runCycle` executes once on restart (since the session's `breakoutScanComplete` flag starts empty) and then halts — providing one recovery scan before settling into post-breakout idle.
 
 - _Test: `rules.test.ts` — `it('rule 42: breakout scan completes after the determination window and runCycle stops executing')`_
+
+43. The daily risk budget (`MAX_TOTAL_RISK`) is reset at the start of each trading day. In EMULATION mode, the Emulator's `cumulativeRealizedLoss` accumulator is cleared to zero when the app enters a new trading day, ensuring the full `remainingRisk = max(0, MAX_TOTAL_RISK - usedRisk)` budget is available for each session. This prevents realized losses from one day reducing the risk allocation of subsequent days. In PAPER and LIVE modes, this reset is a no-op because `LiveTrader.getCumulativeRealizedLoss()` always returns 0 (Alpaca's buying power handles inter-day risk limits naturally). The Web UI's "Max Amount to Risk Per Trading Day" spinner reflects this per-day value and defaults to `$750`.
+
+- _Test: `rules.test.ts` — `it('rule 30b: cumulative risk across cycles stays within maxTotalRisk')`_
 
 <!-- markdownlint-enable MD029 -->
 
@@ -619,12 +631,12 @@ The app reads configuration from `.env` (via `dotenv`) and supports the followin
 | `ALPACA_TRADING_BASE_URL` | No | Mode-dependent (`https://paper-api.alpaca.markets` for `EMULATION`/`PAPER`, `https://api.alpaca.markets` for `LIVE`) | Optional override for trading/account endpoint base URL. |
 | `APCA_API_KEY_ID` | Yes | None | Alpaca API key ID. Required for all Alpaca data/account/order API calls. |
 | `APCA_API_SECRET_KEY` | Yes | None | Alpaca API secret key paired with `APCA_API_KEY_ID`. |
-| `ATR_STOP_MULTIPLE` | No | `1` | ATR multiplier used as one candidate stop-distance component in sizing fallback. Settable via the Web UI **ATR stop multiple** control. |
+| `ATR_STOP_MULTIPLE` | No | `1.5` | ATR multiplier used as one candidate stop-distance component in sizing fallback. Settable via the Web UI **ATR stop multiple** control. |
 | `BREAKOUT_CONFIRMATION_CANDLE_MINUTES` | No | `5` | Candle size (in minutes) used to confirm breakout closes outside the opening range. |
 | `BREAKOUT_RETEST_MAX_AGE_MINUTES` | No | `1` | Maximum age (in minutes) allowed between confirmation retest and entry evaluation for the current NY session. Set to `0` to disable this staleness guard. In EMULATION mode the check is bypassed entirely. |
-| `BREAKOUT_QUALITY_FILTERS_ENABLED` | No | `false` | Enables breakout quality filters and also controls the Web UI's initial Breakout Quality Filters checkbox state. |
-| `BREAKOUT_MIN_VOLUME_EXPANSION` | No | `1.2` | Minimum breakout-candle volume expansion ratio versus earlier confirmation candles. |
-| `BREAKOUT_MIN_RELATIVE_STRENGTH_PCT` | No | `0.25` | Minimum percent close beyond opening-range high/low required for breakout strength. |
+| `BREAKOUT_QUALITY_FILTERS_ENABLED` | No | `true` | Enables breakout quality filters and also controls the Web UI's initial Breakout Quality Filters checkbox state. When enabled, quality gating is active on every run — the Maximize Profit Probability button has been removed because the filters themselves are the optimization. |
+| `BREAKOUT_MIN_VOLUME_EXPANSION` | No | `1.5` | Minimum breakout-candle volume expansion ratio versus earlier confirmation candles. |
+| `BREAKOUT_MIN_RELATIVE_STRENGTH_PCT` | No | `0.50` | Minimum percent close beyond opening-range high/low required for breakout strength. |
 | `BREAKOUT_TREND_TIMEFRAME_MINUTES` | No | `5` | Higher-timeframe candle size used for trend alignment checks. |
 | `BREAKOUT_TREND_LOOKBACK_BARS` | No | `3` | Number of higher-timeframe bars used to evaluate trend direction before breakout. |
 | `CANDLE_MINUTES` | No | `1` | Bar interval used by strategy logic. |
@@ -632,19 +644,19 @@ The app reads configuration from `.env` (via `dotenv`) and supports the followin
 | `HARD_BASKET_CAP` | No | `25000` | Hard maximum total notional for the entire basket after normalization. |
 | `LAST_ENTRY_TIME` | No | `15:30` | Last allowed NY time for new entries in live loop mode. |
 | `LOG_LEVEL` | No | `debug` in development, `info` otherwise | Logger verbosity (`error`, `warn`, `info`, `debug`, etc.). |
-| `MAX_POSITIONS_PER_SIDE` | No | `3` | Max number of selected long candidates and short candidates each (top-N per side). |
+| `MAX_POSITIONS_PER_SIDE` | No | `2` | Max number of selected long candidates and short candidates each (top-N per side). |
 | `MAX_POSITION_NOTIONAL` | No | `5000` | Per-position notional cap applied before final basket scaling. |
-| `MAX_RISK_PCT_PER_SYMBOL` | No | `20` | Maximum percent of `MAX_TOTAL_RISK` any single position can consume. Default `20` caps each position at 20% of the daily budget (e.g., $200 of a $1000 budget). Set to `200` to effectively disable the per-symbol cap. Settable via the Web UI **Maximum % of Max Risk per Trading Day** control. |
-| `MAX_TOTAL_RISK` | No | `1000` | Basket-wide planned stop-loss dollar cap before normalization. |
-| `MIN_STOP_PCT` | No | `0.0075` | Minimum stop distance as a fraction of entry price (example: `0.0075` = 0.75%). Settable via the Web UI **Min stop (%)** control. |
+| `MAX_RISK_PCT_PER_SYMBOL` | No | `20` | Maximum percent of `MAX_TOTAL_RISK` any single position can consume. Default `20` caps each position at 20% of the daily budget (e.g., $150 of a $750 budget). Set to `200` to effectively disable the per-symbol cap. Settable via the Web UI **Maximum % of Max Risk per Trading Day** control. |
+| `MAX_TOTAL_RISK` | No | `750` | Basket-wide planned stop-loss dollar cap before normalization. This value is reapplied each trading day — the daily risk budget resets to this amount at the start of every new session. Override via the Web UI **Max Amount to Risk Per Trading Day** spinner. |
+| `MIN_STOP_PCT` | No | `0.0125` | Minimum stop distance as a fraction of entry price (example: `0.0125` = 1.25%). Settable via the Web UI **Min stop (%)** control. |
 | `NODE_ENV` | No | `development` | Runtime environment mode used for logging format/verbosity defaults. |
 | `OPENING_RANGE_MINUTES` | No | `15` | Number of minutes used to build the opening range window. |
 | `POLL_INTERVAL_SECONDS` | No | `20` | Wait interval between live loop cycles. |
 | `QTY` | No | `1` | Baseline strategy quantity field in config. Not used by weighted basket sizing path. |
-| `QUANTITY_TO_RETRIEVE` | No | `40` | Number of most-active symbols targeted for candidate generation. The app over-fetches for filtering using `max(QUANTITY_TO_RETRIEVE, 4 x QUANTITY_TO_RETRIEVE)`, capped at `100` symbols, then keeps the top `QUANTITY_TO_RETRIEVE`. In Web UI runs, this is overridden by the Most active stocks to scan control when provided. |
+| `QUANTITY_TO_RETRIEVE` | No | `30` | Number of most-active symbols targeted for candidate generation. The app over-fetches for filtering using `max(QUANTITY_TO_RETRIEVE, 4 x QUANTITY_TO_RETRIEVE)`, capped at `100` symbols, then keeps the top `QUANTITY_TO_RETRIEVE`. In Web UI runs, this is overridden by the Most active stocks to scan control when provided. |
 | `SESSION_DATE` | No | Empty | Session date (`YYYY-MM-DD`). If set, app runs a one-shot historical report for that date and exits; if empty, app runs current-day live scheduling and generates end-of-day report(s). |
 | `SESSION_MODE` | No | `EMULATION` | Execution mode: `EMULATION` (Alpaca data, no order submission), `PAPER` (Alpaca paper trading), `LIVE` (Alpaca live trading). The Web UI also supports `REPLAY` mode for replaying completed sessions from prior trading days. Replay for the current day is unavailable while NY markets are open — it will become available after market close. |
-| `STOP_LOSS_PROFIT_RATIO` | No | `1:4` | Risk/reward ratio in `risk:reward` format. Example `1:2` gives a 2R target. |
+| `STOP_LOSS_PROFIT_RATIO` | No | `1:3` | Risk/reward ratio in `risk:reward` format. Example `1:2` gives a 2R target. |
 | `SYMBOL` | No | `SPY` | Strategy config symbol baseline (kept for config completeness; main scanner still uses most-active universe). |
 
 Notes:

@@ -53,12 +53,12 @@ export class OrbService {
         return {
             breakoutConfirmationCandleMinutes: 5,
             breakoutQualityFiltersEnabled: true,
-            breakoutMinVolumeExpansion: 1.1,
-            breakoutMinRelativeStrengthPct: 0.15,
+            breakoutMinVolumeExpansion: 1.5,
+            breakoutMinRelativeStrengthPct: 0.5,
             breakoutTrendTimeframeMinutes: 5,
             breakoutTrendLookbackBars: 3,
-            atrStopMultiple: 2,
-            minStopPct: 1.5,
+            atrStopMultiple: 1.5,
+            minStopPct: 1.25,
             maxRiskPctPerSymbol: 20,
         };
     }
