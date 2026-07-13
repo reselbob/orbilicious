@@ -916,6 +916,8 @@ function formatCurrency(value) {
 }
 
 function showStartConfirmationPane() {
+    startBtn.disabled = true;
+
     const session = sessionMode.value || '-';
     const isHistoricalMode = session === 'EMULATION' || session === 'REPLAY';
     const emulationDate = isHistoricalMode && emulationDateInput.value ? emulationDateInput.value : 'N/A';
@@ -1980,7 +1982,10 @@ confirmStartBtn.addEventListener('click', async () => {
     hideStartConfirmationPane();
     await submitStartOrbilicious();
 });
-cancelStartBtn.addEventListener('click', hideStartConfirmationPane);
+cancelStartBtn.addEventListener('click', () => {
+    hideStartConfirmationPane();
+    startBtn.disabled = false;
+});
 stopBtn.addEventListener('click', stopOrbilicious);
 refreshStatusBtn.addEventListener('click', refreshStatus);
 generateReportBtn.addEventListener('click', generateSelectedReport);
