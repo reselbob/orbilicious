@@ -3,6 +3,7 @@ const statusBox = document.getElementById('statusBox');
 const startBtn = document.getElementById('startBtn');
 const stopBtn = document.getElementById('stopBtn');
 const refreshStatusBtn = document.getElementById('refreshStatusBtn');
+let isStartPending = false;
 const continuousMode = document.getElementById('continuousMode');
 const candidateTradeType = document.getElementById('candidateTradeType');
 const realTimeDataFeed = document.getElementById('realTimeDataFeed');
@@ -977,8 +978,10 @@ async function refreshStatus() {
         }
 
         setStatusText(formatState(payload));
-        startBtn.disabled = payload.isRunning === true;
-        stopBtn.disabled = payload.isRunning !== true;
+        if (!isStartPending) {
+            startBtn.disabled = payload.isRunning === true;
+            stopBtn.disabled = payload.isRunning !== true;
+        }
         renderBacktestProgress(payload.backtestProgress || null);
         if (typeof payload.currentBalance === 'number') {
             currentBalanceDisplay.textContent = `$${payload.currentBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -1095,6 +1098,7 @@ async function refreshTrades() {
 }
 
 async function submitStartOrbilicious() {
+    isStartPending = true;
     startBtn.disabled = true;
     stopBtn.disabled = true;
 
@@ -1161,6 +1165,7 @@ async function submitStartOrbilicious() {
     } catch (error) {
         alert(`Failed to start ORBilicious: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
+        isStartPending = false;
         await refreshStatus();
     }
 }
