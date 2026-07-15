@@ -187,9 +187,9 @@ Each parameter is described below with its new default value, the reasoning for 
   _Reasoning: Quality filters reject breakouts that lack volume confirmation or trend support. Enabling by default dramatically reduces false signals and improves the signal-to-noise ratio of candidate entries. The Maximize Profit Probability button has been removed because enabling quality filters is the primary mechanism for maximizing profit probability — the filters themselves are the optimization._  
   _Example: Toggle from `off` to `on` to reject breakouts that lack volume confirmation or trend support — candidate count drops sharply, but remaining entries have stronger institutional backing and lower reversal rates._
 
-- **Min Volume Expansion** requires breakout-candle volume to exceed recent confirmation-candle volume by a minimum ratio. Default `1.5`.  
-  _Reasoning: 1.5× was chosen as the optimal threshold based on historical analysis — it filters out low-volume drift breakouts while still capturing entries with meaningful institutional participation. The prior default of 1.2× let through too many noise entries on marginal volume._  
-  _Example: Raise from `1.5` to `2.0` to require double the volume — only breakouts with very heavy participation survive, reducing noise entries but excluding valid breakouts on moderate volume._
+- **Min Volume Expansion** requires breakout-candle volume to exceed recent confirmation-candle volume by a minimum ratio. Default `1.0`.  
+  _Reasoning: 1.0× (baseline volume match) was chosen as the optimal threshold — it filters out sub-average-volume breakouts (drift or low-participation moves) while still capturing entries with normal or better institutional participation. The prior default of 1.5× was too strict: on many trading days no stock met the threshold, producing zero candidates. 1.0× preserves meaningful filtering while restoring consistent daily trading activity._  
+  _Example: Raise from `1.0` to `2.0` to require double the volume — only breakouts with very heavy participation survive, reducing noise entries but excluding valid breakouts on moderate volume._
 
 - **Min Relative Strength (%)** requires the breakout close to clear the opening-range boundary by a minimum percentage. Default `0.50%`.  
   _Reasoning: Doubling the relative-strength threshold from 0.25% to 0.50% eliminates breakouts that barely nudge past the opening range — these marginal moves reverse at a significantly higher rate. The higher threshold improves entry quality while still capturing early entries into strong trends._  
@@ -221,7 +221,7 @@ Retest freshness is also enforced by environment setting: `BREAKOUT_RETEST_MAX_A
 
 Suggested workflow:
 
-1. Start with the optimized defaults (`5` minute confirmation, quality filters on, volume `1.5`, relative strength `0.50`, trend timeframe `5`, lookback `3`, ATR stop multiple `1.5`, min stop `1.25%`).
+1. Start with the optimized defaults (`5` minute confirmation, quality filters on, volume `1.0`, relative strength `0.50`, trend timeframe `5`, lookback `3`, ATR stop multiple `1.5`, min stop `1.25%`).
 2. Run emulation for several recent sessions and watch candidate count, pass/fail behavior, and P/L consistency.
 3. Tighten filters further when you see too many weak or whipsaw entries.
 4. Relax filters when you see too few candidates or missed valid breakouts.
@@ -231,12 +231,12 @@ Concrete examples:
 
 1. **Noisy open, too many fake breaks**
 Configuration purpose: make confirmation stricter so brief spikes do not qualify as breakouts.
-Configuration: keep the optimized defaults (quality filters on, volume `1.5`, relative strength `0.50`).
+Configuration: keep the optimized defaults (quality filters on, volume `1.0`, relative strength `0.50`).
 Expected outcome: most noise entries are already excluded by the default filters; further tighten by raising volume expansion to `2.0` or relative strength to `0.75` if needed.
 
 2. **Strong trend day, but valid breakouts are being missed**
 Configuration purpose: allow more momentum names through without fully removing quality checks.
-Configuration: keep quality filters on, lower Min Relative Strength to `0.30`, and lower Min Volume Expansion to `1.2`.
+Configuration: keep quality filters on, lower Min Relative Strength to `0.30`, and keep Min Volume Expansion at `1.0` (default).
 Expected outcome: more candidates pass during broad directional moves, with a moderate increase in trade frequency while quality filters still prevent the weakest entries.
 
 3. **Choppy session with mixed direction and weak follow-through**
@@ -635,7 +635,7 @@ The app reads configuration from `.env` (via `dotenv`) and supports the followin
 | `BREAKOUT_CONFIRMATION_CANDLE_MINUTES` | No | `5` | Candle size (in minutes) used to confirm breakout closes outside the opening range. |
 | `BREAKOUT_RETEST_MAX_AGE_MINUTES` | No | `1` | Maximum age (in minutes) allowed between confirmation retest and entry evaluation for the current NY session. Set to `0` to disable this staleness guard. In EMULATION mode the check is bypassed entirely. |
 | `BREAKOUT_QUALITY_FILTERS_ENABLED` | No | `true` | Enables breakout quality filters and also controls the Web UI's initial Breakout Quality Filters checkbox state. When enabled, quality gating is active on every run — the Maximize Profit Probability button has been removed because the filters themselves are the optimization. |
-| `BREAKOUT_MIN_VOLUME_EXPANSION` | No | `1.5` | Minimum breakout-candle volume expansion ratio versus earlier confirmation candles. |
+| `BREAKOUT_MIN_VOLUME_EXPANSION` | No | `1.0` | Minimum breakout-candle volume expansion ratio versus earlier confirmation candles. |
 | `BREAKOUT_MIN_RELATIVE_STRENGTH_PCT` | No | `0.50` | Minimum percent close beyond opening-range high/low required for breakout strength. |
 | `BREAKOUT_TREND_TIMEFRAME_MINUTES` | No | `5` | Higher-timeframe candle size used for trend alignment checks. |
 | `BREAKOUT_TREND_LOOKBACK_BARS` | No | `3` | Number of higher-timeframe bars used to evaluate trend direction before breakout. |

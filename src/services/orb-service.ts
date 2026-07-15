@@ -53,7 +53,7 @@ export class OrbService {
         return {
             breakoutConfirmationCandleMinutes: 5,
             breakoutQualityFiltersEnabled: true,
-            breakoutMinVolumeExpansion: 1.5,
+            breakoutMinVolumeExpansion: 1.0,
             breakoutMinRelativeStrengthPct: 0.5,
             breakoutTrendTimeframeMinutes: 5,
             breakoutTrendLookbackBars: 3,

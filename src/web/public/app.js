@@ -1776,7 +1776,7 @@ function getBreakoutQualityFiltersEnabled() {
 }
 
 function getBreakoutMinVolumeExpansion() {
-    return clampNumber(breakoutMinVolumeExpansionInput.value, 1.5, 0.5, 10);
+    return clampNumber(breakoutMinVolumeExpansionInput.value, 1.0, 0.5, 10);
 }
 
 function getBreakoutMinRelativeStrengthPct() {

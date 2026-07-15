@@ -104,7 +104,7 @@ describe('config integration', () => {
         expect(mod.env.breakoutConfirmationCandleMinutes).to.equal(5);
         expect(mod.env.breakoutRetestMaxAgeMinutes).to.equal(1);
         expect(mod.env.breakoutQualityFiltersEnabled).to.equal(true);
-        expect(mod.env.breakoutMinVolumeExpansion).to.equal(1.5);
+        expect(mod.env.breakoutMinVolumeExpansion).to.equal(1.0);
         expect(mod.env.breakoutMinRelativeStrengthPct).to.equal(0.5);
         expect(mod.env.breakoutTrendTimeframeMinutes).to.equal(5);
         expect(mod.env.breakoutTrendLookbackBars).to.equal(3);

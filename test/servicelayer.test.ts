@@ -97,7 +97,7 @@ describe('service layer', () => {
         const filters = service.getDefaultOptimalFilters();
 
         expect(filters.breakoutQualityFiltersEnabled).to.equal(true);
-        expect(filters.breakoutMinVolumeExpansion).to.equal(1.5);
+        expect(filters.breakoutMinVolumeExpansion).to.equal(1.0);
         expect(filters.breakoutMinRelativeStrengthPct).to.equal(0.5);
         expect(filters.atrStopMultiple).to.equal(1.5);
         expect(filters.minStopPct).to.equal(1.25);

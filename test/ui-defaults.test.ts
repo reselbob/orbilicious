@@ -25,10 +25,10 @@ describe('UI defaults (index.html)', () => {
         expect(html).to.not.contain('maximizeProfitStatus');
     });
 
-    it('defaults breakoutMinVolumeExpansion to 1.5', () => {
+    it('defaults breakoutMinVolumeExpansion to 1.0', () => {
         const match = html.match(/id="breakoutMinVolumeExpansion"[^>]*value="([^"]+)"/);
         expect(match).to.not.be.null;
-        expect(match![1]).to.equal('1.5');
+        expect(match![1]).to.equal('1.0');
     });
 
     it('defaults breakoutMinRelativeStrengthPct to 0.50', () => {
@@ -89,8 +89,8 @@ describe('UI defaults (app.js)', () => {
         expect(js).to.contain('clampNumber(mostActiveSymbolLimitInput.value, 30, 1, 200)');
     });
 
-    it('defaults getBreakoutMinVolumeExpansion fallback to 1.5', () => {
-        expect(js).to.contain('clampNumber(breakoutMinVolumeExpansionInput.value, 1.5, 0.5, 10)');
+    it('defaults getBreakoutMinVolumeExpansion fallback to 1.0', () => {
+        expect(js).to.contain('clampNumber(breakoutMinVolumeExpansionInput.value, 1.0, 0.5, 10)');
     });
 
     it('defaults getBreakoutMinRelativeStrengthPct fallback to 0.5', () => {

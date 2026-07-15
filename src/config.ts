@@ -128,7 +128,7 @@ export const env = {
     breakoutConfirmationCandleMinutes: num('BREAKOUT_CONFIRMATION_CANDLE_MINUTES', 5),
     breakoutRetestMaxAgeMinutes: num('BREAKOUT_RETEST_MAX_AGE_MINUTES', 1),
     breakoutQualityFiltersEnabled: bool('BREAKOUT_QUALITY_FILTERS_ENABLED', true),
-    breakoutMinVolumeExpansion: num('BREAKOUT_MIN_VOLUME_EXPANSION', 1.5),
+    breakoutMinVolumeExpansion: num('BREAKOUT_MIN_VOLUME_EXPANSION', 1.0),
     breakoutMinRelativeStrengthPct: num('BREAKOUT_MIN_RELATIVE_STRENGTH_PCT', 0.5),
     breakoutTrendTimeframeMinutes: num('BREAKOUT_TREND_TIMEFRAME_MINUTES', 5),
     breakoutTrendLookbackBars: num('BREAKOUT_TREND_LOOKBACK_BARS', 3),
